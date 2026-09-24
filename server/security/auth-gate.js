@@ -3,6 +3,8 @@
 //   GET  /login   the only page served without a session: a token form
 //   POST /login   checks the token (rate-limited), sets the session cookie
 //   GET  /logout  clears the cookie
+//   GET  /api/auth/magic  a signed one-tap link from an email (magic-link.js):
+//                 sets the cookie and lands in the app (see magicLanding)
 //   any request carrying a valid ?token= (older phone links) gets the cookie and
 //   is redirected to the same URL without the token (it never stays in the bar)
 //   everything else without a session: HTML pages -> /login, the rest -> 401
@@ -10,8 +12,10 @@
 // HTTPS (e.g. through a Cloudflare Tunnel: X-Forwarded-Proto https).
 // Failed logins: at most FAIL_LIMIT per client per window, and FAIL_GLOBAL in
 // total per window (a lock that also holds if client addresses are spoofed).
+const crypto = require('crypto');
 const express = require('express');
 const policy = require('./access-policy');
+const magic = require('./magic-link');
 
 const MAX_AGE_S = 30 * 24 * 3600;
 const WINDOW_MS = 15 * 60 * 1000;
@@ -62,6 +66,28 @@ button{margin-top:12px;width:100%;padding:10px;border:0;border-radius:8px;backgr
 </form></body></html>`);
 }
 
+// After a magic link: into the app, with the signature gone from the address bar
+// and history. A 302 only when the tap did not come from another site
+// (Sec-Fetch-Site none / same-origin: typed, or opened by the mail app). A link
+// clicked in webmail is a cross-site navigation, and the browser keeps treating
+// it as one through redirects, so the fresh SameSite=Strict cookie would be held
+// back and the dashboard would bounce to /login. Those get a tiny no-store page
+// that replaces itself with the app: a same-origin navigation, cookie included.
+function magicLanding(req, res, to) {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  const site = String(req.headers['sec-fetch-site'] || '');
+  if (site === 'none' || site === 'same-origin') return res.redirect(302, to);
+  const nonce = crypto.randomBytes(16).toString('base64');
+  return res.status(200).set({
+    'Content-Type': 'text/html; charset=utf-8', 'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'`,
+  }).send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0;url=${escapeHtml(to)}"><title>SignalDesk</title>
+<script nonce="${nonce}">location.replace(${JSON.stringify(to)});</script></head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#94a3b8;font:15px system-ui,sans-serif">
+<p>Signed in. <a style="color:#38bdf8" href="${escapeHtml(to)}">Open SignalDesk</a></p></body></html>`);
+}
+
 function install(app, port) {
   app.get('/login', (req, res) => (policy.hasSession(req) ? res.redirect(303, '/') : loginPage(res, 200)));
   app.post('/login', express.urlencoded({ extended: false, limit: '2kb' }), (req, res) => {
@@ -81,6 +107,21 @@ function install(app, port) {
     console.log(`[security] signed in: ${client}`);
     setSession(req, res);
     return res.redirect(303, '/');
+  });
+  // One-tap magic link (magic-link.js). Failures count against the same limits as /login.
+  app.get('/api/auth/magic', (req, res) => {
+    const client = clientOf(req);
+    if (locked(client)) return loginPage(res, 429, 'Too many failed attempts. Try again in 15 minutes.');
+    const v = magic.verify(req.query);
+    if (!v.ok) {
+      recordFail(client);
+      console.warn(`[security] refused magic link from ${client}: ${v.reason}`);
+      return loginPage(res, 401, 'This sign-in link is invalid or has expired. Sign in with the access token, or send a new link from Settings.');
+    }
+    fails.delete(client);
+    console.log(`[security] signed in with a magic link: ${client}`);
+    setSession(req, res);
+    return magicLanding(req, res, v.to);
   });
   app.get('/logout', (req, res) => {
     res.setHeader('Set-Cookie', `${policy.COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);

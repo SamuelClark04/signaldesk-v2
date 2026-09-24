@@ -133,6 +133,16 @@
           <p class="settings-facts" id="settings-facts"></p>
         </div>
 
+        <div class="panel settings-mobile">
+          <div class="panel-header">
+            <h2 class="panel-title">Mobile access</h2>
+            <span class="panel-hint">One-tap sign-in link for your phone, emailed to ALERT_EMAIL_TO (valid 24 hours by default)</span>
+          </div>
+          <p class="settings-facts" id="settings-tunnel">Checking the public tunnel…</p>
+          <button class="btn btn-primary" id="settings-send-link" type="button" disabled>Send Mobile Link to Email</button>
+          <span class="settings-status" id="settings-link-status" role="status"></span>
+        </div>
+
         <div class="panel settings-danger">
           <div class="panel-header">
             <h2 class="panel-title">Danger zone</h2>
@@ -182,6 +192,7 @@
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
   <script src="views/settings.js"></script>
+  <script src="views/settings-mobile.js"></script>
   <script src="views/today.js"></script>
   <script src="app.js"></script>
 </body>

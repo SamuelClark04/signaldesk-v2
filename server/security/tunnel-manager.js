@@ -7,7 +7,9 @@
 //     startup lines prefixed [tunnel];
 //   - make it the app's public address in memory: APP_PUBLIC_URL (restored when
 //     the tunnel ends) and TUNNEL_PUBLIC_URL, which the alert emails' "Open
-//     Approvals" link uses (notifier.js); no restart, no .env edit.
+//     Approvals" link uses (notifier.js); no restart, no .env edit;
+//   - email it (notifier.sendTunnelReadyEmail): a one-tap sign-in button for the
+//     phone, once per new URL (TUNNEL_EMAIL=off disables it).
 // cloudflared.exe is found via CLOUDFLARED_EXE (Start-SignalDesk.bat sets it),
 // then the project root, scripts/, the installer's Program Files / Common Files
 // folders, winget (Links, Packages), the user's Downloads (cloudflared*.exe, the
@@ -63,6 +65,13 @@ function box(url) {
   console.log(`\n#${'='.repeat(w)}#\n${rows.map((r) => `# ${r.padEnd(w - 1)}#`).join('\n')}\n#${'='.repeat(w)}#\n`);
 }
 
+// Required lazily: the notifier is only needed once a tunnel is up.
+function emailLink(url) {
+  if (String(process.env.TUNNEL_EMAIL || '').toLowerCase() === 'off') return;
+  require('../execution/notifier').sendTunnelReadyEmail(url)
+    .catch((err) => console.error(`[tunnel] mobile link email failed: ${err.message}`));
+}
+
 function onLine(line) {
   const text = line.replace(/^\S+Z\s+/, '').trim(); // drop cloudflared's own timestamp
   if (!text) return;
@@ -74,6 +83,7 @@ function onLine(line) {
     process.env.TUNNEL_PUBLIC_URL = publicUrl;
     process.env.APP_PUBLIC_URL = publicUrl;
     box(publicUrl);
+    emailLink(publicUrl);
     return;
   }
   if (/\b(ERR|WRN)\b/.test(text) || !QUIET.test(text)) console.log(`[tunnel] ${text.slice(0, 200)}`);

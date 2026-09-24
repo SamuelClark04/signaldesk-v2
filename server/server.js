@@ -35,6 +35,7 @@ const { buildIntelligence } = require('./intelligence/dashboard-intel');
 const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = require('./security/access-policy');
 const authGate = require('./security/auth-gate');
 const tunnel = require('./security/tunnel-manager'); // Cloudflare quick tunnel (TUNNEL=off disables)
+const mobileLink = require('./security/mobile-link'); // Settings: live tunnel link + email re-send
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -43,6 +44,7 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 authGate.install(app, PORT); // /login is the only page served without a session
 app.use(express.static(path.join(__dirname, '..', 'client')));
+mobileLink.install(app); // behind the sign-in gate, like everything after authGate
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), clients: wss.clients.size });

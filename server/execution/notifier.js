@@ -9,19 +9,26 @@
 //   APP_PUBLIC_URL (the address you open SignalDesk at; default this machine).
 // Anything missing: the alert is logged to the console instead (warned once,
 // naming the missing settings, never their values). A failed send is logged and
-// never blocks staging. The link carries no access token: on a LAN/remote setup
-// open it from a browser that already has access.
+// never blocks staging. Links carry no access token: the buttons are one-tap
+// magic sign-in links (security/magic-link.js: HMAC-signed, expiring), so a
+// phone lands inside the app even on a brand-new tunnel hostname. The console
+// fallback never prints them (consoleText: the plain address only).
+// sendTunnelReadyEmail: "[SignalDesk] Your Live Mobile Link is Ready", sent by
+// security/tunnel-manager.js once per new tunnel URL (TUNNEL_EMAIL=off disables
+// it) and on demand from Settings (security/mobile-link.js).
 //
 // The alert is informational: approving still happens in the terminal, where the
 // order guard re-checks staleness and price at the moment of approval.
 const nodemailer = require('nodemailer');
 const { MAX_CANDIDATE_AGE_MS } = require('./order-guard');
+const magic = require('../security/magic-link');
 
 // The Cloudflare quick tunnel's address (TUNNEL_PUBLIC_URL, set at runtime by
 // security/tunnel.js) wins, so emailed links work away from this PC.
 const baseUrl = () => (process.env.TUNNEL_PUBLIC_URL || process.env.APP_PUBLIC_URL || (process.env.TERMINAL_URL || '').split('#')[0]
   || `http://127.0.0.1:${Number(process.env.PORT) || 3000}/`).replace(/\/*$/, '/');
 const approvalsUrl = () => `${baseUrl()}#opportunities?tab=approvals`;
+const expiresText = () => `${Math.round(magic.TTL_MS / 3600000)} hours`;
 
 const usd = (x) => (Number.isFinite(x)
   ? `${x < 0 ? '-' : ''}$${Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -85,8 +92,8 @@ function buildAlert(o) {
     `Thesis: ${o.thesis || 'n/a'}`,
     '',
     expiry,
-    `Open the Approvals queue: ${approvalsUrl()}`,
   ].join('\n');
+  const link = magic.create(baseUrl(), '/#opportunities?tab=approvals');
 
   const long = o.direction !== 'short';
   const html = [
@@ -101,12 +108,36 @@ function buildAlert(o) {
     '</table>',
     `<p style="margin:14px 0;font-size:13px;line-height:1.5;color:#cbd5e1"><em>${escapeHtml(o.thesis || '')}</em></p>`,
     `<p style="margin:0 0 18px;font-size:13px;color:#fbbf24">${escapeHtml(expiry)}</p>`,
-    `<a href="${escapeHtml(approvalsUrl())}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#2f81f7;color:#ffffff;font-weight:700;text-decoration:none">Open Approvals &rarr;</a>`,
-    '<p style="margin:16px 0 0;font-size:11px;color:#64748b">Informational alert: nothing has been executed. Approving re-checks price and staleness first.</p>',
+    `<a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#2f81f7;color:#ffffff;font-weight:700;text-decoration:none">Open Approvals &rarr;</a>`,
+    `<p style="margin:16px 0 0;font-size:11px;color:#64748b">Informational alert: nothing has been executed. Approving re-checks price and staleness first. The button signs this device in (link valid ${expiresText()}); do not forward this email.</p>`,
     '</div></div>',
   ].join('\n');
 
-  return { subject, text, html };
+  return { subject, html, text: `${text}\nOpen the Approvals queue (one-tap sign-in, valid ${expiresText()}): ${link}`,
+    consoleText: `${text}\nOpen the Approvals queue: ${approvalsUrl()}` };
+}
+
+// Mobile link email: a one-tap sign-in button for the live tunnel + the plain address.
+function buildTunnelEmail(tunnelUrl) {
+  const clean = String(tunnelUrl).replace(/\/*$/, '/');
+  const link = magic.create(clean, '/#today');
+  const subject = '[SignalDesk] Your Live Mobile Link is Ready';
+  const lines = ['SignalDesk is running and reachable from your phone.', '', `Address: ${clean}`,
+    'This address changes every time SignalDesk (or its tunnel) restarts; a new email follows each change.'];
+  const text = [...lines, '', `Open SignalDesk on Phone (one-tap sign-in, valid ${expiresText()}): ${link}`, '', 'Do not forward this email: the button signs a device in.'].join('\n');
+  const html = [
+    '<div style="background:#0b1220;padding:24px;font-family:system-ui,-apple-system,Segoe UI,sans-serif">',
+    '<div style="max-width:520px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:10px;padding:22px;color:#e5e7eb">',
+    '<p style="margin:0 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8">SignalDesk · Mobile access</p>',
+    '<h2 style="margin:0 0 10px;font-size:20px;color:#f8fafc">Your live mobile link is ready</h2>',
+    '<p style="margin:0 0 18px;font-size:14px;line-height:1.5;color:#cbd5e1">Tap the button on your phone: it signs this device in on the new address and opens the dashboard. No typing, no token.</p>',
+    `<a href="${escapeHtml(link)}" style="display:block;padding:15px 22px;border-radius:10px;background:#2f81f7;color:#ffffff;font-size:17px;font-weight:700;text-align:center;text-decoration:none">Open SignalDesk on Phone &rarr;</a>`,
+    '<p style="margin:18px 0 4px;font-size:12px;color:#94a3b8">Address (sign in with your access token once the button has expired):</p>',
+    `<p style="margin:0 0 16px;font:14px ui-monospace,Consolas,monospace;word-break:break-all"><a href="${escapeHtml(clean)}" style="color:#38bdf8">${escapeHtml(clean)}</a></p>`,
+    `<p style="margin:0;font-size:11px;line-height:1.5;color:#64748b">The button is valid for ${expiresText()}. The address changes every time SignalDesk restarts; a new email follows each change. Do not forward this email: the button signs a device in.</p>`,
+    '</div></div>',
+  ].join('\n');
+  return { subject, text, html, consoleText: [...lines, '', '(The one-tap sign-in link is only sent by email, never printed here.)'].join('\n') };
 }
 
 // ---------- Transport ----------
@@ -134,7 +165,7 @@ function smtp() {
 
 function logToConsole(message) {
   const rule = '─'.repeat(72);
-  console.log(`[notifier] ${rule}\n[notifier] Subject: ${message.subject}\n${message.text}\n[notifier] ${rule}`);
+  console.log(`[notifier] ${rule}\n[notifier] Subject: ${message.subject}\n${message.consoleText || message.text}\n[notifier] ${rule}`);
   return { delivered: 'console' };
 }
 
@@ -158,4 +189,19 @@ async function sendApprovalAlert(candidate) {
   return { ...message, result };
 }
 
-module.exports = { sendApprovalAlert, buildAlert, approvalsUrl };
+// Once per tunnel URL (a restart or rotation brings a new one); force: the Settings re-send.
+const emailedTunnels = new Set();
+let lastTunnelEmail = null; // { url, at, delivered, error } for Settings
+async function sendTunnelReadyEmail(tunnelUrl, { force = false } = {}) {
+  const url = String(tunnelUrl || '');
+  if (!/^https:\/\//.test(url)) return { skipped: 'not an https address' };
+  if (emailedTunnels.has(url) && !force) return { skipped: 'already emailed for this tunnel' };
+  emailedTunnels.add(url);
+  const result = await dispatch(buildTunnelEmail(url));
+  lastTunnelEmail = { url, at: Date.now(), delivered: result.delivered, error: result.error || null };
+  return result;
+}
+
+const emailConfigured = () => REQUIRED.every((k) => String(process.env[k] || '').trim());
+
+module.exports = { sendApprovalAlert, sendTunnelReadyEmail, buildAlert, buildTunnelEmail, approvalsUrl, emailConfigured, lastTunnelEmail: () => lastTunnelEmail };

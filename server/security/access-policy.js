@@ -37,6 +37,9 @@ function resolveToken() {
 const { token: TOKEN, generated: TOKEN_GENERATED } = resolveToken();
 // Session cookie value: HMAC of the token (changing the token signs everyone out).
 const SESSION = crypto.createHmac('sha256', TOKEN).update('signaldesk-session-v1').digest('base64url');
+// HMAC of `data` keyed with the token (magic sign-in links, magic-link.js): proves
+// the server made it without the token ever leaving this process.
+const sign = (data) => crypto.createHmac('sha256', TOKEN).update(String(data)).digest('base64url');
 
 const HOST = LAN_ACCESS ? '0.0.0.0' : '127.0.0.1';
 
@@ -115,5 +118,5 @@ function lanUrls(port) {
     .map((i) => `http://${i.address}:${port}/?token=${TOKEN}`);
 }
 
-module.exports = { HOST, LAN_ACCESS, COOKIE, SESSION, TOKEN_GENERATED, checkUpgrade, checkHttp, hasSession, tokenMatches,
+module.exports = { HOST, LAN_ACCESS, COOKIE, SESSION, TOKEN_GENERATED, checkUpgrade, checkHttp, hasSession, tokenMatches, sign, safeEqual,
   isAllowedOrigin, addAllowedOrigin, removeAllowedOrigin, isPrivateIPv4, lanUrls, generatedToken: () => (TOKEN_GENERATED ? TOKEN : null) };
