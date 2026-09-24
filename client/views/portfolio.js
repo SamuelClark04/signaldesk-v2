@@ -103,7 +103,7 @@
     const rows = [...positions].sort((a, b) => b.openedAt - a.openedAt).map((p) => {
       const t1 = (p.targets || []).find((t) => t.level === 1) || (p.targets || [])[0];
       return el('tr', {}, [
-        assetCell(p, `${p.market} · opened ${clock(p.openedAt)}`),
+        assetCell(p, `${p.market} · opened ${clock(p.openedAt)}${p.execution === 'LIVE' ? ` · LIVE @ ${p.broker}` : ''}`),
         dirCell(p),
         td(size(p), 'num'),
         td(price(p.fillPrice, p), 'num'),

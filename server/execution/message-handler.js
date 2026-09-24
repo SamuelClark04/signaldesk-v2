@@ -7,26 +7,56 @@ const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 const { publishBrokerState } = require('./broker-state');
+const alpacaApi = require('../connectors/alpaca-api');
+const coinbaseApi = require('../connectors/coinbase-api');
 
-// Which settings key decides the execution venue for each market.
-const MODE_KEY_BY_MARKET = { stocks: 'stockMode', options: 'stockMode', crypto: 'cryptoMode' };
+// Execution venue per market: which mode setting governs it, and which broker
+// connector places LIVE orders. Options have no live path yet: their strikes and
+// debit are simulated, and a stock bracket on the underlying would buy SHARES.
+const VENUES = {
+  stocks: { modeKey: 'stockMode', broker: 'Alpaca', api: alpacaApi },
+  options: { modeKey: 'stockMode', broker: 'Alpaca', api: null },
+  crypto: { modeKey: 'cryptoMode', broker: 'Coinbase', api: coinbaseApi },
+};
 
-// Route a guard-approved order: 'paper' fills in the paper ledger; 'live' is
-// reserved for broker integration and does NOT touch the ledger. The order stays
-// pending (nothing was traded anywhere) and the client is told why.
-function routeApproved(order, livePrice) {
-  const modeKey = MODE_KEY_BY_MARKET[order.market];
-  if (!modeKey) throw new Error(`no execution venue for market "${order.market}"`);
-  const mode = ledger.getSettings()[modeKey];
-  if (mode === 'paper') return ledger.executeOrder(order.id, livePrice);
+// Route a guard-approved order by its venue's mode.
+//   paper: fill in the paper ledger.
+//   live:  submit to the broker first; only an ACCEPTED order is recorded in the
+//          ledger (tagged execution LIVE + brokerId). A failed submit leaves the
+//          order pending and nothing is filled anywhere.
+async function routeApproved(order, livePrice) {
+  const venue = VENUES[order.market];
+  if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
+  if (ledger.getSettings()[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice);
+  if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
 
-  console.warn(`[LIVE EXECUTION WARNING] Routing ${order.asset} to broker APIs... (Integration pending)`);
-  throw new Error('LIVE_NOT_INTEGRATED');
+  console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
+  const result = await venue.api.submitOrder(order, order.positionSize, livePrice);
+  if (!result.ok) {
+    console.error(`[LIVE] ${venue.broker} order FAILED for ${order.id}: ${result.error}`);
+    throw new Error(`LIVE_ORDER_FAILED: ${result.error}`);
+  }
+  console.warn(`[LIVE] ${venue.broker} accepted ${order.id} as ${result.brokerId}`);
+
+  try {
+    return ledger.executeOrder(order.id, livePrice, {
+      execution: 'LIVE',
+      brokerId: result.brokerId,
+      broker: venue.broker,
+      brokerEnvironment: result.environment,
+      fillEstimated: true, // market order: the broker's actual fill price is not fetched yet
+    });
+  } catch (err) {
+    // The broker holds a real position the ledger could not record. Never silent.
+    console.error(`[LIVE] CRITICAL: ${venue.broker} order ${result.brokerId} was placed for ${order.id} `
+      + `but the ledger could not record it (${err.message}). Reconcile manually in ${venue.broker}.`);
+    throw new Error(`LIVE_UNRECORDED: ${venue.broker} order ${result.brokerId} placed but not recorded; check ${venue.broker}`);
+  }
 }
 
 // Guarded approval: the order guard runs first whatever the venue, then the order
 // is routed by its market's mode. Failed guards retire the setup with a reason.
-function approveWithGuard(id) {
+async function approveWithGuard(id) {
   const order = ledger.getPendingOrders().find((o) => o.id === id);
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
@@ -42,16 +72,28 @@ const QUEUE_ACTIONS = {
   REJECT: (id) => ledger.discardOrder(id),
 };
 
+// Orders with an APPROVE/REJECT in progress. A live submit awaits the broker, so
+// without this a double-click could send two orders, or a REJECT could remove an
+// order the broker is filling.
+const inFlight = new Set();
+
 function createMessageHandler({ send, broadcast }) {
-  function handleQueueAction(ws, { type, id }) {
+  async function handleQueueAction(ws, { type, id }) {
+    if (typeof id === 'string' && inFlight.has(id)) {
+      send(ws, 'ACTION_FAILED', { type, id, error: 'ORDER_BUSY' });
+      return;
+    }
+    if (typeof id === 'string') inFlight.add(id);
     try {
       if (typeof id !== 'string' || !id) throw new Error('missing order id');
-      const result = QUEUE_ACTIONS[type](id);
-      console.log(`[ledger] ${type} ${id} -> ${result.status}`);
+      const result = await QUEUE_ACTIONS[type](id);
+      console.log(`[ledger] ${type} ${id} -> ${result.status}${result.execution === 'LIVE' ? ` (LIVE ${result.brokerId})` : ''}`);
       if (result.status === 'open') broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
     } catch (err) {
       console.warn(`[ledger] ${type} ${id} failed: ${err.message}`);
       send(ws, 'ACTION_FAILED', { type, id, error: err.message });
+    } finally {
+      inFlight.delete(id);
     }
     broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
   }
@@ -86,7 +128,9 @@ function createMessageHandler({ send, broadcast }) {
     let msg;
     try { msg = JSON.parse(raw); } catch { return send(ws, 'error', 'invalid JSON'); }
     if (msg.type === 'ping') return send(ws, 'pong', Date.now());
-    if (QUEUE_ACTIONS[msg.type]) return handleQueueAction(ws, msg);
+    if (QUEUE_ACTIONS[msg.type]) {
+      return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
+    }
     if (msg.type === 'CALCULATE_ALLOCATION') return handleAllocation(ws, msg);
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     send(ws, 'error', `unknown message type: ${msg.type}`);

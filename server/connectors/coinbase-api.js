@@ -46,41 +46,53 @@ function buildJwt(keyName, signingKey, method, path, nowSec = Math.floor(Date.no
   return `${input}.${b64url(sig)}`;
 }
 
-async function fetchPage(keyName, signingKey, cursor) {
+// One signed request (fresh JWT bound to method + path). Throws on transport/HTTP errors.
+async function cbFetch(auth, method, path, { query = '', body } = {}) {
   const base = (process.env.COINBASE_API_BASE_URL || `https://${HOST}`).replace(/\/+$/, '');
-  const query = `?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-  const jwt = buildJwt(keyName, signingKey, 'GET', ACCOUNTS_PATH);
-  const res = await fetch(`${base}${ACCOUNTS_PATH}${query}`, {
-    headers: { Authorization: `Bearer ${jwt}`, Accept: 'application/json' },
+  const jwt = buildJwt(auth.keyName, auth.signingKey, method, path);
+  const res = await fetch(`${base}${path}${query}`, {
+    method,
+    headers: { Authorization: `Bearer ${jwt}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  let body = null;
-  try { body = await res.json(); } catch { /* non-JSON error page */ }
+  let json = null;
+  try { json = await res.json(); } catch { /* non-JSON error page */ }
   if (!res.ok) {
     const hint = res.status === 401 ? ' (check key name/secret; Advanced Trade needs an ECDSA CDP key)' : '';
-    throw new Error(`Coinbase HTTP ${res.status}: ${(body && (body.message || body.error)) || res.statusText}${hint}`);
+    throw new Error(`Coinbase HTTP ${res.status}: ${(json && (json.message || json.error)) || res.statusText}${hint}`);
   }
-  if (!body || !Array.isArray(body.accounts)) throw new Error('Coinbase: unexpected accounts response');
-  return body;
+  return json;
 }
 
-async function getAccount() {
+// Credentials from .env, or an { error } explaining why they can't be used.
+function loadAuth() {
   const keyName = process.env.COINBASE_API_KEY;
   const secret = process.env.COINBASE_API_SECRET;
-  if (!keyName || !secret) return { ok: false, error: 'COINBASE_API_KEY / COINBASE_API_SECRET not set in .env' };
-
-  let signingKey;
+  if (!keyName || !secret) return { error: 'COINBASE_API_KEY / COINBASE_API_SECRET not set in .env' };
   try {
-    signingKey = loadSigningKey(secret);
+    return { keyName, signingKey: loadSigningKey(secret) };
   } catch (err) {
-    return { ok: false, error: `Coinbase key unusable: ${err.message}` };
+    return { error: `Coinbase key unusable: ${err.message}` };
   }
+}
+
+const failure = (err) => {
+  const reason = err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS / 1000}s` : err.message;
+  return { ok: false, error: reason.startsWith('Coinbase') ? reason : `Coinbase unreachable: ${reason}` };
+};
+
+async function getAccount() {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
 
   const balances = Object.fromEntries(CASH_CURRENCIES.map((c) => [c, 0]));
   try {
     let cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const body = await fetchPage(keyName, signingKey, cursor);
+      const query = `?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const body = await cbFetch(auth, 'GET', ACCOUNTS_PATH, { query });
+      if (!body || !Array.isArray(body.accounts)) throw new Error('Coinbase: unexpected accounts response');
       for (const a of body.accounts) {
         const cur = a.currency || (a.available_balance && a.available_balance.currency);
         if (cur in balances) balances[cur] += Number((a.available_balance && a.available_balance.value) || 0);
@@ -89,8 +101,7 @@ async function getAccount() {
       cursor = body.cursor;
     }
   } catch (err) {
-    const reason = err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS / 1000}s` : err.message;
-    return { ok: false, error: reason.startsWith('Coinbase') ? reason : `Coinbase unreachable: ${reason}` };
+    return failure(err);
   }
 
   return {
@@ -102,4 +113,107 @@ async function getAccount() {
   };
 }
 
-module.exports = { getAccount, buildJwt, loadSigningKey };
+// ---------- Orders ----------
+const ORDERS_PATH = '/api/v3/brokerage/orders';
+const base8 = (x) => (Math.floor(x * 1e8) / 1e8).toFixed(8).replace(/\.?0+$/, '');
+const quotePx = (p) => (p >= 1 ? p.toFixed(2) : p.toFixed(6));
+
+// Market BUY for the risk-engine size, with an ATTACHED take-profit/stop-loss
+// bracket (trigger_bracket_gtc): the exits live at Coinbase and inherit the entry
+// size, so the position is protected even if SignalDesk is offline. Spot only:
+// shorts are refused. client_order_id = candidate id guards against duplicates.
+async function submitOrder(candidate, size, entryPrice) {
+  const c = candidate;
+  const tp = c.targets && c.targets[0] && c.targets[0].price;
+  let problem = null;
+  if (c.market !== 'crypto') problem = `Coinbase live routing supports crypto only (got "${c.market}")`;
+  else if (c.direction !== 'long') problem = 'spot accounts cannot open shorts';
+  else if (!(size > 0) || base8(size) === '0') problem = `invalid size ${size}`;
+  else if (!(tp > 0) || !(c.invalidation > 0) || !(c.invalidation < entryPrice && entryPrice < tp)) {
+    problem = `levels out of order: stop ${c.invalidation}, entry ${entryPrice}, target ${tp}`;
+  }
+  if (problem) return { ok: false, error: `Coinbase order not sent: ${problem}` };
+
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+
+  let body;
+  try {
+    body = await cbFetch(auth, 'POST', ORDERS_PATH, {
+      body: {
+        client_order_id: String(c.id),
+        product_id: c.asset,
+        side: 'BUY',
+        order_configuration: { market_market_ioc: { base_size: base8(size) } },
+        attached_order_configuration: {
+          trigger_bracket_gtc: { limit_price: quotePx(tp), stop_trigger_price: quotePx(c.invalidation) },
+        },
+      },
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  // Coinbase reports rejections with HTTP 200 and success: false.
+  if (!body || body.success !== true) {
+    const e = (body && body.error_response) || {};
+    return { ok: false, error: `Coinbase rejected order: ${e.error_details || e.message || e.new_order_failure_reason || e.error || 'unknown reason'}` };
+  }
+  const orderId = body.success_response && body.success_response.order_id;
+  if (!orderId) return { ok: false, error: 'Coinbase: order response had no order_id' };
+  return { ok: true, brokerId: orderId, environment: 'coinbase-live' };
+}
+
+// ---------- Order status (reconciliation) ----------
+const HISTORICAL_PATH = '/api/v3/brokerage/orders/historical/';
+const TERMINAL = new Set(['filled', 'canceled', 'expired', 'failed']);
+// Coinbase statuses are UPPERCASE and spell CANCELLED; normalise to Alpaca-style.
+const normStatus = (s) => String(s || 'unknown').toLowerCase().replace('cancelled', 'canceled');
+const numOrNull = (x) => (x === undefined || x === null || x === '' ? null : Number(x));
+
+async function fetchOrder(auth, orderId) {
+  const body = await cbFetch(auth, 'GET', `${HISTORICAL_PATH}${encodeURIComponent(orderId)}`);
+  if (!body || !body.order) throw new Error('Coinbase: unexpected order response');
+  return body.order;
+}
+
+// Entry order + its attached TP/SL order. `brokerId` is the ENTRY order id; the
+// protective exit is a separate order linked by `attached_order_id`.
+//   { ok, status, filledQty, avgFillPrice, terminal,
+//     exit: { status, filledQty, avgFillPrice, kind: null, brokerExitId } | null }
+// kind is null: one trigger-bracket order serves both exits, so the caller infers
+// take-profit vs stop-loss from the fill price.
+async function getOrderStatus(brokerId) {
+  if (!brokerId) return { ok: false, error: 'missing broker order id' };
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    const entry = await fetchOrder(auth, brokerId);
+    let exit = null;
+    if (entry.attached_order_id) {
+      const a = await fetchOrder(auth, entry.attached_order_id);
+      const status = normStatus(a.status);
+      exit = {
+        status: TERMINAL.has(status) || numOrNull(a.filled_size) > 0 ? status : 'open',
+        filledQty: numOrNull(a.filled_size) || 0,
+        avgFillPrice: numOrNull(a.average_filled_price),
+        fees: numOrNull(a.total_fees) || 0,
+        kind: null,
+        brokerExitId: a.order_id || entry.attached_order_id,
+      };
+    }
+    const status = normStatus(entry.status);
+    return {
+      ok: true,
+      status,
+      filledQty: numOrNull(entry.filled_size) || 0,
+      avgFillPrice: numOrNull(entry.average_filled_price),
+      fees: numOrNull(entry.total_fees) || 0,
+      terminal: TERMINAL.has(status),
+      exit,
+    };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+module.exports = { getAccount, submitOrder, getOrderStatus, buildJwt, loadSigningKey };

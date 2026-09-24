@@ -4,14 +4,16 @@
   const SD = window.SignalDesk;
   const { $, el, td, price, money, signed, pnlClass, clock, dirCell, assetCell, setTable } = SD.ui;
 
-  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit (T1)' };
+  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit (T1)', BROKER_EXIT: 'Broker exit' };
+  const LEG_LABELS = { take_profit: 'Broker take profit', stop_loss: 'Broker stop loss' };
 
   function render(trades) {
     const sorted = [...trades].sort((a, b) => b.closedAt - a.closedAt);
     setTable('journal', sorted.map((t) => el('tr', {}, [
-      assetCell(t, `${price(t.fillPrice, t)} → ${price(t.exitPrice, t)} · ${clock(t.closedAt)}`),
+      assetCell(t, `${price(t.fillPrice, t)} → ${price(t.exitPrice, t)} · ${clock(t.closedAt)}`
+        + `${t.execution === 'LIVE' ? ` · LIVE @ ${t.broker} (${t.pnlSource === 'broker-fills' ? 'broker fills' : 'P/L estimated'})` : ''}`),
       dirCell(t),
-      td(EXIT_LABELS[t.exitReason] || t.exitReason),
+      td(LEG_LABELS[t.exitLeg] || EXIT_LABELS[t.exitReason] || t.exitReason),
       td(signed(t.netPnl, money), `num ${pnlClass(t.netPnl)}`),
       td(signed(t.rMultiple, (x) => `${x.toFixed(2)}R`), `num ${pnlClass(t.rMultiple)}`),
     ])));

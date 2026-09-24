@@ -39,14 +39,18 @@ function stageOrder(sizedCandidate) {
   return { ...order };
 }
 
-// fillPrice defaults to the risk engine's worst-case entry price.
-function executeOrder(candidateId, fillPrice) {
+// fillPrice defaults to the risk engine's worst-case entry price. `extra` records
+// how the order was executed, e.g. { execution: 'LIVE', brokerId } for a broker
+// fill; paper fills are tagged { execution: 'PAPER' }.
+function executeOrder(candidateId, fillPrice, extra = {}) {
   const i = findIndex(pendingOrders, candidateId);
   if (i === -1) throw new Error(`paper-ledger: no pending order ${candidateId}`);
 
   const [order] = pendingOrders.splice(i, 1);
   const position = {
     ...order,
+    execution: 'PAPER',
+    ...extra,
     status: 'open',
     fillPrice: fillPrice > 0 ? fillPrice : order.entryPrice,
     openedAt: Date.now(),
@@ -92,7 +96,8 @@ function grossPnlAt(pos, exitPrice) {
 }
 
 // exitPrice is always the UNDERLYING price (options are valued from their legs).
-function closePosition(candidateId, exitPrice, exitReason) {
+// `extra` is merged into the journal entry (e.g. which broker leg filled).
+function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
   if (!(exitPrice > 0)) throw new Error('paper-ledger: exitPrice must be a positive number');
   const i = findIndex(activePositions, candidateId);
   if (i === -1) throw new Error(`paper-ledger: no open position ${candidateId}`);
@@ -100,7 +105,11 @@ function closePosition(candidateId, exitPrice, exitReason) {
   // Compute everything before removing the position, so a failure leaves it open.
   const pos = activePositions[i];
   const { grossPnl, optionsExitValue: exitValue } = grossPnlAt(pos, exitPrice);
-  const fees = estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice);
+  // Broker-reconciled closes pass the broker's actual fees; real fill prices already
+  // include slippage, so the estimate would double-count it.
+  const fees = Number.isFinite(extra.actualFees)
+    ? extra.actualFees
+    : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice);
   const netPnl = grossPnl - fees;
 
   const entry = {
@@ -113,6 +122,7 @@ function closePosition(candidateId, exitPrice, exitReason) {
     fees,
     netPnl,
     rMultiple: netPnl / pos.dollarRisk,
+    ...extra,
     ...(exitValue === undefined ? {} : { optionsExitValue: exitValue }),
   };
   activePositions.splice(i, 1);
@@ -139,6 +149,9 @@ function monitorPositions(latestPricesMap) {
 
   // Iterate over a snapshot: closePosition removes from activePositions.
   for (const pos of [...activePositions]) {
+    // LIVE positions exit at the broker (bracket orders); the reconciler records
+    // those real fills. Closing them here on a local price would be a fiction.
+    if (pos.execution === 'LIVE') continue;
     const price = priceOf(pos.asset);
     if (!(price > 0)) continue;
 
@@ -151,6 +164,40 @@ function monitorPositions(latestPricesMap) {
     else if (hitTarget) closed.push(closePosition(pos.id, price, 'TAKE_PROFIT'));
   }
   return closed;
+}
+
+// ---------- Broker reconciliation (LIVE positions only) ----------
+function findLive(candidateId) {
+  const pos = activePositions.find((p) => p.id === candidateId);
+  if (!pos) throw new Error(`paper-ledger: no open position ${candidateId}`);
+  if (pos.execution !== 'LIVE') throw new Error(`paper-ledger: ${candidateId} is not a LIVE position`);
+  return pos;
+}
+
+// Replace the estimated entry with the broker's actual fill. A partial fill
+// shrinks the position (and its dollar risk) to what was really bought.
+function syncLiveFill(candidateId, { fillPrice, filledQty }) {
+  const pos = findLive(candidateId);
+  if (!(fillPrice > 0) || !(filledQty > 0)) throw new Error('paper-ledger: broker fill needs price and quantity');
+  if (filledQty < pos.positionSize) {
+    pos.dollarRisk *= filledQty / pos.positionSize;
+    pos.positionSize = filledQty;
+  }
+  Object.assign(pos, { fillPrice, fillEstimated: false, brokerFillSyncedAt: Date.now() });
+  store.save();
+  return { ...pos };
+}
+
+// The broker never filled the entry (rejected / canceled / expired): nothing was
+// traded, so the record leaves the book without entering the trade journal.
+function voidLivePosition(candidateId, reason) {
+  findLive(candidateId);
+  const i = findIndex(activePositions, candidateId);
+  const [pos] = activePositions.splice(i, 1);
+  const voided = { ...pos, status: 'void', voidReason: reason, voidedAt: Date.now() };
+  discardedOrders.push(voided);
+  store.save();
+  return { ...voided };
 }
 
 // Read-only views: callers get copies, never the ledger's own arrays.
@@ -167,6 +214,8 @@ module.exports = {
   discardOrder,
   closePosition,
   monitorPositions,
+  syncLiveFill,
+  voidLivePosition,
   getPendingOrders,
   getActivePositions,
   getTradeJournal,

@@ -15,9 +15,20 @@
     PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
     INVALIDATED: 'price is already through the stop and the setup was discarded',
     NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
-    LIVE_NOT_INTEGRATED: 'this venue is set to LIVE but broker routing is not built yet. Nothing was traded; '
-      + 'the order is still pending (switch the venue to Paper in Settings to fill it on paper)',
+    LIVE_OPTIONS_UNSUPPORTED: 'live options execution is not supported yet (strikes are simulated). Nothing was sent; '
+      + 'the order is still pending (set Alpaca mode to Paper to fill it on paper)',
+    ORDER_BUSY: 'an approval for this order is already in progress',
   };
+
+  // Broker errors arrive as "CODE: detail"; known codes get plain words.
+  function describe(error) {
+    if (FAIL_REASONS[error]) return FAIL_REASONS[error];
+    const [code, ...rest] = String(error).split(': ');
+    const detail = rest.join(': ');
+    if (code === 'LIVE_ORDER_FAILED') return `live order rejected, nothing was filled (${detail})`;
+    if (code === 'LIVE_UNRECORDED') return `CHECK YOUR BROKER NOW: ${detail}`;
+    return error;
+  }
 
   // Send an intent only. The row stays until the server's QUEUE_UPDATED removes it.
   function sendAction(type, id) {
@@ -107,7 +118,7 @@
   function actionFailed({ type, id, error }) {
     console.warn(`[signaldesk] ${type} ${id} failed: ${error}`);
     inFlight.delete(id);
-    showNotice(`${type === 'APPROVE' ? 'Approval' : 'Rejection'} failed for ${id.split(':')[2] || id}: ${FAIL_REASONS[error] || error}`);
+    showNotice(`${type === 'APPROVE' ? 'Approval' : 'Rejection'} failed for ${id.split(':')[2] || id}: ${describe(error)}`);
     render();
   }
 

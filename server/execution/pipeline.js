@@ -11,6 +11,7 @@ const optionsSystem = require('../strategies/5-options-system');
 const { processCandidate } = require('../risk/risk-engine');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
+const { reconcileLivePositions } = require('./reconciler');
 const prices = require('../market/latest-prices');
 
 const PIPELINE_INTERVAL_MS = 60000;
@@ -85,19 +86,31 @@ async function pipelinePass() {
     }
   }
 
-  // Exit management for filled positions: stops and T1 targets on fresh prices.
+  // Exit management. LIVE positions first, from broker truth (real fills);
+  // then PAPER positions from local prices (monitorPositions skips LIVE ones).
+  let positionsChanged = false;
+  let journalChanged = false;
+  const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `
+    + `net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)${t.exitLeg ? ` via ${t.exitLeg}` : ''}`);
+  try {
+    for (const r of await reconcileLivePositions(ledger.getActivePositions(), ledger)) {
+      if (r.action === 'closed') { logClose(r.trade); journalChanged = true; }
+      if (r.action === 'voided') console.warn(`[reconcile] voided ${r.id}: ${r.detail}`);
+      if (r.action === 'synced') console.log(`[reconcile] ${r.id}: entry synced to broker fill`);
+      if (['closed', 'voided', 'synced'].includes(r.action)) positionsChanged = true;
+    }
+  } catch (err) {
+    console.error('[pipeline] broker reconciliation failed:', err.message);
+  }
   try {
     const closed = ledger.monitorPositions(prices.getLatestPrices());
-    for (const t of closed) {
-      console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)`);
-    }
-    if (closed.length) {
-      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
-      broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
-    }
+    closed.forEach(logClose);
+    if (closed.length) { positionsChanged = true; journalChanged = true; }
   } catch (err) {
     console.error('[pipeline] position monitor failed:', err.message);
   }
+  if (positionsChanged) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+  if (journalChanged) broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
 
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
   return counts;
