@@ -27,7 +27,8 @@
   };
   // Rejection label (REJECTION_STATS bucket) -> state label shown in the table.
   const FAIL_LABELS = [[/^Fee drag/, 'Cost filter failed'], [/^Expired/, 'Expired'], [/^Price escaped/, 'Price escaped'],
-    [/^Price through stop/, 'Invalidated'], [/^Bankroll too small|^Position too small/, 'Size filter failed']];
+    [/^Price through stop/, 'Invalidated'], [/^Bankroll too small|^Position too small/, 'Size filter failed'],
+    [/Live account value unavailable/, 'Live capital unavailable']];
 
   const marketOf = (s) => (s.includes('-') ? 'crypto' : 'stocks');
   const display = (asset, market) => (market === 'crypto' ? asset.replace('-', '/') : asset);

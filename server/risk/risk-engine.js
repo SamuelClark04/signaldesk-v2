@@ -100,6 +100,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     stopDistance,
     notional: sizing.notional,
     riskPct,
+    // What it was sized against: the approval step refuses a LIVE execution of
+    // an order that was not sized from that live account (venue-capital.js).
+    sizingBankroll: configuredBankroll,
+    sizingBasis: options.sizingBasis || 'paper',
     cappedByNotional: sizing.cappedByNotional,
     feeDrag: cost.feeDrag,
     estimatedFees: cost.estimatedFees,

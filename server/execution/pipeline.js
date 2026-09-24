@@ -9,6 +9,7 @@ const cryptoIntra = require('../strategies/2-crypto-intra');
 const equitySwing = require('../strategies/3-equity-swing');
 const optionsSystem = require('../strategies/5-options-system');
 const { processCandidate } = require('../risk/risk-engine');
+const { sizingBankroll } = require('../risk/venue-capital');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
@@ -81,13 +82,22 @@ function notify(order) {
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
-  // Read once per pass: every candidate in a pass is sized against the same
-  // bankroll and risk profile (Settings: 0.5% / 1% / 2% per trade).
-  const { bankroll, riskPct } = ledger.getSettings();
+  // Read once per pass: every candidate is sized with the same risk profile
+  // (Settings: 0.5% / 1% / 2%) against the capital of the venue it would execute
+  // on: the paper bankroll, or the LIVE broker account (cached ~60 s).
+  const settings = ledger.getSettings();
+  const { riskPct } = settings;
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
-    const result = processCandidate(candidate, bankroll, { riskPct });
+    const capital = await sizingBankroll(candidate.market, settings);
+    if (!capital.ok) {
+      // Fail closed: a LIVE setup is never sized from the paper bankroll.
+      console.warn(`[pipeline] rejected ${candidate.id}: ${capital.reason}`);
+      recordRejection(candidate.id, capital.reason, candidate);
+      continue;
+    }
+    const result = processCandidate(candidate, capital.bankroll, { riskPct, sizingBasis: capital.basis });
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
       recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason

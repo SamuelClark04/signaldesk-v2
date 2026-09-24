@@ -21,6 +21,8 @@ const BUCKETS = [
   [/^PRICE_ESCAPED$/, 'Price escaped entry zone'],
   [/^INVALIDATED$/, 'Price through stop before entry'],
   [/^REJECTED_BY_USER$/, 'Rejected by you'],
+  [/^LIVE_CAPITAL_UNAVAILABLE/, 'Rejected: Live account value unavailable for sizing'],
+  [/^SIZED_FOR_OTHER_VENUE/, 'Sized for another venue (mode changed)'],
 ];
 
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD

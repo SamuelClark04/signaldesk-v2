@@ -32,6 +32,7 @@
     const [code, ...rest] = String(error).split(': ');
     if (code === 'LIVE_ORDER_FAILED') return `live order rejected, nothing was filled (${rest.join(': ')})`;
     if (code === 'LIVE_UNRECORDED') return `CHECK YOUR BROKER NOW: ${rest.join(': ')}`;
+    if (code === 'SIZED_FOR_OTHER_VENUE') return `nothing was sent: this setup was ${rest.join(': ')}. Dismiss it; the next scan re-proposes it sized from the live account`;
     return error;
   }
 

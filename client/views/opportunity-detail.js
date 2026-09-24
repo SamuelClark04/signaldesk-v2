@@ -110,6 +110,16 @@
   }
 
   // ---------- Right: risk & execution ----------
+  const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity' };
+  // Was this order sized for the venue it would execute on now? (server rule:
+  // message-handler refuses a LIVE approval of a setup not sized from that account)
+  function sizing(o, ctx) {
+    const [modeKey, broker] = VENUE[o.market] || [null, '?'];
+    const liveVenue = !!(ctx.settings && modeKey && ctx.settings[modeKey] === 'live');
+    const basis = o.sizingBasis || 'paper'; // setups staged before venue sizing were all sized from paper
+    return { broker, basis, mismatch: hasLevels(o) && liveVenue && basis !== `${broker.toLowerCase()}-live` };
+  }
+
   function scenarioTable(o) {
     const s = hasLevels(o) ? o.scenarios || {} : {};
     const rows = hasLevels(o) ? [['Stop', s.stop], ['T1', s.t1], ['T2', s.t2]].filter(([, v]) => v) : [['Stop'], ['T1'], ['T2']];
@@ -135,13 +145,15 @@
     const liveOptions = live && o.market === 'options';
     let label = live ? `Execute live on ${broker}` : 'Start paper tracking';
     if (liveOptions) label = 'Live options not supported';
+    const wrongSizing = sizing(o, ctx).mismatch;
+    if (wrongSizing) label = `Sized for ${sizing(o, ctx).basis === 'paper' ? 'paper' : 'another venue'}: dismiss & re-scan`;
     if (ctx.busy) label = 'Sending…';
     if (!ready) label = 'Waiting for Setup';
     const primary = el('button', {
       type: 'button',
       className: `btn ${live && ready ? 'btn-live' : 'btn-solid'} opp-go`,
       textContent: label,
-      disabled: !ready || !ctx.online || ctx.busy || liveOptions,
+      disabled: !ready || !ctx.online || ctx.busy || liveOptions || wrongSizing,
       title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : '',
     });
     const analysis = el('button', { type: 'button', className: 'btn', textContent: 'View full analysis' });
@@ -169,17 +181,13 @@
     const lv = (fn) => (ready ? fn() : '—');
     const cost = (x) => (Number.isFinite(x) ? money(x) : '—');
     const rr = ready && s.t1 && s.stop && s.stop.net < 0 ? `${(s.t1.net / -s.stop.net).toFixed(2)} : 1` : '—';
-    // Sizing basis = the bankroll of the venue this order would go to (paper,
-    // live Coinbase or live Alpaca), and risk % against THAT bankroll only.
-    const [modeKey, broker] = VENUE[o.market] || [null, '?'];
-    const liveVenue = ctx.settings && modeKey && ctx.settings[modeKey] === 'live';
-    const vb = SD.portfolioTable.venueBankroll(ctx.state || {}, liveVenue ? (broker === 'Coinbase' ? 'coinbase' : 'alpaca') : 'paper');
-    const riskShare = vb.amount > 0 && o.dollarRisk > 0 ? o.dollarRisk / vb.amount : null;
-    const riskPct = riskShare === null ? (liveVenue ? ' (% unknown: live account not loaded)' : '') : ` (${(riskShare * 100).toFixed(2)}%)`;
-    // The risk engine still sizes every order from the PAPER bankroll; on a live
-    // venue that can be far more than the intended profile % of the real account.
-    const paperBankroll = ctx.settings && ctx.settings.bankroll;
-    const oversized = ready && liveVenue && riskShare !== null && o.riskPct > 0 && riskShare > o.riskPct * 1.25;
+    // Sizing basis: what the SERVER sized this order against (o.sizingBasis +
+    // o.sizingBankroll, set by venue-capital at staging). If the venue's mode has
+    // changed since, a LIVE approval is refused server-side; say so up front.
+    const { broker, basis, mismatch } = sizing(o, ctx);
+    const sizedFrom = o.sizingBankroll > 0 ? `${money(o.sizingBankroll)} · ${BASIS[basis] || basis}` : `${BASIS[basis] || basis}`;
+    const riskShare = o.sizingBankroll > 0 && o.dollarRisk > 0 ? o.dollarRisk / o.sizingBankroll : null;
+    const riskPct = riskShare === null ? '' : ` (${(riskShare * 100).toFixed(2)}%)`;
     const summary = ready && o.thesis ? o.thesis.split(/(?<=\.)\s/)[0] : '';
     return el('aside', { className: 'opp-right' }, [
       el('header', { className: 'opp-right-head' }, [
@@ -201,10 +209,10 @@
         kv('Quantity (est.)', lv(() => size(o))),
       ]),
       el('div', { className: 'opp-kv-group' }, [
-        kv('Sizing basis', vb.amount > 0 ? `${money(vb.amount)} · ${vb.label}` : `${vb.label} · ${vb.note}`),
-        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`), oversized ? 'text-short' : ''),
-        ...(oversized ? [el('p', { className: 'opp-size-warn', textContent: `Sized from the paper bankroll (${money(paperBankroll)}): this risks ${(riskShare * 100).toFixed(2)}% `
-          + `of your live ${broker} account, not ${(o.riskPct * 100).toFixed(1)}%. Live sizing is not isolated yet.` })] : []),
+        kv('Sizing basis', lv(() => sizedFrom)),
+        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`), mismatch ? 'text-short' : ''),
+        ...(mismatch ? [el('p', { className: 'opp-size-warn', textContent: `Sized from the ${BASIS[basis] || basis}, but ${broker} is now LIVE. `
+          + 'LIVE approval is blocked for this setup: dismiss it and the next scan re-proposes it sized from the live account.' })] : []),
         kv('Estimated entry cost', lv(() => cost(c.entry))),
         kv('Estimated exit cost (T1)', lv(() => cost(c.exitT1))),
         kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),

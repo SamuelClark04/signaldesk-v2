@@ -10,6 +10,7 @@ const { publishBrokerState } = require('./broker-state');
 const { recordRejection } = require('./rejection-stats');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const { runPipeline, getScanStatus } = require('./pipeline');
+const { requiredBasis } = require('../risk/venue-capital');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const brokerSync = require('../connectors/broker-sync');
@@ -31,8 +32,13 @@ const VENUES = {
 async function routeApproved(order, livePrice) {
   const venue = VENUES[order.market];
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
-  if (ledger.getSettings()[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice);
+  const settings = ledger.getSettings();
+  if (settings[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice);
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
+  // A LIVE order must have been sized from that live account. One staged while
+  // the venue was on paper (or before this check existed) is refused, never sent.
+  const needed = requiredBasis(order.market, settings);
+  if (order.sizingBasis !== needed) throw new Error(`SIZED_FOR_OTHER_VENUE: sized from ${order.sizingBasis || 'the paper bankroll'}, venue needs ${needed}`);
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
   const result = await venue.api.submitOrder(order, order.positionSize, livePrice);
