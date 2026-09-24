@@ -115,6 +115,8 @@ async function pipelinePass() {
       counts.staged += 1;
       broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
+      if (result.capitalCapped) console.warn(`[pipeline] ${result.id}: CAPITAL CAP ${result.capitalCapPct * 100}% of bankroll bound the size; `
+        + `risking ${(result.actualRiskPct * 100).toFixed(2)}% instead of ${(result.riskPct * 100).toFixed(2)}% (stop is tight relative to price)`);
       notify(staged);
     } catch (err) {
       // Expected when the same setup is re-proposed on the next tick (duplicate id).

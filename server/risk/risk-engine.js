@@ -2,7 +2,7 @@
 // Sizes the position from bankroll risk, then runs it through the cost gate.
 // Approved results are frozen and registered, so the ledger can refuse anything
 // that did not come through here.
-//   stocks/crypto: size = risk budget / (entry - stop), capped by bankroll notional
+//   stocks/crypto: size = min(risk budget / (entry - stop), MAX_CAPITAL_ALLOCATION x bankroll / entry)
 //   options:       real contracts carry riskPerShare = ask paid - the bid the
 //                  option is modelled to fetch at the underlying stop, so
 //                  size = floor(risk budget / (riskPerShare x multiplier)) contracts,
@@ -15,6 +15,14 @@ const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
 const MARKETS = ['crypto', 'stocks', 'options'];
 const MAX_PREMIUM_R = 3; // full-premium loss capped at 3x the per-trade risk budget
+// Capital cap: no single position may tie up more than this share of the
+// bankroll (notional for stocks/crypto, premium for options), however tight the
+// stop. Risk-based size first, then min(risk size, cap size); when the cap
+// binds, the order carries capitalCapped + the risk % it actually takes.
+const MAX_CAPITAL_ALLOCATION = (() => {
+  const v = Number(process.env.MAX_CAPITAL_ALLOCATION);
+  return v > 0 && v <= 1 ? v : 0.25;
+})();
 const approvedOrders = new WeakSet();
 
 function reject(candidate, reason, extra = {}) {
@@ -50,15 +58,15 @@ function roundSize(size, market) {
 
 // Linear instruments: risk is the distance from entry to the invalidation level.
 function sizeLinear(candidate, bankroll, riskBudget, maxLeverage, entryPrice, stopDistance) {
-  const maxSizeByNotional = (bankroll * maxLeverage) / entryPrice;
-  const rawSize = Math.min(riskBudget / stopDistance, maxSizeByNotional);
-  const positionSize = roundSize(rawSize, candidate.market);
+  const bySize = riskBudget / stopDistance; // risk-based size
+  const byCapital = (bankroll * Math.min(maxLeverage, MAX_CAPITAL_ALLOCATION)) / entryPrice; // capital cap
+  const positionSize = roundSize(Math.min(bySize, byCapital), candidate.market);
   if (!(positionSize > 0)) return { error: 'Position size rounds to zero' };
   return {
     positionSize,
-    dollarRisk: positionSize * stopDistance, // actual risk after rounding and the notional cap
+    dollarRisk: positionSize * stopDistance, // actual risk after rounding and the capital cap
     notional: positionSize * entryPrice,
-    cappedByNotional: rawSize < riskBudget / stopDistance,
+    cappedByNotional: byCapital < bySize,
   };
 }
 
@@ -69,12 +77,12 @@ function sizeOptions(candidate, riskBudget, bankroll, maxLeverage) {
   const premiumPerContract = debit * multiplier;
   const riskPerContract = (riskPerShare || debit) * multiplier;
   const byRisk = Math.floor(riskBudget / riskPerContract);
-  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * maxLeverage) / premiumPerContract);
+  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * Math.min(maxLeverage, MAX_CAPITAL_ALLOCATION)) / premiumPerContract);
   const positionSize = Math.min(byRisk, byPremium);
   if (positionSize < 1) {
     return { error: byRisk < 1
       ? `Bankroll too small: one contract risks $${riskPerContract.toFixed(2)} to the stop, budget is $${riskBudget.toFixed(2)}`
-      : `Bankroll too small: one contract's premium $${premiumPerContract.toFixed(2)} exceeds ${MAX_PREMIUM_R}x the $${riskBudget.toFixed(2)} risk budget` };
+      : `Bankroll too small: one contract's premium $${premiumPerContract.toFixed(2)} exceeds ${MAX_PREMIUM_R}x the $${riskBudget.toFixed(2)} risk budget or ${MAX_CAPITAL_ALLOCATION * 100}% of the bankroll` };
   }
   return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk };
 }
@@ -116,6 +124,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     sizingBankroll: configuredBankroll,
     sizingBasis: options.sizingBasis || 'paper',
     cappedByNotional: sizing.cappedByNotional,
+    // Capital cap bound: the trade risks less than the profile's target %.
+    capitalCapped: sizing.cappedByNotional,
+    capitalCapPct: MAX_CAPITAL_ALLOCATION,
+    actualRiskPct: dollarRisk / configuredBankroll,
     feeDrag: cost.feeDrag,
     estimatedFees: cost.estimatedFees,
     approvedAt: Date.now(),
@@ -128,4 +140,4 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R };
+module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R, MAX_CAPITAL_ALLOCATION };

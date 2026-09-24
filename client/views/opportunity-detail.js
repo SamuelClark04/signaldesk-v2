@@ -77,7 +77,7 @@
     const dir = o.direction === 'short' ? 'short' : 'long';
     const shown = livePrice > 0 ? livePrice : ref ? ref.price : null;
     // Live candles when the chart library loaded; static level chart otherwise.
-    const chart = SD.liveChart.mount(o, { withLevels: !watch, banner: watch ? WATCH_TEXT : '' })
+    const chart = SD.liveChart.mount(o, { withLevels: !watch, banner: SD.positionDetail.banner(o, ctx, watch ? WATCH_TEXT : '') })
       || (watch ? watchChart(o, livePrice) : levelChart(o, livePrice));
     let change = null;
     let basis = '';
@@ -233,6 +233,8 @@
 
   function right(o, ctx) {
     const ready = hasLevels(o);
+    const held = ready ? null : SD.positionDetail.panel(o, ctx); // an open position on this symbol: its details
+    if (held) return held;
     const t = o.targets || [];
     const s = o.scenarios || {};
     const c = o.costs || {};
@@ -270,6 +272,8 @@
         kv('Risk vs sizing bankroll', lv(() => (riskShare === null ? '—' : `${(riskShare * 100).toFixed(2)}% (${money(o.dollarRisk)})`)), mismatch ? 'text-short' : ''),
         ...(mismatch ? [el('p', { className: 'opp-size-warn', textContent: `Sized from the ${BASIS[basis] || basis}, but ${broker} is now LIVE. `
           + 'LIVE approval is blocked for this setup: dismiss it and the next scan re-proposes it sized from the live account.' })] : []),
+        ...(ready && o.capitalCapped ? [el('p', { className: 'opp-size-warn', textContent: `Capital cap: size limited to ${o.capitalCapPct * 100}% of the bankroll, `
+          + `so this trade risks ${(o.actualRiskPct * 100).toFixed(2)}% instead of the profile's ${(o.riskPct * 100).toFixed(2)}% (the stop is tight relative to price).` })] : []),
         kv('Estimated entry cost', lv(() => cost(c.entry))),
         kv('Estimated exit cost (T1)', lv(() => cost(c.exitT1))),
         kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),

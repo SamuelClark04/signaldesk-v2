@@ -117,7 +117,9 @@
 .hud-exit.is-armed:hover:not(:disabled) { filter: brightness(1.1); }
 @media (max-width: 760px) { .trade-hud { position: static; width: auto; margin-top: 8px; } }
 /* Keep the Market Watch banner clear of the HUD. */
-.opp-chart-wrap:has(.trade-hud) .opp-watch-mode { right: 350px; text-align: left; padding-left: 16px; }
+/* With a trade on screen the banner becomes a small legend at the bottom-left. */
+.opp-chart-wrap:has(.trade-hud) .opp-watch-mode { top: auto; bottom: 58px; left: 12px; right: auto; max-width: min(60%, 420px); transform: none;
+  padding: 3px 8px; border-radius: 4px; background: rgba(17, 24, 39, 0.85); font-size: 11px; text-align: left; }
 
 /* ---------- Chart symbol picker (Phase 34) ---------- */
 .opp-symbol-select {
@@ -144,3 +146,13 @@
 .snt-fill.is-bear { background: var(--short); }
 .snt-fill.is-neutral { background: var(--warn); }
 .snt-source { grid-column: 1 / -1; color: var(--text-faint); font-size: 11px; }
+
+/* ---------- HUD: real option contracts (Phase 38) ---------- */
+.hud-contract { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 13px var(--font-mono); }
+.hud-contract strong { color: var(--text); }
+.hud-premium { display: flex; align-items: baseline; gap: 6px; font: 12px var(--font-mono); }
+.hud-premium strong { font-size: 15px; color: var(--text); }
+.hud-basis { padding: 0 5px; border-radius: 4px; font: 600 10px/15px var(--font-mono); }
+.hud-basis.is-bid { background: var(--long-bg); color: var(--long); }
+.hud-basis.is-model { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.hud-underlying { font-family: var(--font-mono); font-size: 11px; }

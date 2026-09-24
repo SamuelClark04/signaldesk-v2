@@ -4,7 +4,8 @@
 //           does not manage) + Cash.
 // P/L uses the ledger's own maths: gross = (price − fill) × size (× −1 short);
 // estimated exit fees use the position's fee model (sent by the server), exactly
-// as the ledger books a close. Options have no live option prices, so no $ P/L.
+// as the ledger books a close. Real option contracts are marked at their live
+// bid (or modelled value) from the server; older options setups get no $ P/L.
 // Exposes window.SignalDesk.portfolioMetrics.
 (() => {
   const SD = window.SignalDesk;
@@ -25,23 +26,33 @@
     const fm = p.feeModel || {};
     const exitFees = (x) => (fm.perContractRoundTrip ? fm.perContractRoundTrip * p.positionSize
       : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
+    if (p.market === 'options' && p.optionsData && p.optionsData.contract) return markOption(p, livePrice, cost, exitFees);
     if (!(livePrice > 0)) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
-    if (p.market === 'options') {
-      const underlyingMove = livePrice / p.fillPrice - 1;
-      const q = p.optionQuote; // real contract: its latest fresh quote, sold at the bid
-      if (q && q.bid > 0 && p.optionsData) {
-        const gross = (q.bid - p.optionsData.debit) * p.optionsData.multiplier * p.positionSize;
-        const fees = exitFees(livePrice);
-        return { live: true, price: livePrice, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
-          pctGross: cost > 0 ? gross / cost : null, r: p.dollarRisk > 0 ? gross / p.dollarRisk : null, underlyingMove, optionBid: q.bid };
-      }
-      return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null, underlyingMove };
+    if (p.market === 'options') { // older setups (no real contract): only the underlying's move is known
+      return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null,
+        underlyingMove: livePrice / p.fillPrice - 1 };
     }
     const sign = p.direction === 'short' ? -1 : 1;
     const gross = (livePrice - p.fillPrice) * p.positionSize * sign;
     const fees = exitFees(livePrice);
     return { live: true, price: livePrice, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
       pctGross: cost > 0 ? gross / cost : null, r: p.dollarRisk > 0 ? gross / p.dollarRisk : null };
+  }
+
+  // Real option contract: valued at the server's optionMark (per share): the
+  // real BID from a fresh quote, else the Black-Scholes value at the live
+  // underlying (basis 'model'). P/L = (value − premium paid) × 100 × contracts.
+  // `live` still means "the underlying has a live price" (closing needs one).
+  function markOption(p, livePrice, cost, exitFees) {
+    const om = p.optionMark;
+    const underlying = livePrice > 0 ? livePrice : om && om.underlying > 0 ? om.underlying : null;
+    const base = { live: livePrice > 0, price: underlying, cost, underlyingMove: underlying ? underlying / p.fillPrice - 1 : null };
+    if (!om || !(om.value >= 0)) return { ...base, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
+    const { debit, multiplier } = p.optionsData;
+    const gross = (om.value - debit) * multiplier * p.positionSize;
+    const fees = exitFees(underlying);
+    return { ...base, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees, pctGross: cost > 0 ? gross / cost : null,
+      r: p.dollarRisk > 0 ? gross / p.dollarRisk : null, optionValue: om.value, optionBasis: om.basis, optionAt: om.at };
   }
 
   function markBroker(p, livePrice) {

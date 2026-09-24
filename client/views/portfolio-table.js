@@ -14,12 +14,14 @@
   // ---------- Holdings table ----------
   function pnlCell(m, p) {
     if (m.noBasis) return el('td', { className: 'num pf-muted', textContent: 'No cost basis', title: 'Coinbase reports no entry price for this balance (e.g. coins transferred in)' });
-    if (!m.live && m.priceSource !== 'sync') return el('td', { className: 'num pf-muted', textContent: 'No live price' });
+    if (!m.live && m.priceSource !== 'sync' && !(m.gross !== null && m.optionBasis)) return el('td', { className: 'num pf-muted', textContent: 'No live price' });
     if (m.gross === null) {
+      if (!Number.isFinite(m.underlyingMove)) return el('td', { className: 'num pf-muted', textContent: 'No option price' });
       return el('td', { className: 'num pf-muted', title: 'No live option prices: showing the underlying move since entry' },
         [el('span', { textContent: `Underlying ${pct(m.underlyingMove)}` })]);
     }
-    return el('td', { className: `num ${pnlClass(m.gross)}`, title: m.net === null ? '' : `After est. exit fees ${signed(m.net, money)}` }, [
+    const basis = m.optionBasis ? `Option at ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : 'modelled'}). ` : '';
+    return el('td', { className: `num ${pnlClass(m.gross)}`, title: `${basis}${m.net === null ? '' : `After est. exit fees ${signed(m.net, money)}`}` }, [
       el('span', { className: 'pf-pnl', textContent: signed(m.gross, money) }),
       el('span', { className: 'pf-pnl-pct', textContent: m.pctGross === null ? '' : pct(m.pctGross) }),
     ]);

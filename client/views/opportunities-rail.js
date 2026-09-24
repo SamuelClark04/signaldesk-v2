@@ -36,7 +36,8 @@
     const m = SD.portfolioMetrics.mark(p, live);
     const venue = p.adopted ? 'Adopted' : p.execution === 'LIVE' ? 'Live' : 'Paper';
     const pnl = m.gross === null || m.gross === undefined
-      ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: m.live ? '—' : 'No price' })
+      ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: p.market === 'options' && !(p.optionsData && p.optionsData.contract) ? 'Simulated'
+        : m.live && p.market !== 'options' ? '—' : 'No price' })
       : el('span', { className: `opp-pos-pnl ${pnlClass(m.gross)}`, textContent: signed(m.gross, money) });
     const active = view.isWatch && view.watchSymbol === p.asset;
     const btn = el('button', { type: 'button', className: `opp-watch opp-pos${active ? ' is-active' : ''}` }, [
@@ -44,7 +45,9 @@
       el('span', { className: `opp-heat is-position${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: `${p.direction === 'short' ? 'Short · ' : ''}${venue}` }),
       pnl,
     ]);
-    btn.title = `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${m.live ? ' · P/L before fees' : ''}`;
+    btn.title = m.optionBasis
+      ? `${venue} ${p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : 'modelled'}) vs ${p.optionsData.debit} paid · P/L before fees`
+      : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));
     btn.onclick = () => view.onOpenPosition(p);
     return btn;

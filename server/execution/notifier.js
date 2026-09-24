@@ -43,6 +43,7 @@ function detailRows(o) {
     ['Size', sizeLabel(o)],
     ['Risk', `${usd(o.dollarRisk)}${Number.isFinite(o.feeDrag) ? ` · fee drag ${o.feeDrag.toFixed(2)}R` : ''}`],
   ];
+  if (o.capitalCapped) rows.push(['Capital cap', `size limited to ${o.capitalCapPct * 100}% of the bankroll: risking ${(o.actualRiskPct * 100).toFixed(2)}%, not ${(o.riskPct * 100).toFixed(2)}%`]);
   if (o.optionsData) {
     const legs = (o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ');
     rows.push(['Options', o.optionsData.contract ? `${o.optionsData.contract} at ${o.optionsData.debit} ask (bid ${o.optionsData.bid}), ${o.optionsData.dte} DTE, delta ${Number(o.optionsData.delta).toFixed(2)}`

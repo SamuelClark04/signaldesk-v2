@@ -10,6 +10,7 @@ const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
 const { grossPnl, optionsSaleValue, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
 const { freshQuote } = require('../connectors/options-data');
+const { optionMark } = require('./option-marks');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -248,9 +249,8 @@ function unsaveSetup(candidateId) {
 // derived on read, never stored, so older saved orders get them too.
 const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
-// and real option contracts their latest fresh quote (optionQuote: { bid, ask, quoteTime }).
-const optionQuote = (p) => (p.market === 'options' && p.optionsData && p.optionsData.contract ? freshQuote(p.optionsData.contract) : null);
-const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market), optionQuote: optionQuote(p) }));
+// and real option contracts their current value (optionMark, option-marks.js).
+const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market), optionMark: optionMark(p) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 const getSavedSetups = () => savedSetups.map((s) => ({ ...s }));
 
