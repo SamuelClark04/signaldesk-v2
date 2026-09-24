@@ -4,7 +4,25 @@
   const SD = window.SignalDesk;
   const { $ } = SD.ui;
   const DEFAULT_HOST = '127.0.0.1:3000'; // used when the page is opened from disk
-  const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || DEFAULT_HOST}/ws`;
+
+  // LAN access token (phone on Wi-Fi): arrives once as ?token=..., is kept on this
+  // device, and is removed from the address bar so it isn't left on screen.
+  const TOKEN_KEY = 'signaldesk.accessToken';
+  const accessToken = (() => {
+    const params = new URLSearchParams(location.search);
+    const fromUrl = params.get('token');
+    if (fromUrl) {
+      try { localStorage.setItem(TOKEN_KEY, fromUrl); } catch { /* storage blocked: use for this session */ }
+      params.delete('token');
+      const query = params.toString();
+      history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
+      return fromUrl;
+    }
+    try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  })();
+  const isLocalPage = ['localhost', '127.0.0.1', ''].includes(location.hostname);
+  const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || DEFAULT_HOST}/ws`
+    + (accessToken ? `?token=${encodeURIComponent(accessToken)}` : '');
   const TABS = ['today', 'opportunities', 'portfolio', 'journal', 'settings'];
   const DEFAULT_TAB = 'opportunities';
 
@@ -67,7 +85,10 @@
       if (handler) handler(msg.payload);
     });
     ws.addEventListener('close', () => {
-      setConn('closed', `Offline · retry ${backoff / 1000}s`);
+      // A LAN page without a token will always be refused: say why instead of "Offline".
+      setConn('closed', !isLocalPage && !accessToken
+        ? 'No access token: open the link printed by the server'
+        : `Offline · retry ${backoff / 1000}s`);
       SD.queue.render(); // disables the action buttons while offline
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);

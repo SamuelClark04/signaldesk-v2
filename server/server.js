@@ -17,7 +17,8 @@ const { createMessageHandler } = require('./execution/message-handler');
 const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 
-const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
+// Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
+const { HOST, LAN_ACCESS, checkUpgrade, lanUrls } = require('./security/access-policy');
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const STOCK_WATCHLIST = ['AAPL', 'NVDA', 'SPY'];
@@ -36,17 +37,15 @@ const server = http.createServer(app);
 
 // ---------- CSWSH shield ----------
 // Browsers do not apply same-origin rules to WebSockets, so any page the user
-// has open could otherwise connect to ws://127.0.0.1 and send APPROVE or
-// UPDATE_SETTINGS. Only the terminal's own origin may open the socket; a
-// missing Origin (non-browser client) is rejected too.
-const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+// has open could otherwise connect and send APPROVE or UPDATE_SETTINGS. Every
+// upgrade goes through the access policy (origin + LAN token); see
+// server/security/access-policy.js.
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  const { pathname } = new URL(req.url, 'http://placeholder');
-  const origin = req.headers.origin;
-  if (pathname !== '/ws' || !ALLOWED_ORIGINS.has(origin)) {
-    console.warn(`[security] rejected WebSocket upgrade: path=${pathname} origin=${origin || '(none)'}`);
+  const verdict = checkUpgrade(req, PORT);
+  if (!verdict.ok) {
+    console.warn(`[security] rejected WebSocket upgrade: ${verdict.reason}`);
     socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
@@ -108,6 +107,12 @@ process.on('SIGTERM', shutdown);
 
 server.listen(PORT, HOST, () => {
   console.log(`SignalDesk-V2 listening on http://${HOST}:${PORT}`);
+  if (LAN_ACCESS) {
+    const urls = lanUrls(PORT);
+    console.warn('[security] LAN ACCESS ON: devices on your network can reach this terminal with the access token.');
+    console.warn('[security] Open on your phone (this link contains the secret token; do not share it):');
+    for (const u of urls.length ? urls : ['(no private IPv4 address found on this machine)']) console.warn(`           ${u}`);
+  }
   start();
 });
 
