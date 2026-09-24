@@ -152,6 +152,7 @@ async function submitOrder(candidate, size, entryPrice) {
   if (c.market !== 'crypto') problem = `Coinbase live routing supports crypto only (got "${c.market}")`;
   else if (c.direction !== 'long') problem = 'spot accounts cannot open shorts';
   else if (!(size > 0) || base8(size) === '0') problem = `invalid size ${size}`;
+  else if (!(tp > 0)) problem = 'no take-profit: live bracket orders need one (Portfolio Pilot core holdings have none, by design); nothing was sent. Buy it on paper, or at the broker';
   else if (!(tp > 0) || !(c.invalidation > 0) || !(c.invalidation < entryPrice && entryPrice < tp)) {
     problem = `levels out of order: stop ${c.invalidation}, entry ${entryPrice}, target ${tp}`;
   }

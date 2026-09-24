@@ -5,7 +5,7 @@
 const ledger = require('./paper-ledger');
 const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
-const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
+const { createPilotHandler } = require('./pilot-handler');
 const { publishBrokerState } = require('./broker-state');
 const { recordRejection } = require('./rejection-stats');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
@@ -206,15 +206,8 @@ function createMessageHandler({ send, broadcast }) {
     return broadcast('BROKER_HOLDINGS', result.snapshot);
   }
 
-  // Allocator: read-only math, answered to the requesting client only.
-  function handleAllocation(ws, { amount }) {
-    try {
-      const proposal = calculateAllocation(amount, ledger.getActivePositions(), prices.getLatestPrices());
-      send(ws, 'ALLOCATION_PROPOSAL', proposal);
-    } catch (err) {
-      send(ws, 'ALLOCATION_PROPOSAL', { error: err.message });
-    }
-  }
+  // Portfolio Pilot: deposit -> staged BUY setups; SELL / TRIM approvals (pilot-handler.js).
+  const handlePilot = createPilotHandler({ send, broadcast });
 
   // Settings: the ledger validates and persists; every client sees the new values.
   function handleSettings(ws, { payload }) {
@@ -229,6 +222,25 @@ function createMessageHandler({ send, broadcast }) {
     } catch (err) {
       console.warn(`[settings] rejected update ${JSON.stringify(payload)}: ${err.message}`);
       send(ws, 'SETTINGS_ERROR', { error: err.message, settings: ledger.getSettings() });
+    }
+  }
+
+  // Paper reset: destructive, so it needs the typed confirmation word as well.
+  function handleReset(ws, { confirm }) {
+    if (confirm !== 'RESET') return send(ws, 'LEDGER_RESET', { ok: false, error: 'Type RESET to confirm.' });
+    try {
+      const r = ledger.resetPaper();
+      console.warn(`[ledger] PAPER RESET: removed ${JSON.stringify(r.removed)}; kept LIVE ${JSON.stringify(r.keptLive)}; backup ${r.backupPath}`);
+      broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
+      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
+      broadcast('PILOT_ACTIONS', ledger.getPilotActions());
+      try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
+      publishBrokerState(broadcast, { force: true }).catch(() => {});
+      // Only the backup's file name goes to clients, not the server's directory layout.
+      return broadcast('LEDGER_RESET', { ok: true, removed: r.removed, keptLive: r.keptLive, backupFile: r.backupPath ? require('path').basename(r.backupPath) : null });
+    } catch (err) {
+      return send(ws, 'LEDGER_RESET', { ok: false, error: err.message });
     }
   }
 
@@ -250,9 +262,10 @@ function createMessageHandler({ send, broadcast }) {
     if (QUEUE_ACTIONS[msg.type]) {
       return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
     }
-    if (msg.type === 'CALCULATE_ALLOCATION') return handleAllocation(ws, msg);
+    if (handlePilot(ws, msg)) return undefined;
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
+    if (msg.type === 'RESET_LEDGER') return handleReset(ws, msg);
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
     if (msg.type === 'ADOPT_POSITION' || msg.type === 'RELEASE_POSITION') return handleAdoption(ws, msg);
     if (msg.type === 'SAVE_SETUP' || msg.type === 'UNSAVE_SETUP') return handleSaved(ws, msg);

@@ -1,4 +1,4 @@
-// Opportunities tab: sub-navigation (Setups / Scanner / Saved) and the Setups
+// Opportunities tab: sub-navigation (Setups / Approvals / Scanner / Saved) and the Setups
 // workspace: rail (left, opportunities-rail.js: active positions, queue, market
 // watch), analysis (center), risk & execution (right).
 // With no setup selected it shows Market Watch: live prices, nothing executable.
@@ -89,7 +89,8 @@
     inFlight.delete(id);
     closing.delete(id);
     const who = (mounted && mounted.state.pending.find((o) => o.id === id)) || { asset: String(id).split(':')[2] || id };
-    showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close', SAVE_SETUP: 'Save', UNSAVE_SETUP: 'Remove bookmark' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
+    const label = { APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close', SAVE_SETUP: 'Save', UNSAVE_SETUP: 'Remove bookmark', APPROVE_ACTION: 'Pilot action', DISMISS_ACTION: 'Dismiss' }[type];
+    showNotice(`${label || 'Action'} failed for ${who.asset}: ${describe(error)}`);
   }
 
   // ---------- Filters (one shared state drives the rail toggle and the top tabs) ----------
@@ -121,7 +122,7 @@
   // ---------- Setups workspace (3 columns, always) ----------
   function setups(state) {
     const real = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
-    for (const id of inFlight) if (!real.some((o) => o.id === id)) inFlight.delete(id); // approved (now a position) or dismissed
+    for (const id of inFlight) if (!real.some((o) => o.id === id) && !(state.pilotActions || []).some((a) => a.id === id)) inFlight.delete(id); // resolved
     for (const id of closing) if (!(state.positions || []).some((p) => p.id === id)) closing.delete(id); // closed
     const visible = real.filter((o) => matchesAsset(o.market)
       && matchesSearch(o.asset, SD.oppDetail.displaySymbol(o), o.setupType, o.strategyId, o.timeframe, o.thesis));
@@ -185,6 +186,14 @@
     return host;
   }
 
+  // Approvals: one-click approve for every staged setup and Pilot SELL / TRIM.
+  function approvals(state) {
+    for (const id of inFlight) if (!state.pending.some((o) => o.id === id) && !(state.pilotActions || []).some((a) => a.id === id)) inFlight.delete(id);
+    return SD.oppApprovals.render(state, { state, online: transport.isOnline(), inFlight, onApprove, onDismiss, matchesAsset,
+      onReview: nav.onReview,
+      sendAction: (type, id) => { if (!transport.isOnline() || inFlight.has(id)) return; inFlight.add(id); transport.send({ type, id }); rerender(); } });
+  }
+
   function render(container, state) {
     mounted = { container, state };
     // Briefly hold re-renders while the chart's symbol picker is in use (symbol-picker.js).
@@ -196,8 +205,10 @@
     const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
     const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
-    const tabs = el('div', { className: 'opp-subnav' }, ['setups', 'scanner', 'saved'].map((t) => {
+    const waiting = SD.oppApprovals.count(state);
+    const tabs = el('div', { className: 'opp-subnav' }, ['setups', 'approvals', 'scanner', 'saved'].map((t) => {
       const b = el('button', { type: 'button', className: `opp-subtab${t === subTab ? ' is-active' : ''}`, textContent: t[0].toUpperCase() + t.slice(1) });
+      if (t === 'approvals' && waiting) b.append(el('span', { className: 'opp-subtab-count', textContent: String(waiting) }));
       b.setAttribute('aria-pressed', String(t === subTab));
       b.onclick = () => { subTab = t; rerender(); };
       return b;
@@ -210,7 +221,8 @@
       // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
       el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs] : [tabs, el('div', { className: 'opp-toolbar-right' }, [scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
-      subTab === 'setups' ? setups(state) : subTab === 'scanner' ? scanner(state) : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
+      subTab === 'setups' ? setups(state) : subTab === 'approvals' ? approvals(state) : subTab === 'scanner' ? scanner(state)
+        : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
     );
 
     const input = container.querySelector('#opp-search');
@@ -229,5 +241,6 @@
     render,
     actionFailed,
     select: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; },
+    openApprovals: () => { subTab = 'approvals'; },
   };
 })();

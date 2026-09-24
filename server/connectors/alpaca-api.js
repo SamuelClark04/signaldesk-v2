@@ -75,7 +75,8 @@ function validateOrder(c, size, entryPrice) {
   if (c.market !== 'stocks') return `Alpaca live routing supports stocks only (got "${c.market}")`;
   if (!Number.isInteger(size) || size < 1) return `bracket orders need a whole share quantity (got ${size})`;
   const tp = c.targets && c.targets[0] && c.targets[0].price;
-  if (!(tp > 0) || !(c.invalidation > 0) || !(entryPrice > 0)) return 'missing target, stop or entry price';
+  if (!(tp > 0)) return 'no take-profit: live bracket orders need one (Portfolio Pilot core holdings have none, by design); nothing was sent. Buy it on paper, or at the broker';
+  if (!(c.invalidation > 0) || !(entryPrice > 0)) return 'missing stop or entry price';
   const long = c.direction === 'long';
   if (long ? !(c.invalidation < entryPrice && entryPrice < tp) : !(tp < entryPrice && entryPrice < c.invalidation)) {
     return `levels out of order for a ${c.direction}: stop ${c.invalidation}, entry ${entryPrice}, target ${tp}`;

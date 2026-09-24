@@ -57,16 +57,20 @@ function roundSize(size, market) {
 }
 
 // Linear instruments: risk is the distance from entry to the invalidation level.
+// candidate.maxNotional (optional, e.g. a Portfolio Pilot buy of a set dollar
+// amount) is a third ceiling: it only ever makes a position smaller.
 function sizeLinear(candidate, bankroll, riskBudget, maxLeverage, entryPrice, stopDistance) {
   const bySize = riskBudget / stopDistance; // risk-based size
   const byCapital = (bankroll * Math.min(maxLeverage, MAX_CAPITAL_ALLOCATION)) / entryPrice; // capital cap
-  const positionSize = roundSize(Math.min(bySize, byCapital), candidate.market);
+  const byAmount = candidate.maxNotional > 0 ? candidate.maxNotional / entryPrice : Infinity;
+  const positionSize = roundSize(Math.min(bySize, byCapital, byAmount), candidate.market);
   if (!(positionSize > 0)) return { error: 'Position size rounds to zero' };
   return {
     positionSize,
-    dollarRisk: positionSize * stopDistance, // actual risk after rounding and the capital cap
+    dollarRisk: positionSize * stopDistance, // actual risk after rounding and the caps
     notional: positionSize * entryPrice,
-    cappedByNotional: byCapital < bySize,
+    cappedByNotional: byCapital < bySize && byCapital <= byAmount,
+    cappedByAmount: byAmount < Math.min(bySize, byCapital),
   };
 }
 
@@ -124,6 +128,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     sizingBankroll: configuredBankroll,
     sizingBasis: options.sizingBasis || 'paper',
     cappedByNotional: sizing.cappedByNotional,
+    cappedByAmount: !!sizing.cappedByAmount, // sized to the requested dollar amount (Pilot buys)
     // Capital cap bound: the trade risks less than the profile's target %.
     capitalCapped: sizing.cappedByNotional,
     capitalCapPct: MAX_CAPITAL_ALLOCATION,

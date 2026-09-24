@@ -1,7 +1,8 @@
 // Portfolio → Portfolio Pilot: health dashboard + recommendations built from the
 // server's attention alerts (DASHBOARD_INTELLIGENCE, one per open position), and
-// the Capital Allocator ("What to buy", computed on the server). Recommendation
-// only: nothing here stages or sends an order.
+// the Capital Allocator: a deposit becomes fully formed BUY setups (volatility
+// stop, 2R target) that the server stages into Opportunities → Approvals;
+// nothing executes until they are approved there.
 // Exposes window.SignalDesk.portfolioPilot.
 (() => {
   const SD = window.SignalDesk;
@@ -104,10 +105,25 @@
     ]);
   }
 
+  // What the server did with each buy: staged (size, stop, target) or why not.
+  function setupCell(pr, r) {
+    const s = (pr.setups || []).find((x) => x.asset === r.asset);
+    if (!s) return el('td', { className: 'pf-muted', textContent: r.recommendedBuyAmount > 0 ? '—' : 'Nothing to buy' });
+    if (!s.staged) return el('td', { className: 'pf-muted', textContent: `Not staged: ${s.reason}` });
+    const p = { market: r.asset.includes('-') ? 'crypto' : 'stocks', entryPrice: s.entryPrice };
+    return el('td', { className: 'text-long', textContent: `Staged ${money(s.notional)} · stop ${price(s.invalidation, p)} · no fixed target${s.cappedByAmount ? '' : ' (risk-limited)'}` });
+  }
+
+  function openApprovals(opts) {
+    const b = el('button', { type: 'button', className: 'btn btn-solid', textContent: 'Open Approvals →' });
+    b.onclick = () => { SD.opportunities.openApprovals(); window.location.hash = '#opportunities'; opts.rerender(); };
+    return b;
+  }
+
   function allocator(opts) {
     const input = el('input', { type: 'number', id: 'pf-alloc-amount', className: 'scan-input pf-alloc-input', min: '1', step: 'any', inputMode: 'decimal', placeholder: 'Deposit Amount (e.g., $1000)', value: alloc.amount });
     input.oninput = () => { alloc.amount = input.value; };
-    const go = el('button', { type: 'submit', className: 'btn btn-solid', textContent: alloc.pending ? 'Calculating…' : 'Calculate', disabled: alloc.pending });
+    const go = el('button', { type: 'submit', className: 'btn btn-solid', textContent: alloc.pending ? 'Generating…' : 'Generate buy setups', disabled: alloc.pending });
     const form = el('form', { className: 'pf-alloc-form', noValidate: true }, [input, go]);
     form.onsubmit = (e) => {
       e.preventDefault();
@@ -117,29 +133,33 @@
       Object.assign(alloc, { pending: true, error: '' });
       opts.send({ type: 'CALCULATE_ALLOCATION', amount });
       clearTimeout(timer);
-      timer = setTimeout(() => { allocationResult({ error: 'No response from the server. Try again.' }); opts.rerender(); }, 10000);
+      timer = setTimeout(() => { allocationResult({ error: 'No response from the server. Try again.' }); opts.rerender(); }, 30000);
       return opts.rerender();
     };
     const pr = alloc.proposal;
     const fmtPct = (x) => `${(x * 100).toFixed(1)}%`;
     return el('section', { className: 'pf-card pf-alloc' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Capital allocator — What to buy' })]),
-      el('p', { className: 'pf-sub', textContent: 'Buy-only rebalance of a deposit toward the pilot target model (BTC 40% · ETH 30% · SPY 30%), at live prices. Suggestions only; nothing is staged.' }),
+      el('p', { className: 'pf-sub', textContent: 'Buy-only rebalance of a deposit toward the pilot target model (BTC 40% · ETH 30% · SPY 30%), at live prices. '
+        + 'Each buy becomes a setup with a volatility stop (no fixed take-profit: core holdings exit at the stop or an approved Pilot sell/trim), sized by the risk engine (never above its allocation) and sent to Opportunities → Approvals. '
+        + 'Generating again replaces Pilot buys still waiting.' }),
       form,
       ...(alloc.error ? [el('p', { className: 'pf-error', textContent: alloc.error })] : []),
       ...(pr ? [
         el('p', { className: 'pf-text' }, ['Pilot holdings ', el('strong', { textContent: money(pr.portfolioValue) }), ' + deposit ', el('strong', { textContent: money(pr.deposit) }),
           ' → ', el('strong', { textContent: money(pr.newTotal) }), pr.unallocated > 0 ? ` · ${money(pr.unallocated)} left unallocated` : '']),
         el('table', { className: 'data-table pf-table pf-alloc-table' }, [
-          el('thead', {}, el('tr', {}, ['Asset', 'Current', 'Target', 'Buy', '≈ Units'].map((h, i) => el('th', { textContent: h, className: i ? 'num' : '' })))),
+          el('thead', {}, el('tr', {}, ['Asset', 'Current', 'Target', 'Buy', '≈ Units', 'Setup'].map((h, i) => el('th', { textContent: h, className: i && i < 5 ? 'num' : '' })))),
           el('tbody', {}, pr.recommendations.map((r) => el('tr', {}, [
             el('td', {}, el('span', { className: 'asset', textContent: r.asset })),
             el('td', { className: 'num', textContent: fmtPct(r.currentWeight) }),
             el('td', { className: 'num', textContent: fmtPct(r.targetWeight) }),
             el('td', { className: `num ${r.recommendedBuyAmount > 0 ? 'text-long' : ''}`, textContent: money(r.recommendedBuyAmount) }),
             el('td', { className: 'num', textContent: r.estimatedUnits > 0 ? r.estimatedUnits.toFixed(r.estimatedUnits < 1 ? 6 : 4) : '—' }),
+            setupCell(pr, r),
           ]))),
         ]),
+        ...((pr.setups || []).some((x) => x.staged) ? [openApprovals(opts)] : []),
         ...(pr.notes && pr.notes.length ? [el('ul', { className: 'pf-notes' }, pr.notes.map((n) => el('li', { textContent: n })))] : []),
       ] : []),
     ]);

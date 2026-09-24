@@ -18,6 +18,7 @@ const { startPipeline, stopPipeline, runPipeline, getScanStatus, getProximity } 
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const scanLog = require('./execution/scan-log');
+const macro = require('./connectors/macro-events');
 const watchlist = require('./execution/watchlist');
 const prices = require('./market/latest-prices');
 const referencePrices = require('./market/reference-prices');
@@ -27,14 +28,18 @@ const { getHistory } = require('./connectors/history-bars');
 const brokerSync = require('./connectors/broker-sync');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
-// Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
-const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls } = require('./security/access-policy');
+// Zero trust: every request needs the access token (sign-in cookie), even from
+// 127.0.0.1 (a tunnel arrives from localhost). Local-only listener by default;
+// LAN_ACCESS=true opens it to the Wi-Fi. See security/access-policy.js.
+const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = require('./security/access-policy');
+const authGate = require('./security/auth-gate');
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
+authGate.install(app, PORT); // /login is the only page served without a session
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
 app.get('/api/health', (req, res) => {
@@ -105,6 +110,8 @@ wss.on('connection', (ws) => {
   send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
   send(ws, 'SCAN_STATUS', getScanStatus());
   send(ws, 'SCAN_LOG', scanLog.snapshot());
+  send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
+  send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());
   send(ws, 'TRIGGER_PROXIMITY', getProximity());
   send(ws, 'BROKER_HOLDINGS', brokerSync.getSnapshot()); // last Sync Broker result (never auto-fetched)
@@ -152,8 +159,21 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
+// Startup banner: where to open the terminal. APP_PUBLIC_URL is the address the
+// alert emails link to; it is only printed (no secrets in it).
+function banner() {
+  const local = `http://127.0.0.1:${PORT}/`;
+  const pub = String(process.env.APP_PUBLIC_URL || '').trim();
+  const rows = [`Local:   ${local}`, pub ? `Public:  ${pub}  (alert email links)` : 'Public:  APP_PUBLIC_URL not set (alert emails link to the local URL)',
+    `Sign in: ${local}login  (token: LAN_ACCESS_TOKEN in .env)`];
+  if (generatedToken()) rows.push(`No valid token in .env: this run's token is ${generatedToken()}`);
+  const w = Math.max(...rows.map((r) => r.length), 30) + 2;
+  console.log(`\n+${'-'.repeat(w)}+\n| ${'SignalDesk is running'.padEnd(w - 1)}|\n${rows.map((r) => `| ${r.padEnd(w - 1)}|`).join('\n')}\n+${'-'.repeat(w)}+\n`);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`SignalDesk-V2 listening on http://${HOST}:${PORT}`);
+  banner();
   if (LAN_ACCESS) {
     const urls = lanUrls(PORT);
     console.warn('[security] LAN ACCESS ON: devices on your network can reach this terminal with the access token.');

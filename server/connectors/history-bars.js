@@ -16,6 +16,8 @@ const TIMEFRAMES = Object.freeze({
   '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30 },
   '4h': { alpaca: '4Hour', coinbase: 'ONE_HOUR', sec: 14400, lookbackDays: 180, group: 4 },
   '1d': { alpaca: '1Day', coinbase: 'ONE_DAY', sec: 86400, lookbackDays: 200 },
+  // Deeper daily history for 200-day averages (Portfolio Pilot); not a chart timeframe.
+  '1d-long': { alpaca: '1Day', coinbase: 'ONE_DAY', sec: 86400, lookbackDays: 420, limit: 260 },
 });
 const COINBASE_MAX_CANDLES = 350;
 
@@ -48,7 +50,7 @@ async function fetchStock(symbol, tf) {
   const headers = alpacaHeaders();
   if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
   const start = new Date(Date.now() - tf.lookbackDays * 86400000).toISOString();
-  const query = `timeframe=${tf.alpaca}&limit=${LIMIT}&feed=iex&sort=desc&start=${encodeURIComponent(start)}`;
+  const query = `timeframe=${tf.alpaca}&limit=${tf.limit || LIMIT}&feed=iex&sort=desc&start=${encodeURIComponent(start)}`;
   const r = await getJson(`${alpacaData()}/v2/stocks/${encodeURIComponent(symbol)}/bars?${query}`, headers);
   if (!r.ok) return r;
   const bars = (r.json.bars || []).map((b) => ({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
@@ -58,7 +60,7 @@ async function fetchStock(symbol, tf) {
 async function fetchCrypto(symbol, tf) {
   const group = tf.group || 1;
   const baseSec = tf.sec / group;
-  const count = Math.min(LIMIT * group, COINBASE_MAX_CANDLES);
+  const count = Math.min((tf.limit || LIMIT) * group, COINBASE_MAX_CANDLES);
   const end = Math.floor(Date.now() / 1000);
   const query = `start=${end - count * baseSec}&end=${end}&granularity=${tf.coinbase}&limit=${count}`;
   const r = await getJson(`${coinbaseBase()}/api/v3/brokerage/market/products/${encodeURIComponent(symbol)}/candles?${query}`);
@@ -82,12 +84,12 @@ function regroup(bars, tfSec) {
 }
 
 // Oldest first, one bar per timestamp, finite prices only.
-function clean(bars) {
+function clean(bars, limit = LIMIT) {
   const byTime = new Map();
   for (const b of bars) {
     if ([b.time, b.open, b.high, b.low, b.close].every(Number.isFinite) && b.close > 0) byTime.set(b.time, b);
   }
-  return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-LIMIT);
+  return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-limit);
 }
 
 // { ok: true, bars: [{ time (unix seconds), open, high, low, close, volume }] } or { ok: false, status, error }.
@@ -101,7 +103,7 @@ async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
   if (hit && now - hit.at < CACHE_MS) return { ok: true, bars: hit.bars.map((b) => ({ ...b })) };
   const result = isCrypto(s) ? await fetchCrypto(s, tf) : await fetchStock(s, tf);
   if (!result.ok) return result;
-  const bars = clean(result.bars);
+  const bars = clean(result.bars, tf.limit || LIMIT);
   cache.set(key, { at: now, bars });
   return { ok: true, bars: bars.map((b) => ({ ...b })) };
 }

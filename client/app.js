@@ -5,29 +5,17 @@
   const { $ } = SD.ui;
   const DEFAULT_HOST = '127.0.0.1:3000'; // used when the page is opened from disk
 
-  // LAN access token (phone on Wi-Fi): arrives once as ?token=..., is kept on this
-  // device, and is removed from the address bar so it isn't left on screen.
-  const TOKEN_KEY = 'signaldesk.accessToken';
-  const accessToken = (() => {
-    const params = new URLSearchParams(location.search);
-    const fromUrl = params.get('token');
-    if (fromUrl) {
-      try { localStorage.setItem(TOKEN_KEY, fromUrl); } catch { /* storage blocked: use for this session */ }
-      params.delete('token');
-      const query = params.toString();
-      history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
-      return fromUrl;
-    }
-    try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-  })();
-  const isLocalPage = ['localhost', '127.0.0.1', ''].includes(location.hostname);
-  const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || DEFAULT_HOST}/ws`
-    + (accessToken ? `?token=${encodeURIComponent(accessToken)}` : '');
-  // Read-only HTTP API (chart history). LAN devices send the token as a header.
+  // Zero-trust sign-in: the server's /login sets an HttpOnly session cookie that
+  // the page, the API and the WebSocket all carry automatically. The token is
+  // never kept in page storage (older builds stored it: removed here).
+  try { localStorage.removeItem('signaldesk.accessToken'); } catch { /* storage blocked */ }
+  const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || DEFAULT_HOST}/ws`;
   const API_BASE = location.protocol === 'file:' ? `http://${DEFAULT_HOST}` : '';
+  const toLogin = () => { if (location.protocol !== 'file:') location.href = '/login'; };
   SD.api = {
     async getJson(path) {
-      const res = await fetch(`${API_BASE}${path}`, { headers: accessToken ? { 'X-SignalDesk-Token': accessToken } : {} });
+      const res = await fetch(`${API_BASE}${path}`, { credentials: 'same-origin' });
+      if (res.status === 401) { toLogin(); throw new Error('sign in required'); }
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
       return body;
@@ -41,7 +29,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, scanLog: [], holdings: null, universe: null, proximity: null, saved: [],
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, scanLog: [], pilotActions: [], macro: [], holdings: null, universe: null, proximity: null, saved: [],
     // Venue filter shared by Today and Portfolio (lib/venue.js); remembered per device.
     activeVenue: (() => { try { return localStorage.getItem(VENUE_KEY) || 'paper'; } catch { return 'paper'; } })() };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
@@ -60,6 +48,8 @@
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
     SCAN_LOG: (log) => { state.scanLog = log || []; }, // live scanner log (Scanner tab), once per pass
+    PILOT_ACTIONS: (list) => { state.pilotActions = list || []; }, // Portfolio Pilot SELL / TRIM (Approvals)
+    MACRO_EVENTS: (list) => { state.macro = list || []; }, // FOMC / CPI / FDA calendar (News & Catalysts)
     NEWS_SENTIMENT: (r) => SD.sentiment.received(r), // 0-100 gauge for the charted symbol
     SAVED_SETUPS: (list) => { state.saved = list || []; }, // bookmarks (Opportunities → Saved)
     UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 80 monitored symbols + names
@@ -76,7 +66,10 @@
   }
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
-  function showTab(name) {
+  // Accepts "opportunities" or a deep link "opportunities?tab=approvals" (alert emails).
+  function showTab(hash) {
+    const [name, query] = String(hash || '').split('?');
+    if (name === 'opportunities' && new URLSearchParams(query || '').get('tab') === 'approvals') SD.opportunities.openApprovals();
     const tab = TABS.includes(name) ? name : DEFAULT_TAB;
     currentTab = tab;
     refreshView();
@@ -125,6 +118,7 @@
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
+    LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
   };
 
@@ -148,10 +142,9 @@
       if (update) { update(msg.payload); refreshView(); }
     });
     ws.addEventListener('close', () => {
-      // A LAN page without a token will always be refused: say why instead of "Offline".
-      setConn('closed', !isLocalPage && !accessToken
-        ? 'No access token: open the link printed by the server'
-        : `Offline · retry ${backoff / 1000}s`);
+      // Refused because the sign-in expired or is missing? Then go sign in.
+      fetch('/api/health', { credentials: 'same-origin', cache: 'no-store' }).then((r) => { if (r.status === 401) toLogin(); }).catch(() => {});
+      setConn('closed', `Offline · retry ${backoff / 1000}s`);
       refreshView(); // disables the action buttons while offline
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);

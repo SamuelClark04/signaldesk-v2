@@ -193,3 +193,31 @@
 .opp-pos-pnl { font: 12px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .opp-heat.is-position.is-live { background: rgba(251, 113, 133, 0.14); color: var(--short); }
 .opp-log-link { align-self: flex-start; margin-top: 4px; font-size: 12px; text-align: left; }
+
+/* ---------- Approvals tab (Phase 43) ---------- */
+.opp-subtab-count { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--solid); color: #fff; font: 600 11px/18px var(--font-mono); }
+.apv { display: flex; flex-direction: column; gap: 10px; }
+.apv-bar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.apv-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-left: 3px solid var(--long); border-radius: 8px; background: var(--surface); }
+.apv-card.is-sell, .apv-card.is-trim { border-left-color: var(--warn); }
+.apv-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.apv-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.apv-title strong { font: 600 15px var(--font-mono); color: var(--text); }
+.apv-title span { color: var(--text-muted); font-size: 12px; }
+.apv-expiry { color: var(--text-faint); font: 11px var(--font-mono); }
+.apv-expiry.is-soon { color: var(--warn); }
+.apv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.apv-kv { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.apv-kv span { color: var(--text-faint); font-size: 11px; }
+.apv-kv strong { font: 600 13px var(--font-mono); color: var(--text); overflow-wrap: anywhere; }
+.apv-note { margin: 0; color: var(--warn); font-size: 12px; }
+.apv-thesis { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.apv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.apv-approve { border-color: var(--long); background: var(--long); color: #04111d; font-weight: 700; }
+.apv-approve.is-live { border-color: var(--short); background: var(--short); color: #fff; }
+.apv-approve.is-sell { border-color: var(--warn); background: var(--warn); color: #1a1200; }
+.apv-approve:disabled { background: var(--surface-2); border-color: var(--border-strong); color: var(--text-muted); }
+.apv-cats { display: flex; gap: 6px; flex-wrap: wrap; }
+.apv-cat { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text-muted); font: 600 11px/18px var(--font-mono); cursor: help; }
+.apv-cat.is-fomc, .apv-cat.is-cpi { border-color: rgba(251, 191, 36, 0.5); color: var(--warn); }
+.apv-cat.is-fda { border-color: rgba(56, 189, 248, 0.5); color: var(--accent); }

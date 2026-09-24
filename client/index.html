@@ -128,6 +128,17 @@
 
           <p class="settings-facts" id="settings-facts"></p>
         </div>
+
+        <div class="panel settings-danger">
+          <div class="panel-header">
+            <h2 class="panel-title">Danger zone</h2>
+            <span class="panel-hint">Paper account only; LIVE and adopted broker positions are never touched</span>
+          </div>
+          <p class="settings-facts">Reset Paper Ledger removes every paper position, closed paper trade and journal entry, all staged setups and Pilot proposals,
+            so the paper account starts again at its bankroll with P&amp;L at zero. Settings and bookmarks stay. A backup copy of the ledger file is saved first.</p>
+          <button class="btn btn-danger" id="settings-reset" type="button">Reset Paper Ledger</button>
+          <span class="settings-status" id="settings-reset-status" role="status"></span>
+        </div>
       </section>
     </main>
   </div>
@@ -154,6 +165,7 @@
   <script src="views/opportunities-scanner.js"></script>
   <script src="views/opportunities-saved.js"></script>
   <script src="views/opportunities-rail.js"></script>
+  <script src="views/opportunities-approvals.js"></script>
   <script src="views/opportunities.js"></script>
   <script src="views/portfolio-metrics.js"></script>
   <script src="views/portfolio-table.js"></script>

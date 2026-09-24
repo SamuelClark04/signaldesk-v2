@@ -21,6 +21,8 @@ const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
 const optionsData = require('../connectors/options-data');
+const macro = require('../connectors/macro-events');
+const { reviewHoldings } = require('./pilot-handler');
 
 const PIPELINE_INTERVAL_MS = 60000;
 
@@ -94,6 +96,9 @@ function notify(order) {
 
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
+  // Macro/FDA calendar (re-read every few hours): every setup is tagged with the
+  // scheduled events inside its expected hold (candidate.catalysts).
+  try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
   for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
@@ -109,6 +114,7 @@ async function pipelinePass() {
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
+    candidate.catalysts = macro.catalystsFor(candidate);
     const capital = await sizingBankroll(candidate.market, settings);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.
@@ -183,6 +189,8 @@ async function pipelinePass() {
     console.error('[pipeline] position monitor failed:', err.message);
   }
   if (positionsChanged) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+  // Portfolio Pilot defense: SELL under the 200-day SMA, TRIM when far extended (Approvals queue).
+  try { await reviewHoldings(broadcast); } catch (err) { console.error('[pipeline] pilot review failed:', err.message); }
   if (journalChanged) broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
 
   // "Heating up": distance to each strategy's trigger (Market Watch filter).

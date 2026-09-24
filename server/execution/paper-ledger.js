@@ -11,6 +11,7 @@ const store = require('./ledger-store');
 const { grossPnl, optionsSaleValue, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
 const { freshQuote } = require('../connectors/options-data');
 const { optionMark } = require('./option-marks');
+const extras = require('./ledger-extras');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -21,8 +22,9 @@ const discardedOrders = [];
 // Bookmarks ("Saved" tab): snapshots of setups, NOT orders. Kept apart from the
 // order lists, so they never count as a known id for staging.
 const savedSetups = [];
-const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups };
-const MAX_SAVED = 100;
+// Portfolio Pilot SELL / TRIM proposals (Approvals queue); see ledger-extras.js.
+const pilotActions = [];
+const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions };
 
 function findIndex(list, candidateId) {
   return list.findIndex((o) => o.id === candidateId);
@@ -127,8 +129,30 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
   return { ...entry };
 }
 
+// Partial exit (Portfolio Pilot TRIM): `fraction` of a PAPER position is split
+// off and closed through closePosition (same fees, P/L and journal entry, id
+// "<id>:trim:<ms>"); the rest stays open with its size and dollar risk reduced.
+function reducePosition(candidateId, fraction, exitPrice, exitReason) {
+  const pos = activePositions.find((p) => p.id === candidateId);
+  if (!pos) throw new Error(`paper-ledger: no open position ${candidateId}`);
+  if (pos.market === 'options') throw new Error('paper-ledger: options positions cannot be reduced');
+  if (!(fraction > 0 && fraction < 1)) throw new Error('paper-ledger: fraction must be between 0 and 1');
+  const raw = pos.positionSize * fraction;
+  const q = pos.market === 'stocks' ? Math.floor(raw) : Math.floor(raw * 1e8) / 1e8;
+  if (!(q > 0) || q >= pos.positionSize) throw new Error('TRIM_TOO_SMALL: the position is too small to trim');
+  const share = q / pos.positionSize;
+  const part = { ...pos, id: `${pos.id}:trim:${Date.now()}`, parentId: pos.id, positionSize: q, dollarRisk: pos.dollarRisk * share };
+  pos.positionSize -= q;
+  pos.dollarRisk -= part.dollarRisk;
+  activePositions.push(part);
+  return closePosition(part.id, exitPrice, exitReason);
+}
+
 // Nearest target in the trade's favor (T1). For now T1 closes the whole position.
+// Portfolio Pilot core holdings never exit at a target (even older ones staged
+// with one): only their stop, or an approved Pilot SELL / TRIM, closes them.
 function firstTarget(pos) {
+  if (pos.strategyId === 'portfolio-pilot') return null;
   const prices = (pos.targets || []).map((t) => t.price).filter((p) => p > 0);
   if (!prices.length) return null;
   return pos.direction === 'short' ? Math.max(...prices) : Math.min(...prices);
@@ -223,27 +247,6 @@ function releaseAdopted(candidateId) {
   return { ...released };
 }
 
-// ---------- Saved setups (bookmarks) ----------
-// The snapshot is copied from the ledger's OWN pending order (never from the
-// client), so a bookmark always reflects what the risk engine actually approved.
-function saveSetup(candidateId) {
-  const order = pendingOrders.find((o) => o.id === candidateId);
-  if (!order) throw new Error('SAVE_NOT_PENDING: only setups in the approvals queue can be saved');
-  if (savedSetups.some((s) => s.id === candidateId)) return getSavedSetups();
-  savedSetups.unshift({ ...order, status: 'saved', savedAt: Date.now() });
-  if (savedSetups.length > MAX_SAVED) savedSetups.length = MAX_SAVED; // oldest bookmarks drop off
-  store.save();
-  return getSavedSetups();
-}
-
-function unsaveSetup(candidateId) {
-  const i = findIndex(savedSetups, candidateId);
-  if (i === -1) throw new Error(`no saved setup ${candidateId}`);
-  savedSetups.splice(i, 1);
-  store.save();
-  return getSavedSetups();
-}
-
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
@@ -252,16 +255,17 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: pric
 // and real option contracts their current value (optionMark, option-marks.js).
 const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market), optionMark: optionMark(p) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
-const getSavedSetups = () => savedSetups.map((s) => ({ ...s }));
 
 // Hand the lists to the store once: it restores them from disk, then saves on every change.
 store.attach(LISTS);
+extras.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions, save: store.save, backup: store.backup });
 
 module.exports = {
   stageOrder,
   executeOrder,
   discardOrder,
   closePosition,
+  reducePosition,
   monitorPositions,
   syncLiveFill,
   voidLivePosition,
@@ -270,9 +274,14 @@ module.exports = {
   getPendingOrders,
   getActivePositions,
   getTradeJournal,
-  saveSetup,
-  unsaveSetup,
-  getSavedSetups,
+  saveSetup: extras.saveSetup,
+  unsaveSetup: extras.unsaveSetup,
+  getSavedSetups: extras.getSavedSetups,
+  getPilotActions: extras.getPilotActions,
+  syncPilotActions: extras.syncPilotActions,
+  resolvePilotAction: extras.resolvePilotAction,
+  findPilotAction: extras.findPilotAction,
+  resetPaper: extras.resetPaper,
   // Settings live in the store; re-exported so callers keep one ledger API.
   // Mark-to-market for monitoring (same math as closePosition, before fees).
   unrealizedPnl: (position, price) => grossPnlAt(position, price).grossPnl,

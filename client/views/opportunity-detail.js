@@ -47,8 +47,9 @@
 
   // A complete algorithmic setup: levels AND server-sized risk. Market Watch (or
   // anything missing these) is display-only: "—" everywhere, nothing executable.
+  // Portfolio Pilot core holdings have no take-profit by design (stop + Pilot sell/trim).
   const hasLevels = (o) => !o.isWatch && !!o.id && !!o.entryZone && o.invalidation > 0
-    && Array.isArray(o.targets) && o.targets.length > 0 && o.positionSize > 0;
+    && Array.isArray(o.targets) && (o.targets.length > 0 || o.strategyId === 'portfolio-pilot') && o.positionSize > 0;
 
   const WATCH_TEXT = 'Market Watch Mode: Waiting for algorithmic setups.';
 
@@ -257,6 +258,7 @@
         el('span', { className: `opp-pill${ready ? ' is-ready' : ''}`, textContent: ready ? 'Ready for review' : 'Waiting for setup' }),
       ]),
       ...[ready ? holdChip(o) : null].filter(Boolean),
+      ...(ready ? SD.oppApprovals.catalystChips(o.catalysts) : []), // FOMC / CPI / FDA inside the expected hold
       ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),
       SD.sentiment.badge(o.asset, { compact: true }),
       el('div', { className: 'opp-kv-group' }, [

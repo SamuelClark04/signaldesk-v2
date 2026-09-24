@@ -176,6 +176,26 @@
     renderFacts();
   }
 
+  // Paper reset: typed confirmation, then the server wipes the paper book.
+  $('settings-reset').addEventListener('click', () => {
+    const s = $('settings-reset-status');
+    if (!transport.isOnline()) { s.textContent = 'Offline: cannot reach the server.'; return; }
+    const typed = window.prompt('Reset the PAPER ledger?\n\nThis deletes every paper position, closed paper trade and journal entry, all staged setups '
+      + 'and Pilot proposals. LIVE/adopted positions are kept. A backup file is saved on the server.\n\nType RESET to confirm:');
+    if (typed === null) return;
+    if (typed.trim() !== 'RESET') { s.textContent = 'Not reset: the confirmation word did not match.'; s.className = 'settings-status is-error'; return; }
+    s.textContent = 'Resetting…'; s.className = 'settings-status';
+    transport.send({ type: 'RESET_LEDGER', confirm: 'RESET' });
+  });
+  function resetDone(r) {
+    const s = $('settings-reset-status');
+    if (!r || !r.ok) { s.textContent = `Not reset: ${(r && r.error) || 'no reply'}`; s.className = 'settings-status is-error'; return; }
+    const n = r.removed;
+    s.textContent = `Paper ledger reset: removed ${n.positions} position(s), ${n.trades} trade(s), ${n.pending} staged setup(s).`
+      + `${r.keptLive.positions ? ` Kept ${r.keptLive.positions} LIVE position(s).` : ''} Backup saved on the server.`;
+    s.className = 'settings-status is-ok';
+  }
+
   $('settings-form').addEventListener('submit', saveForm);
   for (const m of MODE_SELECTS) $(m.id).addEventListener('change', () => changeMode(m));
   renderFacts();
@@ -186,5 +206,6 @@
     init: (t) => { transport = t; },
     render,
     error,
+    resetDone,
   };
 })();

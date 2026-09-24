@@ -4,8 +4,9 @@
 // Each headline links to the article (http/https only, new tab, no referrer)
 // and carries SignalDesk's reading of it (bullish / bearish / neutral), so the
 // score can be traced to the actual events. A setup's own catalyst headline
-// (equity-day news breakouts) is shown first.
-// Exposes window.SignalDesk.newsPanel: { render(o) }.
+// (equity-day news breakouts) is shown first, then the scheduled catalysts
+// (FOMC / CPI / FDA, server/connectors/macro-events.js) for the next 30 days.
+// Exposes window.SignalDesk.newsPanel: { render(o, state) }.
 (() => {
   const SD = window.SignalDesk;
   const { el, age } = SD.ui;
@@ -35,16 +36,34 @@
       + `${d.headlines && d.headlines.length ? ` · the ${d.headlines.length} most recent below` : ''}`;
   }
 
-  function render(o) {
+  // Scheduled events for this symbol: every macro event, its own FDA dates, and
+  // FDA committee meetings for healthcare names (server: macro-events.appliesTo).
+  function scheduled(o, state) {
+    const events = ((state && state.macro) || []).filter((e) => e.daysAway <= 30 && (e.scope === 'macro' || e.symbol === o.asset || (e.symbols || []).includes(o.asset)));
+    const tagged = new Set((o.catalysts || []).map((c) => `${c.type}:${c.date}`));
+    return el('div', { className: 'news-sched' }, [
+      el('h4', { className: 'opp-section', textContent: 'Scheduled catalysts (next 30 days)' }),
+      events.length ? el('ul', { className: 'news-sched-list' }, events.map((e) => el('li', { className: `news-sched-item${tagged.has(`${e.type}:${e.date}`) ? ' is-tagged' : ''}` }, [
+        el('span', { className: `apv-cat is-${e.type.toLowerCase()}`, textContent: e.type }),
+        el('span', { textContent: `${e.title} · ${new Date(`${e.date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}`
+          + `${e.time ? ` ${e.time}` : ''} · ${e.daysAway === 0 ? 'today' : `in ${e.daysAway} days`}` }),
+        el('span', { className: 'news-meta', textContent: tagged.has(`${e.type}:${e.date}`) ? 'inside this setup’s hold' : e.source }),
+      ]))) : el('p', { className: 'sa-muted', textContent: 'No FOMC, CPI or FDA events in the next 30 days.' }),
+    ]);
+  }
+
+  function render(o, state) {
     const d = SD.sentiment.data(o.asset);
     const cat = o.catalyst && o.catalyst.headline
       ? [el('div', { className: 'news-catalyst' }, [el('span', { className: 'sa-muted', textContent: 'Setup catalyst' }),
         el('strong', { textContent: o.catalyst.headline })])] : [];
-    if (!d) return [...cat, el('p', { className: 'sa-muted', textContent: 'Loading headlines…' })];
-    if (!d.ok) return [...cat, el('p', { className: 'sa-muted', textContent: `News unavailable: ${d.error}` })];
+    const sched = scheduled(o, state);
+    if (!d) return [...cat, sched, el('p', { className: 'sa-muted', textContent: 'Loading headlines…' })];
+    if (!d.ok) return [...cat, sched, el('p', { className: 'sa-muted', textContent: `News unavailable: ${d.error}` })];
     const list = d.headlines || [];
     return [
       ...cat,
+      sched,
       el('div', { className: 'news-head' }, [SD.sentiment.badge(o.asset, { compact: true }), el('p', { className: 'sa-muted', textContent: counts(d) })]),
       list.length
         ? el('ol', { className: 'news-list' }, list.map(headline))

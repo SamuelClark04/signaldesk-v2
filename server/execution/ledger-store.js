@@ -103,7 +103,7 @@ function load() {
 }
 
 const LIST_KEYS = ['pendingOrders', 'activePositions', 'tradeJournal', 'discardedOrders'];
-const OPTIONAL_LIST_KEYS = ['savedSetups'];
+const OPTIONAL_LIST_KEYS = ['savedSetups', 'pilotActions'];
 
 // Called once by the ledger at startup: remembers its lists and restores from disk.
 // Checked BEFORE touching the file, so a wiring mistake can never cause a good
@@ -131,4 +131,13 @@ function updateSettings(newSettings) {
   return getSettings();
 }
 
-module.exports = { attach, save, getSettings, updateSettings };
+// Copy of the current state file (before a destructive change such as a paper
+// reset). Returns the backup path, or null when there is no file yet.
+function backup(tag) {
+  if (!fs.existsSync(STATE_PATH)) return null;
+  const dest = `${STATE_PATH}.${tag}-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  fs.copyFileSync(STATE_PATH, dest);
+  return dest;
+}
+
+module.exports = { attach, save, backup, getSettings, updateSettings };

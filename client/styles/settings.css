@@ -66,3 +66,8 @@
   font-size: 12px;
 }
 .settings-facts strong { color: var(--text-muted); font-family: var(--font-mono); font-weight: 500; }
+
+/* ---------- Danger zone (Phase 44) ---------- */
+.settings-danger { border-color: rgba(251, 113, 133, 0.45); }
+.btn-danger { border-color: var(--short); background: var(--short); color: #fff; font-weight: 700; }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
