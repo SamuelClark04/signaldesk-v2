@@ -13,6 +13,7 @@ const alpacaStocks = require('./connectors/alpaca-stock-socket');
 const alpacaNews = require('./connectors/alpaca-news-socket');
 const coinbase = require('./connectors/coinbase-socket');
 const equityDay = require('./strategies/1-equity-day');
+const optionsSystem = require('./strategies/5-options-system');
 const { processCandidate } = require('./risk/risk-engine');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
@@ -67,16 +68,40 @@ const heartbeat = setInterval(() => {
   }
 }, 30000);
 
+// Each strategy runs isolated: one failing never blocks the others' candidates.
+const STRATEGIES = [
+  ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
+  ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
+];
+
+async function collectCandidates() {
+  const all = [];
+  for (const [name, generate] of STRATEGIES) {
+    try {
+      all.push(...(await generate()));
+    } catch (err) {
+      console.error(`[pipeline] strategy ${name} failed:`, err.message);
+    }
+  }
+  return all;
+}
+
 // One pipeline pass. Strategies only propose; the risk engine decides; only
 // the ledger holds state. A failure on one candidate never stops the others.
-function runPipeline() {
-  const counts = { generated: 0, approved: 0, staged: 0 };
-  let candidates = [];
+let pipelineRunning = false;
+async function runPipeline() {
+  if (pipelineRunning) return console.warn('[pipeline] previous pass still running; skipping this tick');
+  pipelineRunning = true;
   try {
-    candidates = equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext());
-  } catch (err) {
-    console.error('[pipeline] strategy equity-day failed:', err.message);
+    return await pipelinePass();
+  } finally {
+    pipelineRunning = false;
   }
+}
+
+async function pipelinePass() {
+  const counts = { generated: 0, approved: 0, staged: 0 };
+  const candidates = await collectCandidates();
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
@@ -92,7 +117,7 @@ function runPipeline() {
       broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
     } catch (err) {
-      // Expected when the same breakout is re-proposed on the next tick (duplicate id).
+      // Expected when the same setup is re-proposed on the next tick (duplicate id).
       console.log(`[pipeline] not staged ${result.id}: ${err.message}`);
     }
   }
@@ -121,7 +146,9 @@ function start() {
   alpacaStocks.init({ symbols: STOCK_WATCHLIST });
   alpacaNews.init({ symbols: STOCK_WATCHLIST });
   coinbase.init({ symbols: CRYPTO_WATCHLIST });
-  pipelineTimer = setInterval(runPipeline, PIPELINE_INTERVAL_MS);
+  pipelineTimer = setInterval(() => {
+    runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
+  }, PIPELINE_INTERVAL_MS);
   console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${BANKROLL}`);
 }
 
