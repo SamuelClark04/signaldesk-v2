@@ -8,7 +8,7 @@ const path = require('path');
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
 const { RISK_PROFILES, DEFAULT_PROFILE, riskPctFor } = require('../risk/risk-profiles');
 
-const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
+const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: older files load with none)
 
 // Editable settings: default and accepted values for each key. Execution modes
 // default to 'paper', and a missing/invalid saved mode falls back to 'paper', so
@@ -82,10 +82,13 @@ function load() {
   if (!fs.existsSync(STATE_PATH)) return;
   try {
     const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    // Core lists must be present; optional lists added later (savedSetups) may be
+    // missing from older files, which then load with an empty list, never as corrupt.
     for (const key of Object.keys(lists)) {
+      if (state[key] === undefined && OPTIONAL_LIST_KEYS.includes(key)) continue;
       if (!Array.isArray(state[key])) throw new Error(`"${key}" is missing or not an array`);
     }
-    for (const [key, list] of Object.entries(lists)) list.push(...state[key]);
+    for (const [key, list] of Object.entries(lists)) if (Array.isArray(state[key])) list.push(...state[key]);
     restoreSettings(state.settings);
     const { pendingOrders, activePositions, tradeJournal, discardedOrders } = lists;
     console.log(`[ledger] restored ${pendingOrders.length} pending, ${activePositions.length} open, `
@@ -98,6 +101,7 @@ function load() {
 }
 
 const LIST_KEYS = ['pendingOrders', 'activePositions', 'tradeJournal', 'discardedOrders'];
+const OPTIONAL_LIST_KEYS = ['savedSetups'];
 
 // Called once by the ledger at startup: remembers its lists and restores from disk.
 // Checked BEFORE touching the file, so a wiring mistake can never cause a good

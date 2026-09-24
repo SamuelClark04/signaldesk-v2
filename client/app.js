@@ -41,7 +41,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null, universe: null, proximity: null,
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null, universe: null, proximity: null, saved: [],
     // Venue filter shared by Today and Portfolio (lib/venue.js); remembered per device.
     activeVenue: (() => { try { return localStorage.getItem(VENUE_KEY) || 'paper'; } catch { return 'paper'; } })() };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
@@ -59,6 +59,7 @@
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
+    SAVED_SETUPS: (list) => { state.saved = list || []; }, // bookmarks (Opportunities → Saved)
     UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 80 monitored symbols + names
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
     BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)

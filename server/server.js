@@ -95,6 +95,7 @@ wss.on('connection', (ws) => {
   send(ws, 'orders:snapshot', ledger.getPendingOrders());
   send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
+  send(ws, 'SAVED_SETUPS', ledger.getSavedSetups());
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
   send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
   send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());

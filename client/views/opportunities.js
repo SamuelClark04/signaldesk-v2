@@ -86,7 +86,7 @@
   function actionFailed({ type, id, error }) {
     inFlight.delete(id);
     const who = (mounted && mounted.state.pending.find((o) => o.id === id)) || { asset: String(id).split(':')[2] || id };
-    showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
+    showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close', SAVE_SETUP: 'Save', UNSAVE_SETUP: 'Remove bookmark' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
   }
 
   // ---------- Rail: queue cards + market watch list ----------
@@ -215,28 +215,27 @@
       onDismiss,
       onClosePosition,
       closing: inFlight,
+      isSaved,
+      onToggleSave,
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
     return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);
   }
 
-  const PLACEHOLDER = {
-    saved: 'Saved setups are not built yet.',
+  // Scanner / Saved: Review and Watch jump back into the Setups workspace; bookmarks toggle.
+  const nav = {
+    onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; rerender(); },
+    onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; rerender(); },
+    send: (msg) => { if (transport.isOnline()) transport.send(msg); },
+    rerender: () => rerender(),
   };
+  const isSaved = (id) => ((mounted && mounted.state.saved) || []).some((s) => s.id === id);
+  const onToggleSave = (o) => nav.send({ type: isSaved(o.id) ? 'UNSAVE_SETUP' : 'SAVE_SETUP', id: o.id });
 
-  // Scanner sub-tab: its own view; Review / Watch jump back into the Setups workspace.
   function scanner(state) {
     const host = el('div', { className: 'opp-scanner' });
-    SD.oppScanner.renderScanner(host, state, {
-      market: assetFilter,
-      onMarket: setFilter,
-      matchesAsset,
-      online: transport.isOnline(),
-      onRunScan: () => { if (transport.isOnline()) transport.send({ type: 'RUN_SCAN' }); },
-      onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; rerender(); },
-      onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; rerender(); },
-      rerender,
-    });
+    SD.oppScanner.renderScanner(host, state, { ...nav, market: assetFilter, onMarket: setFilter, matchesAsset, online: transport.isOnline(),
+      onRunScan: () => nav.send({ type: 'RUN_SCAN' }), isSaved, onToggleSave });
     return host;
   }
 
@@ -263,7 +262,7 @@
       // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
       el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs] : [tabs, el('div', { className: 'opp-toolbar-right' }, [scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
-      subTab === 'setups' ? setups(state) : subTab === 'scanner' ? scanner(state) : el('div', { className: 'placeholder', textContent: PLACEHOLDER[subTab] }),
+      subTab === 'setups' ? setups(state) : subTab === 'scanner' ? scanner(state) : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
     );
 
     const input = container.querySelector('#opp-search');

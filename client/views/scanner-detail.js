@@ -54,6 +54,11 @@
       ? el('button', { type: 'button', className: 'btn btn-primary scan-detail-go', textContent: 'Review setup' })
       : el('button', { type: 'button', className: 'btn scan-detail-go', textContent: 'Open chart' });
     primary.onclick = () => (row.order ? opts.onReview(row.order.id) : opts.onWatch(row.asset));
+    const saved = row.order && opts.isSaved && opts.isSaved(row.order.id);
+    const save = row.order && opts.onToggleSave
+      ? el('button', { type: 'button', className: `btn scan-detail-go opp-bookmark${saved ? ' is-saved' : ''}`, textContent: saved ? '★ Saved' : '☆ Save for later', disabled: !opts.online })
+      : null;
+    if (save) save.onclick = () => opts.onToggleSave(row.order);
     const optionsLink = el('button', { type: 'button', className: 'scan-link', textContent: 'Show options setups ›' });
     optionsLink.onclick = () => opts.onOptions();
 
@@ -73,6 +78,7 @@
       el('p', { className: 'scan-summary', textContent: summary(row) }),
       ...checklist(row, state),
       primary,
+      ...(save ? [save] : []),
       el('div', { className: 'scan-note' }, [
         el('span', { className: 'scan-note-icon', textContent: 'i' }),
         el('div', {}, [

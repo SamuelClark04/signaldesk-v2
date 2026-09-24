@@ -175,3 +175,12 @@
 .opp-heat.is-trigger { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
 .opp-heat.is-queue { background: var(--long-bg); color: var(--long); }
 .opp-heat.is-position { background: rgba(56, 189, 248, 0.14); color: var(--accent); }
+
+/* ---------- Saved tab + bookmark toggle (Phase 33) ---------- */
+.saved-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: start; }
+.saved-list { max-height: 70vh; }
+.saved-detail { max-width: 760px; }
+.saved-empty { padding: 48px 16px; text-align: center; }
+.opp-bookmark { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+.opp-bookmark.is-saved { border-color: var(--warn); color: var(--warn); }
+@media (max-width: 900px) { .saved-grid { grid-template-columns: 1fr; } }

@@ -16,7 +16,11 @@ const tradeJournal = [];
 // Rejected orders are kept (outside the journal) so a strategy re-proposing the
 // same deterministic id cannot put a rejected trade back in the queue.
 const discardedOrders = [];
-const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders };
+// Bookmarks ("Saved" tab): snapshots of setups, NOT orders. Kept apart from the
+// order lists, so they never count as a known id for staging.
+const savedSetups = [];
+const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups };
+const MAX_SAVED = 100;
 
 function findIndex(list, candidateId) {
   return list.findIndex((o) => o.id === candidateId);
@@ -212,6 +216,27 @@ function releaseAdopted(candidateId) {
   return { ...released };
 }
 
+// ---------- Saved setups (bookmarks) ----------
+// The snapshot is copied from the ledger's OWN pending order (never from the
+// client), so a bookmark always reflects what the risk engine actually approved.
+function saveSetup(candidateId) {
+  const order = pendingOrders.find((o) => o.id === candidateId);
+  if (!order) throw new Error('SAVE_NOT_PENDING: only setups in the approvals queue can be saved');
+  if (savedSetups.some((s) => s.id === candidateId)) return getSavedSetups();
+  savedSetups.unshift({ ...order, status: 'saved', savedAt: Date.now() });
+  if (savedSetups.length > MAX_SAVED) savedSetups.length = MAX_SAVED; // oldest bookmarks drop off
+  store.save();
+  return getSavedSetups();
+}
+
+function unsaveSetup(candidateId) {
+  const i = findIndex(savedSetups, candidateId);
+  if (i === -1) throw new Error(`no saved setup ${candidateId}`);
+  savedSetups.splice(i, 1);
+  store.save();
+  return getSavedSetups();
+}
+
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
@@ -219,6 +244,7 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: pric
 // Open positions carry their fee model (derived, not stored) for live P/L marks.
 const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
+const getSavedSetups = () => savedSetups.map((s) => ({ ...s }));
 
 // Hand the lists to the store once: it restores them from disk, then saves on every change.
 store.attach(LISTS);
@@ -236,6 +262,9 @@ module.exports = {
   getPendingOrders,
   getActivePositions,
   getTradeJournal,
+  saveSetup,
+  unsaveSetup,
+  getSavedSetups,
   // Settings live in the store; re-exported so callers keep one ledger API.
   // Mark-to-market for monitoring (same math as closePosition, before fees).
   unrealizedPnl: (position, price) => grossPnlAt(position, price).grossPnl,

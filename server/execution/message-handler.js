@@ -173,6 +173,16 @@ function createMessageHandler({ send, broadcast }) {
     }
   }
 
+  // Bookmarks: every client gets the new list (SAVED_SETUPS).
+  function handleSaved(ws, { type, id }) {
+    try {
+      const list = type === 'SAVE_SETUP' ? ledger.saveSetup(String(id || '')) : ledger.unsaveSetup(String(id || ''));
+      broadcast('SAVED_SETUPS', list);
+    } catch (err) {
+      send(ws, 'ACTION_FAILED', { type, id, error: err.message });
+    }
+  }
+
   // Suggested stop/target for an adoption (read-only maths on real candles),
   // answered to the requesting client; requestId lets it drop stale answers.
   async function handleSuggest(ws, { requestId, payload = {} }) {
@@ -242,6 +252,7 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
     if (msg.type === 'ADOPT_POSITION' || msg.type === 'RELEASE_POSITION') return handleAdoption(ws, msg);
+    if (msg.type === 'SAVE_SETUP' || msg.type === 'UNSAVE_SETUP') return handleSaved(ws, msg);
     if (msg.type === 'GET_ADOPTION_SUGGESTIONS') return handleSuggest(ws, msg).catch((err) => console.error('[adopt] suggestions crashed:', err));
     if (msg.type === 'SYNC_PORTFOLIO') return handleSync(ws).catch((err) => console.error('[broker-sync] sync crashed:', err));
     send(ws, 'error', `unknown message type: ${msg.type}`);

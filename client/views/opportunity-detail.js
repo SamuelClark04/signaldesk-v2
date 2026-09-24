@@ -112,6 +112,16 @@
   }
 
   // ---------- Right: risk & execution ----------
+  // Bookmark toggle (Saved tab). The server snapshots its own copy of the setup.
+  function bookmark(o, ctx) {
+    const saved = ctx.isSaved(o.id);
+    const b = el('button', { type: 'button', className: `btn opp-bookmark${saved ? ' is-saved' : ''}`, textContent: saved ? '★ Saved' : '☆ Save',
+      disabled: !ctx.online, title: saved ? 'Remove from Saved' : 'Save for later (Opportunities → Saved)' });
+    b.setAttribute('aria-pressed', String(saved));
+    b.onclick = () => ctx.onToggleSave(o);
+    return b;
+  }
+
   const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity' };
   // Was this order sized for the venue it would execute on now? (server rule:
   // message-handler refuses a LIVE approval of a setup not sized from that account)
@@ -216,6 +226,7 @@
         SD.scannerDetail.badge(o.asset, true),
         el('div', { className: 'opp-title' }, [el('strong', { className: 'opp-right-symbol', textContent: displaySymbol(o) }),
           el('span', { className: 'opp-name', textContent: ready ? `${o.direction === 'short' ? 'Short' : 'Long'} — ${o.setupType || 'Setup'}` : 'Market watch' })]),
+        ...(ready && ctx.onToggleSave ? [bookmark(o, ctx)] : []),
         el('span', { className: `opp-pill${ready ? ' is-ready' : ''}`, textContent: ready ? 'Ready for review' : 'Waiting for setup' }),
       ]),
       ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),
