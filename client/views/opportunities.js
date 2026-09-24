@@ -1,5 +1,6 @@
 // Opportunities tab: sub-navigation (Setups / Scanner / Saved) and the Setups
-// workspace: queue rail (left), analysis (center), risk & execution (right).
+// workspace: rail (left, opportunities-rail.js: active positions, queue, market
+// watch), analysis (center), risk & execution (right).
 // With no setup selected it shows Market Watch: live prices, nothing executable.
 // The server is the source of truth: buttons send APPROVE / REJECT intents (the
 // same messages the order guard, live routing and ORDER_BUSY lock protect), and
@@ -7,7 +8,7 @@
 // Exposes window.SignalDesk.opportunities.
 (() => {
   const SD = window.SignalDesk;
-  const { el, age, price } = SD.ui;
+  const { el, price } = SD.ui;
 
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
   let subTab = 'setups';
@@ -89,31 +90,10 @@
     showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close', SAVE_SETUP: 'Save', UNSAVE_SETUP: 'Remove bookmark' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
   }
 
-  // ---------- Rail: queue cards + market watch list ----------
-  function railCard(o, active) {
-    const dir = o.direction === 'short' ? 'Short' : 'Long';
-    const btn = el('button', { type: 'button', className: `opp-card${active ? ' is-active' : ''}` }, [
-      SD.scannerDetail.badge(o.asset),
-      el('div', { className: 'opp-card-body' }, [
-        el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(o) }),
-        el('span', { className: 'opp-card-meta', textContent: `${dir} — ${o.setupType || 'Setup'}` }),
-        el('span', { className: 'opp-card-sub' }, [`${String(o.timeframe || '—').toUpperCase()} `,
-          el('span', { className: 'scan-state is-ready', textContent: inFlight.has(o.id) ? 'Sending…' : 'Ready' }),
-          ` · ${age(o.stagedAt)} ago`]),
-      ]),
-      el('span', { className: 'opp-card-chev', textContent: '›' }),
-    ]);
-    btn.title = `${o.strategyId} · staged ${age(o.stagedAt)} ago`;
-    btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = () => { activeId = o.id; manualWatch = false; rerender(); };
-    return btn;
-  }
-
   // ---------- Filters (one shared state drives the rail toggle and the top tabs) ----------
   let assetFilter = 'all'; // 'all' | 'stocks' | 'crypto' | 'options'
   let search = ''; // lower-cased, for matching
   let searchRaw = ''; // exactly as typed, for the input box
-  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto']];
   const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
 
   const matchesAsset = (market) => assetFilter === 'all' || market === assetFilter;
@@ -126,53 +106,15 @@
     rerender();
   }
 
-  function segmented(options, current, className, onPick) {
-    const group = el('div', { className }, options.map(([value, label]) => {
-      const b = el('button', { type: 'button', className: `opp-seg${value === current ? ' is-active' : ''}`, textContent: label });
-      b.setAttribute('aria-pressed', String(value === current));
-      b.onclick = () => onPick(value);
-      return b;
-    }));
-    group.setAttribute('role', 'group');
-    return group;
+  // Rail clicks (opportunities-rail.js): a queued setup, a watch symbol, or an open
+  // position (charted as Market Watch, where the Active Trade HUD shows it).
+  const onSelectSetup = (id) => { activeId = id; manualWatch = false; rerender(); };
+  const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
+  function onOpenPosition(p) {
+    if (!watchMarketOk(marketOf(p.asset)) || !matchesSearch(p.asset, p.asset.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
+    onWatch(p.asset);
   }
-
-  function searchBox() {
-    const input = el('input', { type: 'search', className: 'opp-search', placeholder: 'Search setups...', value: searchRaw, id: 'opp-search' });
-    input.setAttribute('aria-label', 'Search setups and symbols');
-    input.addEventListener('input', () => { search = input.value.trim().toLowerCase(); searchRaw = input.value; rerender(); });
-    return el('label', { className: 'opp-search-wrap' }, input);
-  }
-
-  // Every symbol with a price source: the default, the watchlist, streamed prices, last closes.
-  // "Heating up" only (watch-heat.js): near a trigger, queued, held, or on the chart.
-  let heat = new Map(); // symbol -> { reason, tag, title } for the rows being drawn
-  function watchSymbols(state) {
-    const list = SD.watchHeat.heating(state, { selected: watchSymbol, searching: !!search,
-      keep: (s) => watchMarketOk(marketOf(s)) && matchesSearch(s, s.replace('-', '/'), SD.scannerData.nameOf(s)) });
-    heat = new Map(list.map((x) => [x.symbol, x]));
-    watchCaption = SD.watchHeat.caption(state, list);
-    return list.map((x) => x.symbol);
-  }
-  let watchCaption = '';
-
-  function watchButton(symbol, state, active) {
-    const p = state.prices && state.prices[symbol];
-    const ref = !(p > 0) && state.refPrices && state.refPrices[symbol]; // last close while the feed is quiet
-    const shown = p > 0 ? p : ref && ref.price;
-    const market = marketOf(symbol);
-    const px = el('span', { className: `opp-watch-px${ref ? ' is-stale' : ''}`, textContent: shown > 0 ? price(shown, { market, entryPrice: shown }) : '—' });
-    if (ref) px.title = `Last close, ${new Date(ref.time).toLocaleString()} (no live price: market closed or feed quiet)`;
-    const h = heat.get(symbol);
-    const btn = el('button', { type: 'button', className: `opp-watch${active ? ' is-active' : ''}`, title: h && h.title ? h.title : '' }, [
-      el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: symbol, market }) }),
-      ...(h && h.tag ? [el('span', { className: `opp-heat is-${h.reason}`, textContent: h.tag })] : []),
-      px,
-    ]);
-    btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = () => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
-    return btn;
-  }
+  function onSearch(value) { search = value.trim().toLowerCase(); searchRaw = value; rerender(); }
 
   // ---------- Setups workspace (3 columns, always) ----------
   function setups(state) {
@@ -180,30 +122,18 @@
     for (const id of inFlight) if (!real.some((o) => o.id === id) && !(state.positions || []).some((p) => p.id === id)) inFlight.delete(id);
     const visible = real.filter((o) => matchesAsset(o.market)
       && matchesSearch(o.asset, SD.oppDetail.displaySymbol(o), o.setupType, o.strategyId, o.timeframe, o.thesis));
-    const watchable = watchSymbols(state);
+    const watch = SD.oppRail.watchList(state, { selected: watchSymbol, searching: !!search,
+      keep: (sym) => watchMarketOk(marketOf(sym)) && matchesSearch(sym, sym.replace('-', '/'), SD.scannerData.nameOf(sym)) });
+    const watchable = watch.symbols;
 
     // Selection follows the filters: never keep something the filters hide.
     if (!visible.some((o) => o.id === activeId)) activeId = !manualWatch && visible.length ? visible[0].id : null;
     if (!activeId && !watchable.includes(watchSymbol) && watchable.length) watchSymbol = watchable[0];
     const active = visible.find((o) => o.id === activeId) || marketWatch(watchSymbol);
 
-    const filtered = assetFilter !== 'all' || search;
-    const emptyText = real.length
-      ? 'No setups match these filters.'
-      : 'No setups pending. Watching the market until a strategy proposes one.';
-    const rail = el('aside', { className: 'opp-rail' }, [
-      searchBox(),
-      segmented(RAIL_TOGGLE, assetFilter === 'options' ? null : assetFilter, 'opp-segmented', setFilter),
-      el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Queue' }),
-        el('span', { className: 'count', textContent: filtered ? `${visible.length} / ${real.length}` : String(real.length) })]),
-      el('div', { className: 'opp-queue' }, visible.length ? visible.map((o) => railCard(o, o.id === activeId))
-        : [el('p', { className: 'opp-muted', textContent: emptyText })]),
-      el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch · heating up' }),
-      el('p', { className: 'opp-heat-caption', textContent: search ? 'Searching all monitored symbols' : watchCaption }),
-      el('div', { className: 'opp-watchlist' }, watchable.length
-        ? watchable.map((s) => watchButton(s, state, active.isWatch && s === watchSymbol))
-        : [el('p', { className: 'opp-muted', textContent: 'No symbols match.' })]),
-    ]);
+    const rail = SD.oppRail.rail(state, { assetFilter, searchRaw, searching: !!search, filtered: assetFilter !== 'all' || !!search,
+      real, visible, activeId, watch, watchSymbol, isWatch: !!active.isWatch, inFlight,
+      onSearch, onFilter: setFilter, onSelectSetup, onWatch, onOpenPosition });
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
       refPrice: state.refPrices ? state.refPrices[active.asset] : null,
@@ -257,7 +187,7 @@
     // search box focused with the caret where it was.
     const focused = document.activeElement && document.activeElement.id === 'opp-search';
     const caret = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
-    const SCROLLERS = ['.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
+    const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
     const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
     const tabs = el('div', { className: 'opp-subnav' }, ['setups', 'scanner', 'saved'].map((t) => {
@@ -269,7 +199,7 @@
     const scanBtn = el('button', { type: 'button', className: 'btn opp-scan-btn', textContent: 'Scan markets' });
     scanBtn.onclick = () => { subTab = 'scanner'; rerender(); };
     // Top-right asset tabs: clicking the active tab again clears the filter.
-    const assetTabs = segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
+    const assetTabs = SD.oppRail.segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
     container.replaceChildren(
       // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
       el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs] : [tabs, el('div', { className: 'opp-toolbar-right' }, [scanBtn, assetTabs])]),

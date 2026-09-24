@@ -184,3 +184,11 @@
 .opp-bookmark { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
 .opp-bookmark.is-saved { border-color: var(--warn); color: var(--warn); }
 @media (max-width: 900px) { .saved-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Active positions (rail, Phase 36) ---------- */
+.opp-positions { display: flex; flex-direction: column; gap: 4px; max-height: 30vh; overflow: hidden auto; scrollbar-width: thin; margin-bottom: 6px; }
+.opp-watch.opp-pos { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; min-width: 0; }
+.opp-pos .asset { flex: none; }
+.opp-pos .opp-heat { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.opp-pos-pnl { font: 12px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.opp-heat.is-position.is-live { background: rgba(251, 113, 133, 0.14); color: var(--short); }

@@ -2,9 +2,30 @@
 // (fees + spread/slippage) exceed MAX_FEE_DRAG of the trade's dollar risk (1R).
 // Pure functions only: no state, no I/O.
 
+// Crypto costs come from the user's Coinbase Advanced fee tier (.env):
+//   COINBASE_TAKER_FEE      taker fee per leg (Intro tier: 0.009 = 0.90%)
+//   COINBASE_SPREAD_BUFFER  spread/slippage allowance per leg (default 0.001)
+// Round trip = 2 x (taker + buffer): market-style entry and exit both pay taker.
+// A missing or invalid value falls back to the conservative defaults below
+// (overstating costs is safe; understating them is not).
+const DEFAULT_TAKER_FEE = 0.012;
+const DEFAULT_SPREAD_BUFFER = 0.001;
+
+function feeFromEnv(name, fallback, max) {
+  const raw = process.env[name];
+  if (raw === undefined || String(raw).trim() === '') return fallback;
+  const v = Number(raw);
+  if (Number.isFinite(v) && v >= 0 && v <= max) return v;
+  console.warn(`[cost-authority] ${name}=${raw} is not a fraction between 0 and ${max}; using ${fallback}`);
+  return fallback;
+}
+
+const COINBASE_TAKER_FEE = feeFromEnv('COINBASE_TAKER_FEE', DEFAULT_TAKER_FEE, 0.05);
+const COINBASE_SPREAD_BUFFER = feeFromEnv('COINBASE_SPREAD_BUFFER', DEFAULT_SPREAD_BUFFER, 0.02);
+
 // Round-trip cost as a fraction of position notional.
 const ROUND_TRIP_COST_RATE = {
-  crypto: 0.0264, // taker fees + spread, both legs
+  crypto: 2 * (COINBASE_TAKER_FEE + COINBASE_SPREAD_BUFFER), // Intro tier: 2 x (0.90% + 0.10%) = 2.00%
   stocks: 0.0010, // slippage, both legs
 };
 
@@ -51,5 +72,7 @@ module.exports = {
   estimateRoundTripFees,
   getRoundTripRate,
   MAX_FEE_DRAG,
+  COINBASE_TAKER_FEE,
+  COINBASE_SPREAD_BUFFER,
   OPTIONS_ROUND_TRIP_PER_CONTRACT,
 };

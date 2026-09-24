@@ -6,10 +6,12 @@
 //   setup    = within the last 6 bars (~1 day) the low flushed >= 3% under the mean
 //   trigger  = the last completed bar closed at/below the mean and the LIVE price
 //              is now back above it (a fresh reclaim; one signal per flush)
-//   stop     = 8% under the worst-case entry;  target = 3R (24%)
-// Why 8%: crypto round-trip costs are ~2.64% of the position, and the risk
-// engine rejects fee drag above 0.35R. 2.64% / 8% = 0.33R clears it; a 4% stop
-// (0.66R) would still be rejected every time.
+//   stop     = the tightest stop the fee gate allows (below);  target = 3R
+// Why: the risk engine rejects fee drag above 0.35R, and fee drag = round-trip
+// cost / stop %. The stop is the round-trip cost (cost-authority.js, from the
+// Coinbase fee tier in .env) / 0.34R, rounded UP to 0.5%. Intro tier (0.90%
+// taker + 0.10% spread per leg = 2.00% round trip): 6% stop (0.33R), 18% target.
+// The old flat 2.64% estimate gave the 8% stop / 24% target.
 // Target check: the 3R target must sit at or below the nearest major DAILY
 // resistance (risk/structure.js); otherwise the setup is rejected and reported
 // via takeBlocks(). The thesis states the target's viability, the news
@@ -20,9 +22,13 @@ const { CRYPTO } = require('../market/universe');
 const { getHistory } = require('../connectors/history-bars');
 const { getDailyBars } = require('../connectors/daily-bars');
 const { checkTarget } = require('../risk/structure');
+const { getRoundTripRate } = require('../risk/cost-authority');
 const sentiment = require('../connectors/news-sentiment');
 
 const STRATEGY_ID = 'crypto-swing';
+
+const FEE_DRAG_BUDGET = 0.34; // under the gate's 0.35R, with a little room
+const feeStopPct = (roundTrip) => Math.ceil((roundTrip / FEE_DRAG_BUDGET) * 200) / 200; // up to 0.5%
 
 const CONFIG = {
   symbols: [...CRYPTO], // the monitored crypto universe (server/market/universe.js)
@@ -30,7 +36,7 @@ const CONFIG = {
   meanBars: 20,
   flushLookback: 6,
   flushPct: 0.03,
-  stopPct: 0.08,
+  stopPct: feeStopPct(getRoundTripRate('crypto')),
   entryBufferPct: 0.002,
   targetsR: [{ level: 1, r: 3, allocation: 1 }],
   tradeType: 'Swing Trade',
@@ -96,7 +102,7 @@ function candidate(symbol, live, s, now, ctx) {
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} flushed to ${px(s.flushBar.low)} (${depth.toFixed(1)}% under its ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean `
       + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${CONFIG.targetsR[0].r}R move; `
-      + `invalid below ${invalidation} (${(CONFIG.stopPct * 100).toFixed(0)}% stop). ${ctx.target.text} `
+      + `invalid below ${invalidation} (${+(CONFIG.stopPct * 100).toFixed(1)}% stop). ${ctx.target.text} `
       + `${sentiment.describe(ctx.news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
       `Flush at least ${(CONFIG.flushPct * 100).toFixed(0)}% below the ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean within ${CONFIG.flushLookback} bars`,
@@ -154,4 +160,4 @@ function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
 // The pipeline reads (and clears) the rejected setups after each pass.
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 
-module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, feeStopPct, STRATEGY_ID, CONFIG };
