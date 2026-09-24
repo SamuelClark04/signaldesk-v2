@@ -1,0 +1,39 @@
+/* Portfolio tab: What to Buy allocator. Positions table uses shared .data-table. */
+
+/* ---------- Allocator form ---------- */
+.alloc-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.input-wrap:focus-within { border-color: var(--accent); }
+.input-prefix { padding-left: 10px; color: var(--text-faint); font-family: var(--font-mono); }
+.input {
+  width: 160px;
+  padding: 6px 10px 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 14px var(--font-mono);
+  outline: none;
+}
+.btn-primary { padding: 7px 14px; border-color: var(--accent); color: var(--accent); }
+.btn-primary:hover:not(:disabled) { background: rgba(56, 189, 248, 0.12); }
+.alloc-status { color: var(--text-faint); font-size: 12px; align-self: center; }
+.alloc-status.is-error { color: var(--short); }
+.alloc-summary { padding: 10px 16px; color: var(--text-muted); font-size: 13px; border-bottom: 1px solid var(--border); }
+.alloc-summary strong { color: var(--text); font-family: var(--font-mono); font-weight: 500; }
+.alloc-notes { margin: 0; padding: 10px 16px 12px 32px; color: var(--text-faint); font-size: 12px; }
+.alloc-notes:empty { display: none; }

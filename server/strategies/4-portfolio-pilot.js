@@ -1,6 +1,8 @@
 // Strategy 4: Portfolio Pilot, "What to Buy" allocator.
 // PROPOSER ONLY: pure math over positions and prices. Never stages or executes.
 // Buy-only rebalancing: new money goes to underweight assets; nothing is sold.
+const PILOT_STRATEGY_ID = 'portfolio-pilot';
+
 const TARGET_MODEL = Object.freeze({
   'BTC-USD': 0.40,
   'ETH-USD': 0.30,
@@ -15,13 +17,18 @@ function priceLookup(latestPricesMap) {
     : latestPricesMap && latestPricesMap[asset]);
 }
 
-// Current market value per asset. Longs only: the pilot builds long-term holdings,
-// so short day-trades are left out rather than netted against them. A position
-// with no fresh price is valued at its fill price and reported in notes.
+// Current market value per asset, for the pilot's OWN holdings only. Positions
+// from intraday/swing strategies (equity-day etc.) are ignored so short-term
+// trades never distort the long-term model. Longs only. A position with no fresh
+// price is valued at its fill price and reported in notes.
 function valueHoldings(activePositions, priceOf) {
   const values = new Map();
   const notes = [];
-  for (const p of activePositions) {
+  const own = activePositions.filter((p) => p.strategyId === PILOT_STRATEGY_ID);
+  const ignored = activePositions.length - own.length;
+  if (ignored) notes.push(`${ignored} position(s) from other strategies not counted (pilot holdings only)`);
+
+  for (const p of own) {
     if (p.direction === 'short') {
       notes.push(`${p.asset} short position excluded from portfolio value`);
       continue;
@@ -93,4 +100,4 @@ function calculateAllocation(depositAmount, activePositions, latestPricesMap, mo
   };
 }
 
-module.exports = { calculateAllocation, TARGET_MODEL };
+module.exports = { calculateAllocation, TARGET_MODEL, PILOT_STRATEGY_ID };

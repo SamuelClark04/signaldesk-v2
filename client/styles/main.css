@@ -1,4 +1,6 @@
-/* SignalDesk dark terminal theme. All colors come from the tokens below. */
+/* SignalDesk dark terminal theme: tokens, base layout, sidebar, panels, shared tables,
+   buttons and utilities. View-specific styles live in queue/portfolio/journal.css,
+   which load after this file. All colors come from the tokens below. */
 :root {
   --bg: #0b1120;
   --surface: #111827;
@@ -158,6 +160,7 @@ html, body {
   font: 12px/20px var(--font-mono);
 }
 
+
 /* ---------- Data tables (queue, positions, journal) ---------- */
 .table-wrap { overflow-x: auto; }
 
@@ -181,16 +184,7 @@ html, body {
 
 .asset { font: 600 13px var(--font-mono); }
 .sub { display: block; color: var(--text-faint); font-size: 11px; }
-.catalyst { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
 
-.detail-row td { background: var(--bg); color: var(--text-muted); white-space: normal; }
-/* Pinned to the visible part of the scrolling table so the text never scrolls away. */
-.detail { position: sticky; left: 12px; max-width: min(720px, calc(100vw - 300px)); }
-.detail-row p { margin: 0 0 8px; }
-.detail-row ul { margin: 0; padding-left: 18px; }
-
-.actions-col { text-align: right; }
-.actions { display: flex; justify-content: flex-end; gap: 6px; }
 .btn {
   padding: 4px 10px;
   border: 1px solid var(--border-strong);
@@ -202,57 +196,9 @@ html, body {
   cursor: pointer;
 }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.btn-approve:hover:not(:disabled) { border-color: var(--long); background: var(--long-bg); color: var(--long); }
-.btn-reject:hover:not(:disabled) { border-color: var(--short); background: var(--short-bg); color: var(--short); }
 .btn:disabled { color: var(--text-faint); cursor: not-allowed; opacity: 0.6; }
 
-.notice {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(251, 191, 36, 0.08);
-  color: var(--warn);
-  font-size: 13px;
-}
-
 .panel + .panel { margin-top: 16px; }
-
-/* ---------- Allocator form ---------- */
-.alloc-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.field { display: flex; flex-direction: column; gap: 4px; }
-.field-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-.input-wrap {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg);
-}
-.input-wrap:focus-within { border-color: var(--accent); }
-.input-prefix { padding-left: 10px; color: var(--text-faint); font-family: var(--font-mono); }
-.input {
-  width: 160px;
-  padding: 6px 10px 6px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: 14px var(--font-mono);
-  outline: none;
-}
-.btn-primary { padding: 7px 14px; border-color: var(--accent); color: var(--accent); }
-.btn-primary:hover:not(:disabled) { background: rgba(56, 189, 248, 0.12); }
-.alloc-status { color: var(--text-faint); font-size: 12px; align-self: center; }
-.alloc-status.is-error { color: var(--short); }
-.alloc-summary { padding: 10px 16px; color: var(--text-muted); font-size: 13px; border-bottom: 1px solid var(--border); }
-.alloc-summary strong { color: var(--text); font-family: var(--font-mono); font-weight: 500; }
-.alloc-notes { margin: 0; padding: 10px 16px 12px 32px; color: var(--text-faint); font-size: 12px; }
-.alloc-notes:empty { display: none; }
 
 .empty { padding: 32px 16px; color: var(--text-faint); text-align: center; }
 
@@ -269,9 +215,7 @@ html, body {
 .badge-long { background: var(--long-bg); color: var(--long); }
 .badge-short { background: var(--short-bg); color: var(--short); }
 
-/* ---------- P/L utilities (same palette: green = gain, red = loss) ---------- */
-.pnl-pos { color: var(--long); }
-.pnl-neg { color: var(--short); }
+/* ---------- Shared utilities ---------- */
 .text-upper { text-transform: uppercase; font: 600 12px var(--font-mono); }
 
 /* ---------- Small screens: sidebar becomes a top bar ---------- */
@@ -294,5 +238,4 @@ html, body {
   .nav-link.active { border-bottom-color: var(--accent); }
   .conn { margin: 0 0 0 auto; padding: 0; }
   .main { padding: 16px; }
-  .detail { max-width: calc(100vw - 64px); }
 }

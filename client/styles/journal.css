@@ -1,0 +1,5 @@
+/* Journal tab: closed trades. */
+
+/* ---------- P/L utilities (same palette: green = gain, red = loss) ---------- */
+.pnl-pos { color: var(--long); }
+.pnl-neg { color: var(--short); }
