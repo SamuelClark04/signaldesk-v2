@@ -51,8 +51,8 @@ function closePosition(candidateId, exitPrice, exitReason) {
   if (i === -1) throw new Error(`paper-ledger: no open position ${candidateId}`);
 
   const [pos] = activePositions.splice(i, 1);
-  const direction = pos.side === 'short' ? -1 : 1;
-  const grossPnl = (exitPrice - pos.fillPrice) * pos.positionSize * direction;
+  const sign = pos.direction === 'short' ? -1 : 1;
+  const grossPnl = (exitPrice - pos.fillPrice) * pos.positionSize * sign;
 
   // Round-trip rate is split evenly across the entry and exit legs.
   const halfRate = getRoundTripRate(pos.market) / 2;

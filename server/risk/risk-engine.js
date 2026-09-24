@@ -13,9 +13,9 @@ function reject(candidate, reason, extra = {}) {
 }
 
 function validate(c) {
-  if (!c || !c.id || !c.symbol) return 'Missing id or symbol';
+  if (!c || !c.id || !c.asset) return 'Missing id or asset';
   if (!['crypto', 'stocks'].includes(c.market)) return `Unknown market: ${c.market}`;
-  if (!['long', 'short'].includes(c.side || 'long')) return `Unknown side: ${c.side}`;
+  if (!['long', 'short'].includes(c.direction)) return `Unknown direction: ${c.direction}`;
   if (!c.entryZone || !(c.entryZone.min > 0) || !(c.entryZone.max >= c.entryZone.min)) {
     return 'Invalid entryZone';
   }
@@ -25,7 +25,7 @@ function validate(c) {
 
 // Worst-case fill inside the entry zone: top of zone for longs, bottom for shorts.
 function worstCaseEntry(c) {
-  return (c.side || 'long') === 'short' ? c.entryZone.min : c.entryZone.max;
+  return c.direction === 'short' ? c.entryZone.min : c.entryZone.max;
 }
 
 // Stocks trade in whole shares; crypto to 8 decimals. Always round down so
@@ -41,9 +41,9 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   const riskPct = options.riskPct || DEFAULT_RISK_PCT;
   const maxLeverage = options.maxLeverage || DEFAULT_MAX_LEVERAGE;
-  const side = candidate.side || 'long';
+  const { direction } = candidate;
   const entryPrice = worstCaseEntry(candidate);
-  const stopDistance = side === 'long'
+  const stopDistance = direction === 'long'
     ? entryPrice - candidate.invalidation
     : candidate.invalidation - entryPrice;
   if (!(stopDistance > 0)) return reject(candidate, 'Invalidation is on the wrong side of entry');
@@ -56,7 +56,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   // Actual dollars at risk after rounding and the notional cap.
   const dollarRisk = positionSize * stopDistance;
-  const sized = { ...candidate, side, entryPrice, positionSize, dollarRisk };
+  const sized = { ...candidate, entryPrice, positionSize, dollarRisk };
 
   const cost = evaluateCosts(sized, dollarRisk);
   if (!cost.approved) return reject(candidate, cost.reason, { feeDrag: cost.feeDrag });
