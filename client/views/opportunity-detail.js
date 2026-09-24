@@ -123,6 +123,17 @@
     return b;
   }
 
+  // Trade type and expected hold: from the setup (strategies set them); older
+  // setups fall back to their strategy's defaults.
+  const DURATION = {
+    'equity-day': ['Day Trade', '1-4 hours (closed by the end of the session)'], 'crypto-swing': ['Swing Trade', '2-7 days'],
+    'equity-swing': ['Swing Trade', '3-10 days'], 'options-system': ['Options Swing', 'Days to weeks (until expiry)'],
+  };
+  function holdChip(o) {
+    const [type, dur] = o.tradeType ? [o.tradeType, o.expectedDuration] : DURATION[o.strategyId] || [];
+    return type ? el('div', { className: 'opp-hold' }, [el('strong', { textContent: type }), ` · expected hold ${dur}`]) : null;
+  }
+
   const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity' };
   // Was this order sized for the venue it would execute on now? (server rule:
   // message-handler refuses a LIVE approval of a setup not sized from that account)
@@ -230,7 +241,9 @@
         ...(ready && ctx.onToggleSave ? [bookmark(o, ctx)] : []),
         el('span', { className: `opp-pill${ready ? ' is-ready' : ''}`, textContent: ready ? 'Ready for review' : 'Waiting for setup' }),
       ]),
+      ...[ready ? holdChip(o) : null].filter(Boolean),
       ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),
+      SD.sentiment.badge(o.asset, { compact: true }),
       el('div', { className: 'opp-kv-group' }, [
         kv('Entry range', lv(() => `${px(o.entryZone.min, o)} – ${px(o.entryZone.max, o)}`)),
         kv('Invalidation (stop)', lv(() => px(o.invalidation, o)), ready ? 'text-short' : ''),

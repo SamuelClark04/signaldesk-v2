@@ -13,6 +13,8 @@ const SESSION_OPEN = 9 * 60 + 30; // minutes after midnight, US/Eastern
 const SESSION_CLOSE = 16 * 60;
 
 const CONFIG = {
+  tradeType: 'Day Trade',
+  expectedDuration: '1-4 hours (closed by the end of the session)',
   openingRangeMinutes: 15,
   barMinutes: 5,
   minOpeningRangeBars: 10, // of 15 one-minute bars; IEX can skip quiet minutes
@@ -111,6 +113,8 @@ function detectOrb(symbol, rawBars, headlines) {
     market: 'stocks',
     strategyId: STRATEGY_ID,
     setupType: 'ORB',
+    tradeType: c.tradeType,
+    expectedDuration: c.expectedDuration,
     direction: 'long',
     timeframe: `${c.barMinutes}m`,
     entryZone: { min: cents(orHigh), max: entryMax },

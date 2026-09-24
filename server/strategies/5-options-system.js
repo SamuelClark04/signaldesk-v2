@@ -23,6 +23,8 @@ const IVP_SHIELD_THRESHOLD = 80;
 const TRIGGERS = { AAPL: { above: 100 } };
 
 const CONFIG = {
+  tradeType: 'Options Swing',
+  expectedDuration: 'Days to weeks (until expiry)',
   entryBufferPct: 0.002, // entry zone: live price up to +0.2%
   stopFractionOfMove: 0.5, // invalidation at half the expected move below entry => T1 ~ 2R
   minStopPct: 0.0035, // minimum underlying distance to the invalidation level
@@ -77,6 +79,8 @@ async function buildCandidate(asset, livePrice, now) {
     setupType,
     direction: 'long',
     timeframe: '1d',
+    tradeType: CONFIG.tradeType,
+    expectedDuration: CONFIG.expectedDuration,
     entryZone: { min: cents(livePrice), max: entryMax },
     invalidation,
     targets: [{ level: 1, price: t1, allocation: 1 }],

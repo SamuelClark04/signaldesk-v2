@@ -85,8 +85,8 @@ function notify(order) {
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
-  // Earnings Shield blocks (equity-swing) are rejections too: record them.
-  for (const b of equitySwing.takeBlocks()) recordRejection(b.id, b.reason, b.candidate);
+  // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
+  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) against the capital of the venue it would execute
   // on: the paper bankroll, or the LIVE broker account (cached ~60 s).

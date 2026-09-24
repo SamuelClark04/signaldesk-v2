@@ -10,10 +10,17 @@
 // Why 8%: crypto round-trip costs are ~2.64% of the position, and the risk
 // engine rejects fee drag above 0.35R. 2.64% / 8% = 0.33R clears it; a 4% stop
 // (0.66R) would still be rejected every time.
+// Target check: the 3R target must sit at or below the nearest major DAILY
+// resistance (risk/structure.js); otherwise the setup is rejected and reported
+// via takeBlocks(). The thesis states the target's viability, the news
+// sentiment (connectors/news-sentiment.js) and the expected hold.
 // Candles only change every 4h, so each coin's history is cached for CANDLE_TTL_MS:
 // 40 coins cost at most one REST call per coin per 15 minutes (no poll loop).
 const { CRYPTO } = require('../market/universe');
 const { getHistory } = require('../connectors/history-bars');
+const { getDailyBars } = require('../connectors/daily-bars');
+const { checkTarget } = require('../risk/structure');
+const sentiment = require('../connectors/news-sentiment');
 
 const STRATEGY_ID = 'crypto-swing';
 
@@ -26,12 +33,15 @@ const CONFIG = {
   stopPct: 0.08,
   entryBufferPct: 0.002,
   targetsR: [{ level: 1, r: 3, allocation: 1 }],
+  tradeType: 'Swing Trade',
+  expectedDuration: '2-7 days',
 };
 const CANDLE_TTL_MS = 15 * 60 * 1000;
 const BAR_SEC = 4 * 3600;
 
 const candles = new Map(); // symbol -> { at, bars } (completed 4h bars, oldest first)
 const lastSignal = new Map(); // symbol -> time of the flush-low bar already signalled
+let blocks = []; // setups rejected on the last pass: { id, reason, candidate }
 
 // Keep precision for sub-dollar coins: 2 decimals from $100, 4 from $1, else ~4 significant digits.
 const decimalsFor = (x) => (x >= 100 ? 2 : x >= 1 ? 4 : Math.min(12, 3 - Math.floor(Math.log10(x))));
@@ -58,9 +68,14 @@ function analyse(bars) {
   return flushed ? { mean, flushBar, lastClose: bars[bars.length - 1].close } : null;
 }
 
-function candidate(symbol, live, s, now) {
+function levels(live) {
   const entryMax = px(live * (1 + CONFIG.entryBufferPct));
   const invalidation = floorPx(entryMax * (1 - CONFIG.stopPct));
+  return { entryMax, invalidation, target: px(entryMax + CONFIG.targetsR[0].r * (entryMax - invalidation)) };
+}
+
+function candidate(symbol, live, s, now, ctx) {
+  const { entryMax, invalidation } = levels(live);
   const risk = entryMax - invalidation;
   const depth = ((s.mean - s.flushBar.low) / s.mean) * 100;
   return {
@@ -71,13 +86,18 @@ function candidate(symbol, live, s, now) {
     setupType: 'Capitulation reversal',
     direction: 'long',
     timeframe: CONFIG.timeframe,
+    tradeType: CONFIG.tradeType,
+    expectedDuration: CONFIG.expectedDuration,
+    resistance: ctx.target.resistance,
+    newsSentiment: ctx.news && ctx.news.ok ? { score: ctx.news.score, label: ctx.news.label, source: ctx.news.source } : null,
     entryZone: { min: px(s.mean), max: entryMax },
     invalidation,
     targets: CONFIG.targetsR.map((t) => ({ level: t.level, price: px(entryMax + t.r * risk), allocation: t.allocation })),
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} flushed to ${px(s.flushBar.low)} (${depth.toFixed(1)}% under its ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean `
       + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${CONFIG.targetsR[0].r}R move; `
-      + `invalid below ${invalidation} (${(CONFIG.stopPct * 100).toFixed(0)}% stop).`,
+      + `invalid below ${invalidation} (${(CONFIG.stopPct * 100).toFixed(0)}% stop). ${ctx.target.text} `
+      + `${sentiment.describe(ctx.news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
       `Flush at least ${(CONFIG.flushPct * 100).toFixed(0)}% below the ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean within ${CONFIG.flushLookback} bars`,
       `Last ${CONFIG.timeframe} close at or below the mean (${px(s.lastClose)}), live price back above it`,
@@ -88,6 +108,7 @@ function candidate(symbol, live, s, now) {
 }
 
 async function generateCandidates(latestPricesMap, now = Date.now()) {
+  blocks = [];
   const out = [];
   for (const symbol of CONFIG.symbols) {
     const live = lookup(latestPricesMap, symbol);
@@ -96,8 +117,16 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
       const s = analyse(await completedBars(symbol, now));
       if (!s || lastSignal.get(symbol) === s.flushBar.time) continue; // no flush, or this flush already signalled
       if (!(s.lastClose <= s.mean && live > s.mean)) continue; // not a fresh reclaim
+      // The 3R target must clear the fees AND sit below major daily resistance.
+      const { entryMax, target } = levels(live);
+      const t = checkTarget(await getDailyBars(symbol, now), entryMax, target, px);
+      if (!t.ok) {
+        blocks.push({ id: `${STRATEGY_ID}:REVERSAL:${symbol}:${s.flushBar.time}`, reason: `RESISTANCE_BLOCKS_TARGET: ${t.text}`,
+          candidate: { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: 'Capitulation reversal', direction: 'long', timeframe: CONFIG.timeframe } });
+        continue; // not signalled: it may qualify once price breaks the level
+      }
       lastSignal.set(symbol, s.flushBar.time);
-      out.push(candidate(symbol, live, s, now));
+      out.push(candidate(symbol, live, s, now, { target: t, news: await sentiment.getSentiment(symbol, now) }));
     } catch (err) {
       console.error(`[crypto-swing] ${symbol} failed: ${err.message}`);
     }
@@ -120,6 +149,9 @@ function proximity(latestPricesMap) {
 }
 
 // Test hook.
-function reset() { candles.clear(); lastSignal.clear(); }
+function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
 
-module.exports = { generateCandidates, proximity, reset, analyse, STRATEGY_ID, CONFIG };
+// The pipeline reads (and clears) the rejected setups after each pass.
+function takeBlocks() { const b = blocks; blocks = []; return b; }
+
+module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, STRATEGY_ID, CONFIG };

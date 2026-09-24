@@ -15,11 +15,15 @@
 //   at support   live price within NEAR_SMA_PCT of SMA20, and above SMA50
 const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const { getDailyBars } = require('../connectors/daily-bars');
+const { checkTarget } = require('../risk/structure');
+const sentiment = require('../connectors/news-sentiment');
 
 const STRATEGY_ID = 'equity-swing';
 const MIN_DAYS_TO_EARNINGS = 3;
 
 const CONFIG = {
+  tradeType: 'Swing Trade',
+  expectedDuration: '3-10 days',
   symbols: ['NVDA'],
   fast: 20,
   slow: 50,
@@ -87,6 +91,14 @@ async function evaluate(symbol, livePrice, now) {
   const risk = entryMax - invalidation;
   const t1 = cents(Math.max(recentHigh, entryMax + risk)); // prior high, but at least 1R
   const t2 = cents(entryMax + 2 * risk);
+  // The final target must sit at or below the nearest major daily resistance.
+  const tgt = checkTarget(bars, entryMax, t2, cents);
+  if (!tgt.ok) {
+    blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: `RESISTANCE_BLOCKS_TARGET: ${tgt.text}`,
+      candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
+    return null;
+  }
+  const news = await sentiment.getSentiment(symbol, now);
 
   return {
     id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`,
@@ -96,6 +108,10 @@ async function evaluate(symbol, livePrice, now) {
     setupType: 'SMA20 Pullback',
     direction: 'long',
     timeframe: '1D',
+    tradeType: CONFIG.tradeType,
+    expectedDuration: CONFIG.expectedDuration,
+    resistance: tgt.resistance,
+    newsSentiment: news.ok ? { score: news.score, label: news.label, source: news.source } : null,
     entryZone: { min: cents(livePrice), max: entryMax },
     invalidation,
     targets: [
@@ -106,7 +122,8 @@ async function evaluate(symbol, livePrice, now) {
     thesis: `${symbol} is in an uptrend (SMA${CONFIG.fast} ${cents(fast)} > SMA${CONFIG.slow} ${cents(slow)}) and has `
       + `pulled back ${(((recentHigh - livePrice) / recentHigh) * 100).toFixed(1)}% from its ${CONFIG.highLookback}-day high `
       + `${cents(recentHigh)} to the ${CONFIG.fast}-day average. Long for a retest of the high; `
-      + `invalid below ${invalidation} (under the ${CONFIG.stopLookback}-day low).`,
+      + `invalid below ${invalidation} (under the ${CONFIG.stopLookback}-day low). ${tgt.text} `
+      + `${sentiment.describe(news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
       `SMA${CONFIG.fast} above SMA${CONFIG.slow}`,
       `Price within ${(CONFIG.nearSmaPct * 100).toFixed(1)}% of SMA${CONFIG.fast} and above SMA${CONFIG.slow}`,

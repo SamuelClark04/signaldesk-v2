@@ -24,6 +24,7 @@ const BUCKETS = [
   [/^LIVE_CAPITAL_UNAVAILABLE/, 'Rejected: Live account value unavailable for sizing'],
   [/^EARNINGS_UNKNOWN/, 'Rejected: Earnings date unknown'],
   [/^EARNINGS_SOON/, 'Earnings Shield: reports within 3 trading days'],
+  [/^RESISTANCE_BLOCKS_TARGET/, 'Rejected: Major resistance blocks the target'],
   [/^SIZED_FOR_OTHER_VENUE/, 'Sized for another venue (mode changed)'],
 ];
 

@@ -16,6 +16,7 @@ const coinbaseApi = require('../connectors/coinbase-api');
 const brokerSync = require('../connectors/broker-sync');
 const adoption = require('./adoption');
 const { suggestLevels } = require('../risk/adoption-levels');
+const newsSentiment = require('../connectors/news-sentiment');
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: their strikes and
@@ -253,6 +254,8 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
     if (msg.type === 'ADOPT_POSITION' || msg.type === 'RELEASE_POSITION') return handleAdoption(ws, msg);
     if (msg.type === 'SAVE_SETUP' || msg.type === 'UNSAVE_SETUP') return handleSaved(ws, msg);
+    // News sentiment for one symbol (read-only, cached ~90 min server-side), to the asker only.
+    if (msg.type === 'GET_SENTIMENT') return newsSentiment.getSentiment(msg.symbol).then((r) => send(ws, 'NEWS_SENTIMENT', r));
     if (msg.type === 'GET_ADOPTION_SUGGESTIONS') return handleSuggest(ws, msg).catch((err) => console.error('[adopt] suggestions crashed:', err));
     if (msg.type === 'SYNC_PORTFOLIO') return handleSync(ws).catch((err) => console.error('[broker-sync] sync crashed:', err));
     send(ws, 'error', `unknown message type: ${msg.type}`);

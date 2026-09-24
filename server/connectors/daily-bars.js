@@ -36,9 +36,11 @@ async function getDailyBars(symbol, now = Date.now()) {
     hit = { at: now, ...(await fetchDailyBars(symbol)) };
     cache.set(symbol, hit);
   }
+  // Stocks: a 1D bar is stamped at its session start (ET midnight), so today's ET
+  // date = still forming. Crypto trades 24/7 in UTC days: complete once 24h passed.
   const today = etDate.format(now);
-  // A 1D bar is stamped at the start of its session (ET midnight), so its ET date is the session date.
-  return hit.bars.filter((b) => etDate.format(b.time * 1000) < today).map((b) => ({ ...b }));
+  const done = symbol.includes('-') ? (b) => (b.time + 86400) * 1000 <= now : (b) => etDate.format(b.time * 1000) < today;
+  return hit.bars.filter(done).map((b) => ({ ...b }));
 }
 
 module.exports = { getDailyBars, CACHE_TTL_MS };

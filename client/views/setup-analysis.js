@@ -57,13 +57,14 @@
     ])];
   }
 
-  function context(state) {
+  function context(state, o) {
     const c = state.intelligence && state.intelligence.context;
-    if (!c || !c.length) return [el('p', { className: 'sa-muted', textContent: 'Waiting for the first market read from the live streams.' })];
-    return [el('div', { className: 'sa-cols' }, c.map((m) => col(m.asset, [
+    const news = col(`${o.market === 'crypto' ? o.asset.replace('-', '/') : o.asset} news`, [SD.sentiment.badge(o.asset)]);
+    if (!c || !c.length) return [el('div', { className: 'sa-cols' }, [news, col('Market', [el('p', { className: 'sa-muted', textContent: 'Waiting for the first market read from the live streams.' })])])];
+    return [el('div', { className: 'sa-cols' }, [news, ...c.map((m) => col(m.asset, [
       el('p', { className: `sa-trend is-${m.trend}`, textContent: `${m.trend === 'unknown' ? 'No read' : m.trend[0].toUpperCase() + m.trend.slice(1)}${Number.isFinite(m.changePct) ? ` ${pct(m.changePct)}` : ''}` }),
       el('p', { className: 'sa-muted', textContent: [m.basis, m.breadth].filter(Boolean).join(' · ') }),
-    ])))];
+    ]))])];
   }
 
   function sources(o, watch) {
@@ -90,7 +91,7 @@
       return b;
     }));
     const asOf = watch ? '' : `As of ${o.stagedAt ? when(o.stagedAt) : '—'} · Source: ${o.strategyId || 'SignalDesk'}`;
-    const body = { thesis: () => thesis(o, watch), structure: () => structure(o, ctx, watch), context: () => context(ctx.state), sources: () => sources(o, watch) }[tab]();
+    const body = { thesis: () => thesis(o, watch), structure: () => structure(o, ctx, watch), context: () => context(ctx.state, o), sources: () => sources(o, watch) }[tab]();
     return el('section', { className: 'opp-analysis', id: 'opp-analysis' }, [
       el('div', { className: 'sa-head' }, [tabs, el('span', { className: 'sa-asof', textContent: asOf })]),
       el('div', { className: 'sa-body' }, body),

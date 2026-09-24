@@ -59,6 +59,7 @@
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
+    NEWS_SENTIMENT: (r) => SD.sentiment.received(r), // 0-100 gauge for the charted symbol
     SAVED_SETUPS: (list) => { state.saved = list || []; }, // bookmarks (Opportunities → Saved)
     UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 80 monitored symbols + names
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
