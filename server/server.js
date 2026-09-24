@@ -13,6 +13,8 @@ const alpacaStocks = require('./connectors/alpaca-stock-socket');
 const alpacaNews = require('./connectors/alpaca-news-socket');
 const coinbase = require('./connectors/coinbase-socket');
 const equityDay = require('./strategies/1-equity-day');
+const cryptoIntra = require('./strategies/2-crypto-intra');
+const equitySwing = require('./strategies/3-equity-swing');
 const optionsSystem = require('./strategies/5-options-system');
 const { processCandidate } = require('./risk/risk-engine');
 const ledger = require('./execution/paper-ledger');
@@ -23,7 +25,7 @@ const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const PIPELINE_INTERVAL_MS = 60000;
-const BANKROLL = 10000; // paper bankroll, fixed for now
+const BANKROLL = 50000; // paper bankroll; $25.2k+ is needed for one options contract at 1% risk
 const STOCK_WATCHLIST = ['AAPL', 'NVDA', 'SPY'];
 const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD'];
 
@@ -71,6 +73,8 @@ const heartbeat = setInterval(() => {
 // Each strategy runs isolated: one failing never blocks the others' candidates.
 const STRATEGIES = [
   ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
+  ['crypto-intraday', () => cryptoIntra.generateCandidates(prices.getLatestPrices())],
+  ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
   ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
 ];
 
