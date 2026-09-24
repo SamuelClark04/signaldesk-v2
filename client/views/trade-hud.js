@@ -8,6 +8,11 @@
 // Real option contracts lead with the contract itself: its live premium (the
 // real bid, or the modelled value when no fresh quote exists) and the option's
 // own P&L; the underlying's price follows for context.
+// Placement: drag it by its title bar anywhere inside the chart (double-click the
+// title bar to put it back top-right); "–" minimizes it to a small pill with the
+// symbol and P&L (click the pill to expand; the pill drags too). Position and
+// minimized state are kept per browser (localStorage) and survive the re-renders
+// every price tick causes, including in the middle of a drag.
 // Exposes window.SignalDesk.tradeHud.hud(o, ctx).
 (() => {
   const SD = window.SignalDesk;
@@ -86,14 +91,92 @@
     ]);
   }
 
+  // ---------- Placement: drag + minimize (shared across re-renders) ----------
+  const VIEW_KEY = 'signaldesk.tradeHud';
+  const view = (() => { try { return { collapsed: false, pos: null, ...JSON.parse(localStorage.getItem(VIEW_KEY) || '{}') }; } catch { return { collapsed: false, pos: null }; } })();
+  const saveView = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* storage blocked: this session only */ } };
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+  // Applies the saved position, kept inside the chart wrap (null = CSS default, top-right).
+  function place(node) {
+    if (!view.pos) { node.style.left = ''; node.style.top = ''; node.style.right = ''; return; }
+    const wrap = node.parentElement;
+    const maxX = wrap ? Math.max(0, wrap.clientWidth - node.offsetWidth) : view.pos.left;
+    const maxY = wrap ? Math.max(0, wrap.clientHeight - node.offsetHeight) : view.pos.top;
+    node.style.right = 'auto';
+    node.style.left = `${clamp(view.pos.left, 0, maxX)}px`;
+    node.style.top = `${clamp(view.pos.top, 0, maxY)}px`;
+  }
+
+  // Pointer drag from a handle. The HUD element is re-found on every move: a price
+  // tick may have replaced it mid-drag. A press that never moves is a click (onClick).
+  function startDrag(e, onClick) {
+    if (e.button !== 0 || e.target.closest('button:not(.hud-pill)')) return;
+    const node = e.currentTarget.closest('.trade-hud');
+    if (!node || getComputedStyle(node).position === 'static') { if (onClick) onClick(); return; } // phone layout: no dragging
+    const start = { x: e.clientX, y: e.clientY, left: node.offsetLeft, top: node.offsetTop };
+    let moved = false;
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 4) return;
+      moved = true;
+      ev.preventDefault();
+      view.pos = { left: start.left + ev.clientX - start.x, top: start.top + ev.clientY - start.y };
+      const cur = document.querySelector('.trade-hud');
+      if (cur) { place(cur); view.pos = { left: cur.offsetLeft, top: cur.offsetTop }; } // keep what is shown (clamped)
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('hud-dragging');
+      if (moved) saveView(); else if (onClick) onClick();
+    };
+    document.body.classList.add('hud-dragging');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.preventDefault();
+  }
+
+  const redraw = (node, o, ctx) => { const next = hud(o, ctx); if (next) node.replaceWith(next); };
+
+  // Minimized: "UNI/USD +$0.11" (option positions: the option's own P&L).
+  function pill(o, positions, ctx) {
+    const marks = positions.map((p) => SD.portfolioMetrics.mark(p, ctx.livePrice));
+    const known = marks.filter((m) => m.gross !== null && m.gross !== undefined);
+    const total = known.reduce((s, m) => s + m.gross, 0);
+    const label = SD.oppDetail.displaySymbol(o);
+    const b = el('button', { type: 'button', className: `hud-pill ${known.length ? pnlClass(total) : 'hud-muted'}`, title: 'Show the trade panel (drag to move)' }, [
+      el('span', { className: 'hud-pill-sym', textContent: `${label}${positions.length > 1 ? ` ×${positions.length}` : ''}` }),
+      el('strong', { textContent: known.length ? signed(total, money) : '—' }),
+    ]);
+    b.setAttribute('aria-label', `Active trade ${label}: expand`);
+    return b;
+  }
+
   // ctx: { state, livePrice, online, closing:Set, onClosePosition(p, m) }
   function hud(o, ctx) {
     const positions = ((ctx.state && ctx.state.positions) || []).filter((p) => p.asset === o.asset);
     if (!positions.length) return null;
-    return el('aside', { className: 'trade-hud', ariaLabel: 'Active trade' }, [
-      el('div', { className: 'hud-title', textContent: `Active trade${positions.length > 1 ? `s (${positions.length})` : ''}` }),
-      ...positions.map((p) => row(p, ctx.livePrice, ctx)),
-    ]);
+    let node;
+    if (view.collapsed) {
+      const b = pill(o, positions, ctx);
+      node = el('aside', { className: 'trade-hud is-collapsed', ariaLabel: 'Active trade (minimized)' }, [b]);
+      const expand = () => { view.collapsed = false; saveView(); redraw(node, o, ctx); };
+      b.addEventListener('pointerdown', (e) => startDrag(e, expand));
+      b.addEventListener('click', (e) => { if (e.detail === 0) expand(); }); // keyboard (Enter/Space); pointer clicks go through startDrag
+    } else {
+      const min = el('button', { type: 'button', className: 'hud-min', textContent: '–', title: 'Minimize' });
+      min.setAttribute('aria-label', 'Minimize the trade panel');
+      min.onclick = () => { view.collapsed = true; saveView(); redraw(node, o, ctx); };
+      const bar = el('div', { className: 'hud-title', title: 'Drag to move · double-click to reset' }, [
+        el('span', { textContent: `Active trade${positions.length > 1 ? `s (${positions.length})` : ''}` }), min]);
+      bar.addEventListener('pointerdown', (e) => startDrag(e));
+      bar.addEventListener('dblclick', () => { view.pos = null; saveView(); place(node); });
+      node = el('aside', { className: 'trade-hud', ariaLabel: 'Active trade' }, [bar, ...positions.map((p) => row(p, ctx.livePrice, ctx))]);
+    }
+    // Position once it is in the chart wrap (its size is known then).
+    requestAnimationFrame(() => { if (node.isConnected) place(node); });
+    if (view.pos) { node.style.right = 'auto'; node.style.left = `${Math.max(0, view.pos.left)}px`; node.style.top = `${Math.max(0, view.pos.top)}px`; }
+    return node;
   }
 
   SD.tradeHud = { hud };

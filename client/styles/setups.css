@@ -176,3 +176,14 @@ a.news-title:hover { color: var(--accent); text-decoration: underline; }
 .news-sched-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 8px; align-items: center; font-size: 12px; color: var(--text-muted); }
 .news-sched-item.is-tagged { color: var(--text); }
 .news-sched-item .apv-cat { text-align: center; }
+
+/* ---------- Trade HUD: drag + minimize (Phase 46) ---------- */
+.trade-hud .hud-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px -4px 0; padding: 2px 4px; cursor: grab; user-select: none; touch-action: none; }
+body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { cursor: grabbing; user-select: none; }
+.hud-min { padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 4px; background: transparent; color: var(--text-muted); font: 700 13px/18px var(--font-mono); cursor: pointer; }
+.hud-min:hover { color: var(--text); border-color: var(--text-faint); }
+.trade-hud.is-collapsed { width: auto; padding: 0; gap: 0; border-radius: 999px; }
+.hud-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 0; border-radius: 999px; background: transparent; font: 600 12px var(--font-mono); cursor: grab; touch-action: none; }
+.hud-pill-sym { color: var(--text); }
+.hud-pill:focus-visible, .hud-min:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 760px) { .trade-hud .hud-title, .hud-pill { cursor: default; } }

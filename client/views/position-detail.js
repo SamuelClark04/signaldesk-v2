@@ -69,7 +69,20 @@
     ];
   }
 
-  function positionBlock(p, livePrice) {
+  // Same rules as the trade panel's button: paper positions close at the live price
+  // (server re-checks); LIVE / adopted ones are closed at the broker.
+  function exitButton(p, m, ctx) {
+    const atBroker = p.execution === 'LIVE' || p.execution === 'BROKER';
+    const closing = !!(ctx.closing && ctx.closing.has(p.id));
+    const b = el('button', { type: 'button', className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,
+      textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : 'Manual Exit / Close Position',
+      disabled: atBroker || closing || !m.live || !ctx.online || !ctx.onClosePosition,
+      title: atBroker ? 'LIVE / adopted position: close it at the broker' : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price' });
+    b.onclick = () => ctx.onClosePosition(p, m);
+    return b;
+  }
+
+  function positionBlock(p, livePrice, ctx) {
     const m = SD.portfolioMetrics.mark(p, livePrice);
     const opt = p.market === 'options';
     const t1 = p.targets && p.targets[0] && p.targets[0].price;
@@ -81,6 +94,7 @@
       kv(opt ? `${p.asset} stop` : 'Stop', price(p.invalidation, p), 'text-short'),
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
       kv('Opened', p.openedAt ? new Date(p.openedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'),
+      exitButton(p, m, ctx),
     ]);
   }
 
@@ -96,8 +110,8 @@
           el('span', { className: 'opp-name', textContent: `Open position${held.length > 1 ? `s (${held.length})` : ''}` })]),
         el('span', { className: 'opp-pill is-ready', textContent: 'In trade' }),
       ]),
-      ...held.map((p) => positionBlock(p, ctx.livePrice)),
-      el('p', { className: 'opp-muted', textContent: `${opt ? 'The chart shows the underlying stock. ' : ''}Manual exit: the trade panel on the chart.` }),
+      ...held.map((p) => positionBlock(p, ctx.livePrice, ctx)),
+      el('p', { className: 'opp-muted', textContent: `${opt ? 'The chart shows the underlying stock. ' : ''}Manual exit: the button above, or the trade panel on the chart (it can be moved or minimized).` }),
     ]);
   }
 
