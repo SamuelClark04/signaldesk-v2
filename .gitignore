@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Secrets (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# Logs and OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
