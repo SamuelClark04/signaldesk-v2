@@ -29,8 +29,8 @@
   let socket = null;
   let currentTab = null;
 
-  // ---------- Shared client state (server snapshots; read by the Today dashboard) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null };
+  // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -43,18 +43,21 @@
     REJECTION_STATS: (stats) => { state.rejections = stats; },
     WATCHLIST_UPDATED: (items) => { state.watchlist = items || []; },
     DASHBOARD_INTELLIGENCE: (intel) => { state.intelligence = intel; },
+    PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
   };
 
-  // Rendered on entering the tab and on every state change while it is visible.
-  function refreshToday() {
+  // State-driven views: rendered on entering their tab and on every state change
+  // (or connection change) while visible.
+  function refreshView() {
     if (currentTab === 'today') SD.today.renderToday($('today-root'), state);
+    if (currentTab === 'opportunities') SD.opportunities.render($('opportunities-root'), state);
   }
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
   function showTab(name) {
     const tab = TABS.includes(name) ? name : DEFAULT_TAB;
     currentTab = tab;
-    refreshToday();
+    refreshView();
     for (const t of TABS) $(`tab-${t}`).hidden = t !== tab;
     document.querySelectorAll('.nav-link').forEach((a) => {
       const active = a.dataset.tab === tab;
@@ -74,17 +77,14 @@
   // ---------- WebSocket ----------
   const isOnline = () => !!socket && socket.readyState === WebSocket.OPEN;
   const transport = { isOnline, send: (msg) => socket.send(JSON.stringify(msg)) };
-  SD.queue.init(transport);
+  SD.opportunities.init(transport);
   SD.portfolio.init(transport);
   SD.settings.init(transport);
 
   const HANDLERS = {
-    'orders:snapshot': (orders) => SD.queue.receive(orders, { replace: true }),
-    'order:staged': (order) => SD.queue.receive(order),
-    QUEUE_UPDATED: (orders) => SD.queue.receive(orders, { replace: true }),
     POSITIONS_UPDATED: (positions) => SD.portfolio.render(positions || []),
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
-    ACTION_FAILED: (payload) => SD.queue.actionFailed(payload),
+    ACTION_FAILED: (payload) => SD.opportunities.actionFailed(payload),
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
@@ -101,28 +101,27 @@
     setConn('connecting', 'Connecting…');
     const ws = new WebSocket(WS_URL);
     socket = ws;
-    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.queue.render(); });
+    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); refreshView(); });
     ws.addEventListener('message', (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
       const handler = HANDLERS[msg.type];
       if (handler) handler(msg.payload);
       const update = STATE_UPDATES[msg.type];
-      if (update) { update(msg.payload); refreshToday(); }
+      if (update) { update(msg.payload); refreshView(); }
     });
     ws.addEventListener('close', () => {
       // A LAN page without a token will always be refused: say why instead of "Offline".
       setConn('closed', !isLocalPage && !accessToken
         ? 'No access token: open the link printed by the server'
         : `Offline · retry ${backoff / 1000}s`);
-      SD.queue.render(); // disables the action buttons while offline
+      refreshView(); // disables the action buttons while offline
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);
     });
   }
 
   showTab(location.hash.slice(1));
-  SD.queue.render();
   SD.portfolio.render([]);
   SD.journal.render([]);
   connect();

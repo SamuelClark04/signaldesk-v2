@@ -18,6 +18,7 @@ const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeli
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const watchlist = require('./execution/watchlist');
+const prices = require('./market/latest-prices');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
@@ -79,6 +80,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
   send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
   send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());
+  send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
   try {
     send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
   } catch (err) {

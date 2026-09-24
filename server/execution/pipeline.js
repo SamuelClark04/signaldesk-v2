@@ -21,6 +21,7 @@ const PIPELINE_INTERVAL_MS = 60000;
 
 let broadcast = () => {}; // set by startPipeline()
 let pipelineTimer = null;
+let lastPricesKey = null;
 
 // Each strategy runs isolated: one failing never blocks the others' candidates.
 const STRATEGIES = [
@@ -92,11 +93,18 @@ async function pipelinePass() {
 
   // Exit management. LIVE positions first, from broker truth (real fills);
   // then PAPER positions from local prices (monitorPositions skips LIVE ones).
-  // Watchlist last prices (broadcast via watchlist.onChange only when a price moved).
+  // Live prices: watchlist last prices, and PRICES_UPDATED for the Setups view
+  // (each broadcast only when a price actually moved).
   try {
-    watchlist.syncPrices(prices.getLatestPrices());
+    const latest = prices.getLatestPrices();
+    watchlist.syncPrices(latest);
+    const key = JSON.stringify([...latest]);
+    if (key !== lastPricesKey) {
+      lastPricesKey = key;
+      broadcast('PRICES_UPDATED', Object.fromEntries(latest));
+    }
   } catch (err) {
-    console.error('[pipeline] watchlist price sync failed:', err.message);
+    console.error('[pipeline] price sync failed:', err.message);
   }
 
   let positionsChanged = false;

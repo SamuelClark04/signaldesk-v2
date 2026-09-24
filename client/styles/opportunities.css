@@ -1,0 +1,100 @@
+/* Opportunities tab: sub-navigation and the 3-column Setups workspace
+   (queue rail | analysis | risk & execution). Colors from main.css tokens. */
+
+.opp { display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- Sub-navigation ---------- */
+.opp-subnav { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.opp-subtab { padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.opp-subtab:hover { color: var(--text); }
+.opp-subtab.is-active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.opp-subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.notice { padding: 8px 16px; border-bottom: 1px solid var(--border); background: rgba(251, 191, 36, 0.08); color: var(--warn); font-size: 13px; }
+.opp-notice { border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; }
+
+/* ---------- 3-column grid ---------- */
+.opp-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.opp-grid.is-empty { grid-template-columns: 260px minmax(0, 1fr); }
+.opp-rail, .opp-center, .opp-right, .opp-empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  min-width: 0;
+}
+.opp-empty { color: var(--text-faint); display: grid; place-items: center; min-height: 240px; text-align: center; }
+.opp-section { margin: 0 0 8px; color: var(--text-faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.opp-muted { margin: 0; color: var(--text-faint); font-size: 13px; }
+.opp-k { color: var(--text-faint); }
+
+/* ---------- Rail ---------- */
+.opp-rail { display: flex; flex-direction: column; gap: 8px; }
+.opp-rail-head { display: flex; align-items: center; justify-content: space-between; }
+.opp-rail-head .opp-section { margin: 0; }
+.opp-card {
+  display: flex; flex-direction: column; gap: 4px;
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.opp-card:hover { border-color: var(--border-strong); }
+.opp-card.is-active { border-color: var(--border-strong); border-left-color: var(--accent); background: var(--surface-2); }
+.opp-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.opp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.opp-card-meta { font-size: 13px; color: var(--text-muted); }
+.opp-card-sub { font-size: 11px; color: var(--text-faint); }
+
+/* ---------- Center ---------- */
+.opp-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.opp-symbol { margin: 0; font: 600 20px var(--font-mono); }
+.opp-meta { color: var(--text-muted); font-size: 13px; }
+.opp-last { margin-left: auto; font: 14px var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.opp-chart { position: relative; height: 300px; border: 1px solid var(--border); border-radius: 8px; background:
+  repeating-linear-gradient(0deg, transparent 0 59px, rgba(148, 163, 184, 0.05) 59px 60px), var(--bg); overflow: hidden; }
+.opp-chart-note { position: absolute; left: 12px; bottom: 8px; color: var(--text-faint); font-size: 11px; }
+.opp-band { position: absolute; left: 0; right: 0; background: rgba(56, 189, 248, 0.08); }
+.opp-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--text-faint); }
+.opp-line-label { position: absolute; right: 8px; transform: translateY(-50%); padding: 1px 6px; border-radius: 4px; background: var(--surface-2); font: 11px var(--font-mono); white-space: nowrap; }
+.opp-line.is-target { border-top-color: var(--long); }
+.opp-line.is-target .opp-line-label { color: var(--long); }
+.opp-line.is-stop { border-top-color: var(--short); }
+.opp-line.is-stop .opp-line-label { color: var(--short); }
+.opp-line.is-entry { border-top-color: var(--accent); }
+.opp-line.is-entry .opp-line-label { color: var(--accent); }
+.opp-line.is-last { border-top: 1px solid var(--text); }
+.opp-line.is-last .opp-line-label { left: 8px; right: auto; color: var(--text); }
+
+.opp-thesis { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.opp-thesis-text { margin: 0 0 8px; line-height: 1.55; }
+.opp-catalyst { margin: 0 0 8px; font-size: 13px; }
+.opp-criteria { margin: 0; padding-left: 18px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+
+/* ---------- Right ---------- */
+.opp-right { display: flex; flex-direction: column; gap: 6px; }
+.opp-right .opp-section { margin-top: 10px; }
+.opp-right .opp-section:first-child { margin-top: 0; }
+.opp-kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.opp-v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.opp-scenarios { table-layout: auto; }
+.opp-scenarios th, .opp-scenarios td { padding: 6px 4px; font-size: 12px; }
+.opp-scenarios th { font-size: 10px; letter-spacing: 0.03em; }
+.opp-r { display: block; font-size: 11px; opacity: 0.8; }
+.opp-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.opp-venue { font-size: 12px; color: var(--text-muted); }
+.opp-venue.is-live { color: var(--short); font-weight: 600; }
+.opp-go { padding: 9px 14px; font-size: 13px; }
+.btn-live { border-color: var(--short); background: var(--short); color: var(--bg); font-weight: 600; }
+.btn-live:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1200px) {
+  .opp-grid { grid-template-columns: 240px minmax(0, 1fr); }
+  .opp-right { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .opp-grid, .opp-grid.is-empty { grid-template-columns: 1fr; }
+  .opp-chart { height: 220px; }
+  .opp-last { margin-left: 0; }
+}

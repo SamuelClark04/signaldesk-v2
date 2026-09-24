@@ -91,7 +91,7 @@
     const field = (k, v, cls = '') => el('div', { className: 'today-field' }, [
       el('span', { className: 'today-field-k', textContent: k }), el('span', { className: `today-field-v ${cls}`, textContent: v })]);
     const review = el('button', { className: 'btn btn-primary', textContent: 'Review setup', type: 'button' });
-    review.onclick = go('opportunities');
+    review.onclick = () => { SD.opportunities.select(c.id); location.hash = 'opportunities'; };
     return el('article', { className: 'today-setup' }, [
       el('div', { className: 'today-setup-head' }, [
         el('span', { className: 'asset', textContent: c.asset }),
@@ -111,7 +111,7 @@
   // Real: the Approvals Queue (up to 3 cards).
   function readyForReview(state) {
     const real = state.pending.slice(0, 3).map((o) => ({
-      asset: o.asset, direction: o.direction, timeframe: o.timeframe, market: o.market, entryPrice: o.entryPrice,
+      id: o.id, asset: o.asset, direction: o.direction, timeframe: o.timeframe, market: o.market, entryPrice: o.entryPrice,
       entryMin: o.entryZone.min, entryMax: o.entryZone.max, invalidation: o.invalidation, target: o.targets && o.targets[0] && o.targets[0].price,
     }));
     const body = real.length

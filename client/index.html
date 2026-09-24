@@ -6,7 +6,7 @@
   <title>SignalDesk</title>
   <!-- main.css first: view sheets build on its tokens and base rules. -->
   <link rel="stylesheet" href="styles/main.css">
-  <link rel="stylesheet" href="styles/queue.css">
+  <link rel="stylesheet" href="styles/opportunities.css">
   <link rel="stylesheet" href="styles/portfolio.css">
   <link rel="stylesheet" href="styles/journal.css">
   <link rel="stylesheet" href="styles/settings.css">
@@ -45,41 +45,7 @@
       </section>
 
       <section class="tab" id="tab-opportunities" data-title="Opportunities" hidden>
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">Approvals Queue</h2>
-            <span class="count" id="queue-count">0</span>
-            <span class="panel-hint">Staged candidates that passed the risk and cost gate</span>
-          </div>
-
-          <div class="notice" id="queue-notice" role="status" hidden></div>
-
-          <div class="table-wrap">
-            <table class="data-table queue-table">
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Setup</th>
-                  <th>Dir</th>
-                  <th class="num">Entry zone</th>
-                  <th class="num">Stop</th>
-                  <th class="num">Targets</th>
-                  <th class="num">Size</th>
-                  <th class="num">Risk $</th>
-                  <th class="num">Fee drag</th>
-                  <th>Catalyst</th>
-                  <th class="num">Age</th>
-                  <th class="actions-col">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="queue-body"></tbody>
-            </table>
-          </div>
-
-          <div class="empty" id="queue-empty">
-            No staged candidates. New setups appear here as soon as the risk engine approves them.
-          </div>
-        </div>
+        <div class="opp" id="opportunities-root"></div>
       </section>
 
       <section class="tab" id="tab-portfolio" data-title="Portfolio" hidden>
@@ -228,7 +194,8 @@
 
   <!-- Order matters: helpers, then views, then the shell that wires them up. -->
   <script src="lib/ui.js"></script>
-  <script src="views/queue.js"></script>
+  <script src="views/opportunity-detail.js"></script>
+  <script src="views/opportunities.js"></script>
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
   <script src="views/settings.js"></script>

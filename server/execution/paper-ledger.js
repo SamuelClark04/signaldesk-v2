@@ -8,6 +8,7 @@
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
+const { grossPnl, optionsValueAt, priceScenarios } = require('../risk/scenarios');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -36,7 +37,7 @@ function stageOrder(sizedCandidate) {
   const order = { ...sizedCandidate, status: 'pending', stagedAt: Date.now() };
   pendingOrders.push(order);
   store.save();
-  return { ...order };
+  return { ...order, scenarios: priceScenarios(order) };
 }
 
 // fillPrice defaults to the risk engine's worst-case entry price. `extra` records
@@ -71,28 +72,12 @@ function discardOrder(candidateId) {
   return { ...discarded };
 }
 
-// Options value at exit, per share of underlying: each leg's intrinsic value at
-// the underlying exit price (buy legs +, sell legs -). Intrinsic ignores the time
-// value left in the options, so exits are valued as if at expiry: a spread
-// is worth at most its strike width and a stopped-out long call is worth 0.
-function optionsExitValue(legs, underlyingPrice) {
-  return legs.reduce((v, leg) => {
-    const intrinsic = leg.type === 'put'
-      ? Math.max(0, leg.strike - underlyingPrice)
-      : Math.max(0, underlyingPrice - leg.strike);
-    return v + (leg.side === 'sell' ? -1 : 1) * (leg.ratio || 1) * intrinsic;
-  }, 0);
-}
-
 // Gross P/L before fees, plus the per-share option value at exit (options only).
+// The maths lives in risk/scenarios.js, shared with the Setups view's previews.
 function grossPnlAt(pos, exitPrice) {
-  if (pos.market !== 'options') {
-    const sign = pos.direction === 'short' ? -1 : 1;
-    return { grossPnl: (exitPrice - pos.fillPrice) * pos.positionSize * sign };
-  }
-  const { debit, multiplier, legs } = pos.optionsData;
-  const exitValue = optionsExitValue(legs || [], exitPrice);
-  return { grossPnl: (exitValue - debit) * multiplier * pos.positionSize, optionsExitValue: exitValue };
+  const result = { grossPnl: grossPnl(pos, pos.fillPrice, exitPrice) };
+  if (pos.market === 'options') result.optionsExitValue = optionsValueAt(pos.optionsData.legs, exitPrice);
+  return result;
 }
 
 // exitPrice is always the UNDERLYING price (options are valued from their legs).
@@ -201,7 +186,9 @@ function voidLivePosition(candidateId, reason) {
 }
 
 // Read-only views: callers get copies, never the ledger's own arrays.
-const getPendingOrders = () => pendingOrders.map((o) => ({ ...o }));
+// Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
+// derived on read, never stored, so older saved orders get them too.
+const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o) }));
 const getActivePositions = () => activePositions.map((p) => ({ ...p }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
