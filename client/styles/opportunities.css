@@ -221,3 +221,7 @@
 .apv-cat { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text-muted); font: 600 11px/18px var(--font-mono); cursor: help; }
 .apv-cat.is-fomc, .apv-cat.is-cpi { border-color: rgba(251, 191, 36, 0.5); color: var(--warn); }
 .apv-cat.is-fda { border-color: rgba(56, 189, 248, 0.5); color: var(--accent); }
+
+/* ---------- Chart rotation toggle (Phase 46) ---------- */
+.opp-rotate { font-size: 12px; }
+.opp-rotate.is-on { border-color: var(--accent); color: var(--accent); }

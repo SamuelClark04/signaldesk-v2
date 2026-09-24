@@ -1,13 +1,27 @@
-// Setups tab: the analysis card under the chart (Thesis / Price structure /
-// Market context / Sources). Everything shown comes from the setup itself, the
-// order guard's rules, the loaded chart and DASHBOARD_INTELLIGENCE: no invented text.
+// Setups tab: the analysis card under the chart (News & Catalysts / Thesis /
+// Price structure / Market context / Sources). Everything shown comes from the
+// setup itself, the order guard's rules, the loaded chart and
+// DASHBOARD_INTELLIGENCE: no invented text. Thesis only appears when the setup has
+// one. The tabs advance by themselves every CYCLE_MS (command-center display);
+// clicking a tab restarts the countdown, and it holds while the pointer is over
+// the card (someone is reading it).
 // Exposes window.SignalDesk.setupAnalysis.analysis(o, ctx).
 (() => {
   const SD = window.SignalDesk;
   const { el, price } = SD.ui;
 
-  const TABS = [['thesis', 'Thesis'], ['structure', 'Price structure'], ['context', 'Market context'], ['news', 'News & Catalysts'], ['sources', 'Sources']];
-  let tab = 'thesis';
+  const TABS = [['news', 'News & Catalysts'], ['thesis', 'Thesis'], ['structure', 'Price structure'], ['context', 'Market context'], ['sources', 'Sources']];
+  const CYCLE_MS = 10000;
+  let tab = 'news';
+  let shown = TABS.map(([k]) => k); // the tabs of the last render
+  let rerenderLast = null;
+  const hasThesis = (o) => typeof o.thesis === 'string' && o.thesis.trim().length > 0;
+
+  const cycler = SD.autoCycle({
+    periodMs: CYCLE_MS,
+    canRun: () => { const card = document.getElementById('opp-analysis'); return !!(card && card.offsetParent && rerenderLast && !card.matches(':hover')); },
+    advance: () => { tab = shown[(shown.indexOf(tab) + 1) % shown.length]; rerenderLast(); },
+  });
 
   const col = (title, children) => el('div', { className: 'sa-col' }, [el('h4', { className: 'sa-h', textContent: title }), ...children]);
   const list = (items) => el('ul', { className: 'sa-list' }, items.map((t) => el('li', { textContent: t })));
@@ -83,11 +97,15 @@
   // ctx: { state, livePrice, refPrice, rerender }
   function analysis(o, ctx) {
     const watch = !SD.oppDetail.hasLevels(o);
-    const tabs = el('div', { className: 'sa-tabs', role: 'tablist' }, TABS.map(([key, label]) => {
+    const available = TABS.filter(([key]) => key !== 'thesis' || hasThesis(o));
+    shown = available.map(([k]) => k);
+    rerenderLast = ctx.rerender;
+    if (!shown.includes(tab)) tab = shown[0];
+    const tabs = el('div', { className: 'sa-tabs', role: 'tablist' }, available.map(([key, label]) => {
       const b = el('button', { type: 'button', className: `sa-tab${key === tab ? ' is-active' : ''}`, textContent: label });
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', String(key === tab));
-      b.onclick = () => { tab = key; ctx.rerender(); };
+      b.onclick = () => { tab = key; cycler.reset(); ctx.rerender(); };
       return b;
     }));
     const asOf = watch ? '' : `As of ${o.stagedAt ? when(o.stagedAt) : '—'} · Source: ${o.strategyId || 'SignalDesk'}`;

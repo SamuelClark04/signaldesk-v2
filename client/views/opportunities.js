@@ -109,6 +109,34 @@
     rerender();
   }
 
+  // ---------- Chart rotation (command center) ----------
+  // Every ROTATE_MS the chart moves to the next queued setup / Market Watch symbol
+  // (the rail's current list, in its order). Pause / Play in the toolbar (kept per
+  // browser). It never switches while the pointer is over the rail or the risk &
+  // execution panel, while an action is in flight, or while the symbol picker is
+  // open; any click in the workspace restarts the countdown.
+  const ROTATE_MS = 12000;
+  let rotation = []; // [{ id } | { symbol }] from the last Setups render
+  const rotator = SD.autoCycle({
+    periodMs: ROTATE_MS, key: 'signaldesk.chartRotation',
+    canRun: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && rotation.length > 1 && !inFlight.size
+      && !document.querySelector('.opp-rail:hover, .opp-right:hover, .trade-hud:hover') && !(document.activeElement && document.activeElement.id === 'opp-symbol-select')),
+    advance: () => {
+      const i = rotation.findIndex((r) => (r.id ? r.id === activeId : !activeId && r.symbol === watchSymbol));
+      const next = rotation[(i + 1) % rotation.length];
+      if (next.id) { activeId = next.id; manualWatch = false; } else { watchSymbol = next.symbol; activeId = null; manualWatch = true; }
+      rerender();
+    },
+  });
+  function rotationButton() {
+    const on = rotator.playing();
+    const b = el('button', { type: 'button', className: `btn opp-rotate${on ? ' is-on' : ''}`, textContent: on ? '⏸ Pause rotation' : '▶ Play rotation',
+      title: on ? `Auto-rotating the chart every ${ROTATE_MS / 1000}s through the queue and Market Watch` : 'Chart rotation paused' });
+    b.setAttribute('aria-pressed', String(on));
+    b.onclick = () => { rotator.setPlaying(!on); rerender(); };
+    return b;
+  }
+
   // Rail clicks (opportunities-rail.js): a queued setup, a watch symbol, or an open
   // position (charted as Market Watch, where the Active Trade HUD shows it).
   const onSelectSetup = (id) => { activeId = id; manualWatch = false; rerender(); };
@@ -137,6 +165,7 @@
     if (!visible.some((o) => o.id === activeId)) activeId = !manualWatch && visible.length ? visible[0].id : null;
     if (!activeId && !watchable.includes(watchSymbol) && watchable.length) watchSymbol = watchable[0];
     const active = visible.find((o) => o.id === activeId) || marketWatch(watchSymbol);
+    rotation = [...visible.map((o) => ({ id: o.id })), ...watchable.filter((s) => !visible.some((o) => o.asset === s)).map((symbol) => ({ symbol }))];
 
     const rail = SD.oppRail.rail(state, { assetFilter, searchRaw, searching: !!search, filtered: assetFilter !== 'all' || !!search,
       real, visible, activeId, watch, watchSymbol, isWatch: !!active.isWatch, inFlight, matchesAsset,
@@ -195,6 +224,10 @@
   }
 
   function render(container, state) {
+    if (!container.dataset.rotationHooked) { // a click in the workspace restarts the rotation countdown
+      container.dataset.rotationHooked = '1';
+      container.addEventListener('pointerdown', () => rotator.reset());
+    }
     mounted = { container, state };
     // Briefly hold re-renders while the chart's symbol picker is in use (symbol-picker.js).
     if (SD.symbolPicker.holding(container, rerender)) return;
@@ -219,7 +252,8 @@
     const assetTabs = SD.oppRail.segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
     container.replaceChildren(
       // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
-      el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs] : [tabs, el('div', { className: 'opp-toolbar-right' }, [scanBtn, assetTabs])]),
+      el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs]
+        : [tabs, el('div', { className: 'opp-toolbar-right' }, [...(subTab === 'setups' ? [rotationButton()] : []), scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
       subTab === 'setups' ? setups(state) : subTab === 'approvals' ? approvals(state) : subTab === 'scanner' ? scanner(state)
         : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
