@@ -91,11 +91,10 @@ const heartbeat = setInterval(() => {
 
 function start() {
   alpacaStocks.init({ symbols: STOCK_WATCHLIST });
-  // News stream disabled: on Alpaca's free tier it competes with the bar stream
-  // for the single allowed connection (406 "connection limit exceeded").
-  // Without it, getNewsContext() is empty: equity-day ORB setups carry a
-  // 'technical' catalyst and its negative-news veto is inactive.
-  // alpacaNews.init({ symbols: STOCK_WATCHLIST });
+  // News stream (Event Catalyst Engine). Alpaca's connection limit is per endpoint,
+  // so it doesn't compete with the bar stream; a 406/404 is retried quietly with
+  // backoff inside the connector (see alpaca-news-socket.js).
+  alpacaNews.init({ symbols: STOCK_WATCHLIST });
   coinbase.init({ symbols: CRYPTO_WATCHLIST });
   startPipeline({ broadcast });
 }
