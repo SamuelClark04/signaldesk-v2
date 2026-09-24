@@ -137,6 +137,11 @@
     </main>
   </div>
 
+  <!-- Order matters: helpers, then views, then the shell that wires them up. -->
+  <script src="lib/ui.js"></script>
+  <script src="views/queue.js"></script>
+  <script src="views/portfolio.js"></script>
+  <script src="views/journal.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

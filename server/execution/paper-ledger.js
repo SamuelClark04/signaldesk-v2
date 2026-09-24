@@ -3,8 +3,14 @@
 // Lifecycle: stageOrder -> pendingOrders -> executeOrder -> activePositions
 //            -> closePosition -> tradeJournal
 //            pendingOrders -> discardOrder -> discardedOrders (never traded)
+// Every change is persisted to server/data/ledger-state.json and restored on start.
+const fs = require('fs');
+const path = require('path');
 const { isApproved } = require('../risk/risk-engine');
 const { getRoundTripRate } = require('../risk/cost-authority');
+
+const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
+const STATE_VERSION = 1;
 
 const pendingOrders = [];
 const activePositions = [];
@@ -12,6 +18,40 @@ const tradeJournal = [];
 // Rejected orders are kept (outside the journal) so a strategy re-proposing the
 // same deterministic id cannot put a rejected trade back in the queue.
 const discardedOrders = [];
+const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders };
+
+// ---------- Persistence ----------
+// Write to a temp file then rename, so a crash mid-write never leaves a torn file.
+// A failed save is logged, not thrown: the in-memory ledger stays authoritative.
+function saveState() {
+  const state = { version: STATE_VERSION, savedAt: new Date().toISOString(), ...LISTS };
+  try {
+    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
+    const tmp = `${STATE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, STATE_PATH);
+  } catch (err) {
+    console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}`);
+  }
+}
+
+// An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.
+function loadState() {
+  if (!fs.existsSync(STATE_PATH)) return;
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    for (const key of Object.keys(LISTS)) {
+      if (!Array.isArray(state[key])) throw new Error(`"${key}" is missing or not an array`);
+    }
+    for (const [key, list] of Object.entries(LISTS)) list.push(...state[key]);
+    console.log(`[ledger] restored ${pendingOrders.length} pending, ${activePositions.length} open, `
+      + `${tradeJournal.length} closed, ${discardedOrders.length} rejected from ${STATE_PATH}`);
+  } catch (err) {
+    const aside = `${STATE_PATH}.corrupt-${Date.now()}`;
+    try { fs.renameSync(STATE_PATH, aside); } catch { /* leave it in place */ }
+    console.error(`[ledger] could not load ${STATE_PATH} (${err.message}); moved to ${aside}, starting empty`);
+  }
+}
 
 function findIndex(list, candidateId) {
   return list.findIndex((o) => o.id === candidateId);
@@ -31,6 +71,7 @@ function stageOrder(sizedCandidate) {
   }
   const order = { ...sizedCandidate, status: 'pending', stagedAt: Date.now() };
   pendingOrders.push(order);
+  saveState();
   return { ...order };
 }
 
@@ -47,6 +88,7 @@ function executeOrder(candidateId, fillPrice) {
     openedAt: Date.now(),
   };
   activePositions.push(position);
+  saveState();
   return { ...position };
 }
 
@@ -57,6 +99,7 @@ function discardOrder(candidateId) {
   const [order] = pendingOrders.splice(i, 1);
   const discarded = { ...order, status: 'discarded', discardedAt: Date.now() };
   discardedOrders.push(discarded);
+  saveState();
   return { ...discarded };
 }
 
@@ -86,6 +129,7 @@ function closePosition(candidateId, exitPrice, exitReason) {
     rMultiple: netPnl / pos.dollarRisk,
   };
   tradeJournal.push(entry);
+  saveState();
   return { ...entry };
 }
 
@@ -126,6 +170,9 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o }));
 const getActivePositions = () => activePositions.map((p) => ({ ...p }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
+// Restore persisted state once, when the module is first required.
+loadState();
+
 module.exports = {
   stageOrder,
   executeOrder,
@@ -136,3 +183,4 @@ module.exports = {
   getActivePositions,
   getTradeJournal,
 };
+

@@ -15,7 +15,7 @@ const coinbase = require('./connectors/coinbase-socket');
 const equityDay = require('./strategies/1-equity-day');
 const { processCandidate } = require('./risk/risk-engine');
 const ledger = require('./execution/paper-ledger');
-const { validateApproval } = require('./execution/order-guard');
+const { createMessageHandler } = require('./execution/message-handler');
 const prices = require('./market/latest-prices');
 
 const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
@@ -46,53 +46,17 @@ function broadcast(type, payload) {
   for (const ws of wss.clients) send(ws, type, payload);
 }
 
+const handleMessage = createMessageHandler({ send, broadcast });
+
 wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return send(ws, 'error', 'invalid JSON'); }
-    if (msg.type === 'ping') return send(ws, 'pong', Date.now());
-    if (QUEUE_ACTIONS[msg.type]) return handleQueueAction(ws, msg);
-    send(ws, 'error', `unknown message type: ${msg.type}`);
-  });
+  ws.on('message', (raw) => handleMessage(ws, raw));
   send(ws, 'hello', { server: 'signaldesk-v2', ts: Date.now() });
   send(ws, 'orders:snapshot', ledger.getPendingOrders());
   send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
 });
-
-// Client intents. The client only asks; the ledger decides and the server
-// broadcasts the resulting queue so every open client shows the same state.
-const QUEUE_ACTIONS = {
-  APPROVE: (id) => approveWithGuard(id),
-  REJECT: (id) => ledger.discardOrder(id),
-};
-
-// Guarded approval: fills at the live price, or retires the setup with a reason.
-function approveWithGuard(id) {
-  const order = ledger.getPendingOrders().find((o) => o.id === id);
-  if (!order) throw new Error(`no pending order ${id}`);
-  const livePrice = prices.getLatestPrice(order.asset);
-  const check = validateApproval(order, livePrice);
-  if (check.valid) return ledger.executeOrder(id, livePrice);
-  // A missing price is a data gap, not a verdict on the setup: leave it pending.
-  if (check.reason !== 'NO_LIVE_PRICE') ledger.discardOrder(id);
-  throw new Error(check.reason);
-}
-
-function handleQueueAction(ws, { type, id }) {
-  try {
-    if (typeof id !== 'string' || !id) throw new Error('missing order id');
-    const result = QUEUE_ACTIONS[type](id);
-    console.log(`[ledger] ${type} ${id} -> ${result.status}`);
-    if (result.status === 'open') broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
-  } catch (err) {
-    console.warn(`[ledger] ${type} ${id} failed: ${err.message}`);
-    send(ws, 'ACTION_FAILED', { type, id, error: err.message });
-  }
-  broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
-}
 
 // Drop dead client connections every 30s.
 const heartbeat = setInterval(() => {
