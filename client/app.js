@@ -27,10 +27,31 @@
   const DEFAULT_TAB = 'opportunities';
 
   let socket = null;
+  let currentTab = null;
+
+  // ---------- Shared client state (server snapshots; read by the Today dashboard) ----------
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [] };
+  const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
+  const STATE_UPDATES = {
+    'orders:snapshot': (orders) => { state.pending = orders || []; },
+    'order:staged': (order) => { if (order && order.id) state.pending = upsert(state.pending, order); },
+    QUEUE_UPDATED: (orders) => { state.pending = orders || []; },
+    POSITIONS_UPDATED: (positions) => { state.positions = positions || []; },
+    JOURNAL_UPDATED: (trades) => { state.journal = trades || []; },
+    SETTINGS_UPDATED: (settings) => { state.settings = settings; },
+    BROKER_STATE: (broker) => { state.broker = broker; },
+  };
+
+  // Rendered on entering the tab and on every state change while it is visible.
+  function refreshToday() {
+    if (currentTab === 'today') SD.today.renderToday($('today-root'), state);
+  }
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
   function showTab(name) {
     const tab = TABS.includes(name) ? name : DEFAULT_TAB;
+    currentTab = tab;
+    refreshToday();
     for (const t of TABS) $(`tab-${t}`).hidden = t !== tab;
     document.querySelectorAll('.nav-link').forEach((a) => {
       const active = a.dataset.tab === tab;
@@ -83,6 +104,8 @@
       try { msg = JSON.parse(e.data); } catch { return; }
       const handler = HANDLERS[msg.type];
       if (handler) handler(msg.payload);
+      const update = STATE_UPDATES[msg.type];
+      if (update) { update(msg.payload); refreshToday(); }
     });
     ws.addEventListener('close', () => {
       // A LAN page without a token will always be refused: say why instead of "Offline".

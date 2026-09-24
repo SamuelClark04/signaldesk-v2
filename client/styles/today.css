@@ -1,0 +1,102 @@
+/* Today tab: command-center dashboard. Colors come from main.css tokens so the
+   dashboard stays consistent with every other tab. */
+
+.today { display: flex; flex-direction: column; gap: 16px; }
+
+.today-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.today-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.today-card-title { margin: 0; font-size: 14px; font-weight: 600; }
+.today-card-hint { margin-left: auto; color: var(--text-faint); font-size: 12px; }
+.today-tag {
+  padding: 0 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-faint);
+  font: 600 10px/16px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---------- Metric banner ---------- */
+.today-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.today-metric { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.today-metric-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.today-metric-value { margin-top: 4px; font: 600 22px var(--font-mono); font-variant-numeric: tabular-nums; }
+.today-metric-sub { margin-top: 2px; color: var(--text-faint); font-size: 12px; }
+.today-live { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -4px; }
+.today-live-item {
+  padding: 4px 10px;
+  border: 1px solid var(--short);
+  border-radius: 999px;
+  background: var(--short-bg);
+  color: var(--short);
+  font-size: 12px;
+}
+.today-live-item.is-error { border-color: var(--warn); background: transparent; color: var(--warn); }
+
+/* ---------- Briefing ---------- */
+.today-briefing { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
+.today-briefing-text { display: flex; flex-direction: column; gap: 8px; }
+.today-briefing-title { margin: 0; font-size: 18px; font-weight: 600; }
+.today-pills { display: flex; gap: 6px; }
+.today-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.today-pill.is-hot { background: rgba(56, 189, 248, 0.14); color: var(--accent); }
+.today-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+
+/* ---------- Main split ---------- */
+.today-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.today-setups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.today-setup { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--bg); }
+.today-setup-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.today-setup .today-actions { margin: 12px 0 0; }
+.today-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.today-field { display: flex; flex-direction: column; gap: 2px; }
+.today-field-k { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.today-field-v { font: 13px var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- Lists ---------- */
+.today-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.today-list > li { padding: 8px 0; border-top: 1px solid var(--border); }
+.today-list > li:first-child { border-top: 0; padding-top: 0; }
+.today-alert { border-left: 3px solid var(--border-strong); padding-left: 10px !important; }
+.today-alert.is-warn { border-left-color: var(--warn); }
+.today-alert.is-ok { border-left-color: var(--long); }
+.today-alert.is-info { border-left-color: var(--accent); }
+.today-alert-action { margin-left: 8px; color: var(--text); font-size: 13px; }
+.today-alert-detail { margin-top: 2px; color: var(--text-faint); font-size: 12px; }
+.today-count { display: flex; justify-content: space-between; gap: 12px; color: var(--text-muted); font-size: 13px; }
+.today-count-n { font: 600 13px var(--font-mono); color: var(--text); }
+.today-context { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 13px; }
+.today-context-breadth { grid-column: 1 / -1; color: var(--text-faint); font-size: 12px; }
+.today-trend { font: 600 12px var(--font-mono); }
+
+/* ---------- Supporting cards ---------- */
+.today-support { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.today-mini th, .today-mini td { padding: 6px 8px; }
+.today-mini td { white-space: normal; font-size: 13px; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .today-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-support { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .today-split, .today-support { grid-template-columns: 1fr; }
+  .today-actions { margin-left: 0; }
+  .today-metric-value { font-size: 18px; }
+}
+@media (max-width: 420px) {
+  .today-metrics { grid-template-columns: 1fr; }
+}
