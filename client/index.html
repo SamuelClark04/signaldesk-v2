@@ -192,8 +192,13 @@
     </main>
   </div>
 
+  <!-- Chart library, pinned and integrity-checked. If it fails to load, the Setups
+       chart falls back to the static level view. -->
+  <script src="https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js"
+          integrity="sha384-KkYqTZlM13Zya6fVUF3IGCBOQ1ehFeJVVgxaVvD/0MebineF9EI8Jkd3NnWNChqN" crossorigin="anonymous"></script>
   <!-- Order matters: helpers, then views, then the shell that wires them up. -->
   <script src="lib/ui.js"></script>
+  <script src="views/live-chart.js"></script>
   <script src="views/opportunity-detail.js"></script>
   <script src="views/opportunities.js"></script>
   <script src="views/portfolio.js"></script>

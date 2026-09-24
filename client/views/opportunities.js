@@ -97,7 +97,7 @@
   let search = ''; // lower-cased, for matching
   let searchRaw = ''; // exactly as typed, for the input box
   const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto']];
-  const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options (Lab)']];
+  const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
 
   const matchesAsset = (market) => assetFilter === 'all' || market === assetFilter;
   // Options trade on stock underlyings, so the Options filter watches stocks.

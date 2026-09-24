@@ -14,7 +14,7 @@
     el('span', { className: 'opp-k', textContent: k }), el('span', { className: `opp-v ${cls}`, textContent: v })]);
 
   // ---------- Center: analysis ----------
-  // Chart placeholder: every level drawn as a line at its relative height.
+  // Fallback chart (library not loaded): every level drawn as a line at its relative height.
   function levelChart(o, livePrice) {
     const t = o.targets || [];
     const lines = [
@@ -83,7 +83,9 @@
           ...(livePrice > 0 ? [] : [el('span', { className: 'opp-k', textContent: ' · no fresh price (market closed or feed quiet)' })]),
         ]),
       ]),
-      watch ? watchChart(o, livePrice) : levelChart(o, livePrice),
+      // Live candles when the chart library loaded; static level chart otherwise.
+      SD.liveChart.mount(o, { withLevels: !watch, banner: watch ? WATCH_TEXT : '' })
+        || (watch ? watchChart(o, livePrice) : levelChart(o, livePrice)),
       el('div', { className: 'opp-thesis' }, watch ? [
         el('p', { className: 'opp-thesis-text', textContent: WATCH_TEXT }),
         el('p', { className: 'opp-muted', textContent: 'Setups appear in the queue when a strategy proposes one and the risk engine approves it. '

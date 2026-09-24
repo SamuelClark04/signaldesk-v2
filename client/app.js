@@ -89,6 +89,7 @@
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
     BROKER_STATE: (state) => SD.portfolio.renderBrokerState(state),
+    PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
   };
 
   function setConn(state, label) {

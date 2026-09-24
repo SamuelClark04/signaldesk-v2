@@ -149,3 +149,9 @@
   .opp-chart { height: 220px; }
   .opp-last { margin-left: 0; }
 }
+
+/* ---------- Live candlestick chart (Lightweight Charts) ---------- */
+.opp-lwc { background: var(--bg); }
+.opp-lwc-canvas { position: absolute; inset: 0; }
+.opp-lwc .opp-watch-mode { top: 12px; transform: none; z-index: 2; }
+.opp-lwc .opp-chart-note { z-index: 2; left: 8px; bottom: 30px; padding: 1px 6px; border-radius: 4px; background: rgba(11, 17, 32, 0.8); }
