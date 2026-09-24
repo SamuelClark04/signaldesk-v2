@@ -15,6 +15,7 @@ const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const brokerSync = require('../connectors/broker-sync');
 const adoption = require('./adoption');
+const { suggestLevels } = require('../risk/adoption-levels');
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: their strikes and
@@ -172,6 +173,18 @@ function createMessageHandler({ send, broadcast }) {
     }
   }
 
+  // Suggested stop/target for an adoption (read-only maths on real candles),
+  // answered to the requesting client; requestId lets it drop stale answers.
+  async function handleSuggest(ws, { requestId, payload = {} }) {
+    const asset = String(payload.asset || '').toUpperCase();
+    const strategy = adoption.STRATEGIES[payload.strategy];
+    const reply = (body) => send(ws, 'ADOPTION_SUGGESTIONS', { requestId, asset, strategy: payload.strategy, ...body });
+    if (!/^[A-Z0-9]{1,10}-USD$/.test(asset) || !strategy) return reply({ ok: false, error: 'invalid asset or strategy' });
+    const result = await suggestLevels({ asset, timeframe: strategy.timeframe, livePrice: prices.getLatestPrice(asset) })
+      .catch((err) => ({ ok: false, error: err.message }));
+    return reply(result);
+  }
+
   // "Sync Broker": read-only fetch of real broker holdings; every client gets the
   // new snapshot (BROKER_HOLDINGS). A repeat within 10 s is answered, not re-fetched.
   async function handleSync(ws) {
@@ -229,6 +242,7 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
     if (msg.type === 'ADOPT_POSITION' || msg.type === 'RELEASE_POSITION') return handleAdoption(ws, msg);
+    if (msg.type === 'GET_ADOPTION_SUGGESTIONS') return handleSuggest(ws, msg).catch((err) => console.error('[adopt] suggestions crashed:', err));
     if (msg.type === 'SYNC_PORTFOLIO') return handleSync(ws).catch((err) => console.error('[broker-sync] sync crashed:', err));
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };

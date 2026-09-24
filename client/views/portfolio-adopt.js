@@ -4,17 +4,41 @@
 // holding and the live price. WATCH ONLY: SignalDesk alerts at the levels but
 // places no orders at Coinbase. The form state survives the re-render on every
 // price tick (portfolio.js restores focus by element id).
+// Stop and target are auto-filled from GET_ADOPTION_SUGGESTIONS (server maths on
+// real candles at the strategy's timeframe); a field the user edits is kept.
 // Exposes window.SignalDesk.portfolioAdopt.
 (() => {
   const SD = window.SignalDesk;
   const { el, money, price } = SD.ui;
 
   const STRATEGIES = [['adopted-hold', 'Long-term hold (1D)'], ['adopted-swing', 'Swing (4h)'], ['adopted-trend', 'Trend follow (1h)']];
-  const form = { asset: null, qty: '', stop: '', target: '', strategy: 'adopted-hold', error: '', pending: false };
+  const form = { asset: null, qty: '', stop: '', target: '', strategy: 'adopted-hold', error: '', pending: false, touched: {} };
+  // Latest suggestion request: { requestId, status: 'loading'|'ok'|'error', data }.
+  let suggest = { requestId: 0, status: null, data: null };
+  let seq = 0;
   let pendingTimer = null;
 
+  function requestSuggestions() {
+    suggest = { requestId: ++seq, status: 'loading', data: null };
+    SD.app.send({ type: 'GET_ADOPTION_SUGGESTIONS', requestId: suggest.requestId, payload: { asset: form.asset, strategy: form.strategy } });
+  }
+
+  // app.js: ADOPTION_SUGGESTIONS arrived. Stale answers (older request) are dropped.
+  function suggestions(r) {
+    if (!r || r.requestId !== suggest.requestId || r.asset !== form.asset) return;
+    suggest = { requestId: r.requestId, status: r.ok ? 'ok' : 'error', data: r };
+    if (r.ok) {
+      if (!form.touched.stop) form.stop = String(r.stopLoss);
+      if (!form.touched.target) form.target = String(r.takeProfit);
+    }
+    SD.app.refresh();
+  }
+
   const coin = (asset) => asset.replace('-USD', '');
-  const open = (row) => Object.assign(form, { asset: row.p.asset, qty: String(row.p.freeQty), stop: '', target: '', strategy: 'adopted-hold', error: '', pending: false });
+  const open = (row) => {
+    Object.assign(form, { asset: row.p.asset, qty: String(row.p.freeQty), stop: '', target: '', strategy: 'adopted-hold', error: '', pending: false, touched: {} });
+    requestSuggestions();
+  };
   const close = () => Object.assign(form, { asset: null, error: '', pending: false });
 
   // A synced holding with a quantity SignalDesk does not manage yet can be adopted.
@@ -41,6 +65,7 @@
     const i = el('input', { id, type: 'number', step: 'any', min: '0', className: 'scan-input', placeholder, value: form[key] });
     i.oninput = () => {
       form[key] = i.value;
+      if (key === 'stop' || key === 'target') form.touched[key] = true; // keep the user's number over later suggestions
       const pv = document.getElementById('adopt-preview');
       if (pv) pv.textContent = previewText(live);
     };
@@ -51,8 +76,12 @@
     const live = opts.livePrice(row.p.asset);
     const strategy = el('select', { id: 'adopt-strategy', className: 'scan-select' }, STRATEGIES.map(([v, l]) => el('option', { value: v, textContent: l })));
     strategy.value = form.strategy;
-    strategy.onchange = () => { form.strategy = strategy.value; };
-    const submit = el('button', { type: 'submit', className: 'btn btn-solid', textContent: form.pending ? 'Adopting…' : 'Adopt & watch', disabled: form.pending || !opts.online });
+    // A new timeframe means new levels: refill both fields from the engine.
+    strategy.onchange = () => { form.strategy = strategy.value; form.touched = {}; requestSuggestions(); opts.rerender(); };
+    // While new levels are loading the fields still hold the previous timeframe's numbers.
+    const loading = suggest.status === 'loading';
+    const submit = el('button', { type: 'submit', className: 'btn btn-solid', textContent: form.pending ? 'Adopting…' : loading ? 'Calculating…' : 'Adopt & watch',
+      disabled: form.pending || loading || !opts.online });
     const f = el('form', { className: 'pf-adopt-form', noValidate: true }, [
       el('label', {}, [el('span', { textContent: `Quantity (max ${row.p.freeQty})` }), input('adopt-qty', 'qty', String(row.p.freeQty), live)]),
       el('label', {}, [el('span', { textContent: `Stop loss (below ${live > 0 ? price(live, row.p) : '—'})` }), input('adopt-stop', 'stop', 'below the live price', live)]),
@@ -62,6 +91,7 @@
     ]);
     f.onsubmit = (e) => {
       e.preventDefault();
+      if (suggest.status === 'loading' || form.pending) return undefined; // levels for the new timeframe not in yet
       // Read everything NOW: the form may have been drawn several price ticks ago.
       const nowLive = opts.livePrice(row.p.asset);
       const qty = Number(form.qty); const stop = Number(form.stop); const target = Number(form.target);
@@ -80,11 +110,27 @@
       el('div', { className: 'pf-adopt-head' }, [el('strong', { textContent: `Adopt ${coin(row.p.asset)} from your Coinbase account` }),
         el('span', { textContent: `Live ${live > 0 ? price(live, row.p) : '—'} · Coinbase average entry ${row.p.fillPrice > 0 ? price(row.p.fillPrice, row.p) : 'unknown'}` })]),
       f,
+      indicator(opts),
       el('p', { className: 'pf-adopt-preview', id: 'adopt-preview', textContent: previewText(live) }),
       ...(form.error ? [el('p', { className: 'pf-error', textContent: form.error })] : []),
       el('p', { className: 'pf-adopt-note', textContent: 'SignalDesk will watch this holding and alert you near the stop and at your stop or target. '
         + 'It places NO orders at Coinbase: nothing sells automatically, and to exit you still sell at Coinbase.' }),
     ]));
+  }
+
+  // Where the stop/target numbers came from.
+  function indicator(opts) {
+    const d = suggest.data;
+    if (suggest.status === 'loading') return el('p', { className: 'pf-auto is-loading', textContent: '⚡ Calculating stop and target from candle history…' });
+    if (suggest.status === 'error') return el('p', { className: 'pf-auto is-error', textContent: `Could not auto-calculate (${d.error}). Enter the levels yourself.` });
+    if (suggest.status !== 'ok') return null;
+    const edited = form.touched.stop || form.touched.target;
+    const fmt = (x) => x.toLocaleString('en-US', { maximumFractionDigits: 6 });
+    const detail = `${d.method} · ATR ${fmt(d.atr)} · ${d.bars} bars · support ${fmt(d.swingLow)} · resistance ${fmt(d.swingHigh)} · from the ${d.referenceSource} ${fmt(d.reference)}`;
+    if (!edited) return el('p', { className: 'pf-auto', title: detail }, [el('strong', { textContent: '⚡ Auto-calculated by the risk engine' }), ` · ${detail}`]);
+    const reset = el('button', { type: 'button', className: 'scan-link', textContent: 'Use suggestion' });
+    reset.onclick = () => { form.touched = {}; form.stop = String(d.stopLoss); form.target = String(d.takeProfit); opts.rerender(); };
+    return el('p', { className: 'pf-auto is-edited' }, [`Edited by you · the engine suggested stop ${fmt(d.stopLoss)} and target ${fmt(d.takeProfit)} (${d.timeframe}) · `, reset]);
   }
 
   // "Stop managing" for each adopted position inside a synced holding.
@@ -106,5 +152,5 @@
   function positionsUpdated() { if (form.pending) { clearTimeout(pendingTimer); close(); } }
   function failed(error) { clearTimeout(pendingTimer); form.pending = false; form.error = String(error).replace(/^ADOPT_REJECTED: /, ''); }
 
-  SD.portfolioAdopt = { canAdopt, isOpen, button, formRow, releaseList, positionsUpdated, failed };
+  SD.portfolioAdopt = { canAdopt, isOpen, button, formRow, releaseList, positionsUpdated, failed, suggestions };
 })();

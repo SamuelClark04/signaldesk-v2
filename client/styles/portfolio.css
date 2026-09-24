@@ -166,3 +166,8 @@
 .pf-adopted { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .pf-adopted .pf-kv { align-items: center; }
 @media (max-width: 900px) { .pf-adopt-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.pf-auto { margin: 10px 0 0; color: var(--accent); font-size: 12px; line-height: 1.5; }
+.pf-auto strong { font-weight: 600; }
+.pf-auto.is-loading { color: var(--text-muted); }
+.pf-auto.is-edited { color: var(--text-muted); }
+.pf-auto.is-error { color: var(--warn); }
