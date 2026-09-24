@@ -3,14 +3,37 @@
 // Lifecycle: stageOrder -> pendingOrders -> executeOrder -> activePositions
 //            -> closePosition -> tradeJournal
 //            pendingOrders -> discardOrder -> discardedOrders (never traded)
-// Every change is persisted to server/data/ledger-state.json and restored on start.
+// Every change is persisted to server/data/ledger-state.json and restored on start,
+// together with the user-editable settings (currently the paper bankroll).
 const fs = require('fs');
 const path = require('path');
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
-const STATE_VERSION = 1;
+const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
+
+// Editable settings: default value and the accepted range for each key.
+const SETTINGS_RULES = {
+  bankroll: { default: 50000, min: 100, max: 100000000 },
+};
+const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
+
+// Validate a partial settings object; returns only the known, valid keys.
+function cleanSettings(input) {
+  if (!input || typeof input !== 'object') throw new Error('settings must be an object');
+  const clean = {};
+  for (const [key, value] of Object.entries(input)) {
+    const rule = SETTINGS_RULES[key];
+    if (!rule) throw new Error(`unknown setting "${key}"`);
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
+      throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
+    }
+    clean[key] = n;
+  }
+  return clean;
+}
 
 const pendingOrders = [];
 const activePositions = [];
@@ -24,7 +47,7 @@ const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders };
 // Write to a temp file then rename, so a crash mid-write never leaves a torn file.
 // A failed save is logged, not thrown: the in-memory ledger stays authoritative.
 function saveState() {
-  const state = { version: STATE_VERSION, savedAt: new Date().toISOString(), ...LISTS };
+  const state = { version: STATE_VERSION, savedAt: new Date().toISOString(), settings, ...LISTS };
   try {
     fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
     const tmp = `${STATE_PATH}.tmp`;
@@ -32,6 +55,19 @@ function saveState() {
     fs.renameSync(tmp, STATE_PATH);
   } catch (err) {
     console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}`);
+  }
+}
+
+// Settings are restored key by key: a missing (v1 file) or invalid value keeps its
+// default instead of discarding the whole ledger.
+function restoreSettings(saved) {
+  if (!saved) return;
+  for (const [key, value] of Object.entries(saved)) {
+    try {
+      Object.assign(settings, cleanSettings({ [key]: value }));
+    } catch (err) {
+      console.warn(`[ledger] ignoring saved setting: ${err.message}; keeping ${settings[key] ?? 'default'}`);
+    }
   }
 }
 
@@ -44,8 +80,9 @@ function loadState() {
       if (!Array.isArray(state[key])) throw new Error(`"${key}" is missing or not an array`);
     }
     for (const [key, list] of Object.entries(LISTS)) list.push(...state[key]);
+    restoreSettings(state.settings);
     console.log(`[ledger] restored ${pendingOrders.length} pending, ${activePositions.length} open, `
-      + `${tradeJournal.length} closed, ${discardedOrders.length} rejected from ${STATE_PATH}`);
+      + `${tradeJournal.length} closed, ${discardedOrders.length} rejected, bankroll $${settings.bankroll} from ${STATE_PATH}`);
   } catch (err) {
     const aside = `${STATE_PATH}.corrupt-${Date.now()}`;
     try { fs.renameSync(STATE_PATH, aside); } catch { /* leave it in place */ }
@@ -194,6 +231,17 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o }));
 const getActivePositions = () => activePositions.map((p) => ({ ...p }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
+// ---------- Settings ----------
+const getSettings = () => ({ ...settings });
+
+// Validates, applies and persists. Throws (changing nothing) if any value is invalid.
+function updateSettings(newSettings) {
+  const clean = cleanSettings(newSettings);
+  Object.assign(settings, clean);
+  saveState();
+  return getSettings();
+}
+
 // Restore persisted state once, when the module is first required.
 loadState();
 
@@ -206,5 +254,7 @@ module.exports = {
   getPendingOrders,
   getActivePositions,
   getTradeJournal,
+  getSettings,
+  updateSettings,
 };
 

@@ -34,6 +34,7 @@
   const transport = { isOnline, send: (msg) => socket.send(JSON.stringify(msg)) };
   SD.queue.init(transport);
   SD.portfolio.init(transport);
+  SD.settings.init(transport);
 
   const HANDLERS = {
     'orders:snapshot': (orders) => SD.queue.receive(orders, { replace: true }),
@@ -43,6 +44,8 @@
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
     ACTION_FAILED: (payload) => SD.queue.actionFailed(payload),
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
+    SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
+    SETTINGS_ERROR: (payload) => SD.settings.error(payload),
   };
 
   function setConn(state, label) {

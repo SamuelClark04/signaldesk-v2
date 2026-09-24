@@ -48,6 +48,18 @@ function createMessageHandler({ send, broadcast }) {
     }
   }
 
+  // Settings: the ledger validates and persists; every client sees the new values.
+  function handleSettings(ws, { payload }) {
+    try {
+      const settings = ledger.updateSettings(payload);
+      console.log(`[settings] updated: ${JSON.stringify(settings)}`);
+      broadcast('SETTINGS_UPDATED', settings);
+    } catch (err) {
+      console.warn(`[settings] rejected update ${JSON.stringify(payload)}: ${err.message}`);
+      send(ws, 'SETTINGS_ERROR', { error: err.message, settings: ledger.getSettings() });
+    }
+  }
+
   // Entry point for every raw client frame.
   return function handleMessage(ws, raw) {
     let msg;
@@ -55,6 +67,7 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'ping') return send(ws, 'pong', Date.now());
     if (QUEUE_ACTIONS[msg.type]) return handleQueueAction(ws, msg);
     if (msg.type === 'CALCULATE_ALLOCATION') return handleAllocation(ws, msg);
+    if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };
 }

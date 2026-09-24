@@ -25,7 +25,6 @@ const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const PIPELINE_INTERVAL_MS = 60000;
-const BANKROLL = 50000; // paper bankroll; $25.2k+ is needed for one options contract at 1% risk
 const STOCK_WATCHLIST = ['AAPL', 'NVDA', 'SPY'];
 const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD'];
 
@@ -59,6 +58,7 @@ wss.on('connection', (ws) => {
   send(ws, 'orders:snapshot', ledger.getPendingOrders());
   send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
+  send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
 });
 
 // Drop dead client connections every 30s.
@@ -106,10 +106,12 @@ async function runPipeline() {
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
+  // Read once per pass: every candidate in a pass is sized against the same bankroll.
+  const { bankroll } = ledger.getSettings();
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
-    const result = processCandidate(candidate, BANKROLL);
+    const result = processCandidate(candidate, bankroll);
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
       continue;
@@ -153,7 +155,7 @@ function start() {
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
   }, PIPELINE_INTERVAL_MS);
-  console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${BANKROLL}`);
+  console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${ledger.getSettings().bankroll} (editable in Settings)`);
 }
 
 function shutdown() {

@@ -202,6 +202,30 @@ html, body {
 
 .empty { padding: 32px 16px; color: var(--text-faint); text-align: center; }
 
+/* ---------- Form controls (allocator, settings) ---------- */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.input-wrap:focus-within { border-color: var(--accent); }
+.input-prefix { padding-left: 10px; color: var(--text-faint); font-family: var(--font-mono); }
+.input {
+  width: 160px;
+  padding: 6px 10px 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 14px var(--font-mono);
+  outline: none;
+}
+.btn-primary { padding: 7px 14px; border-color: var(--accent); color: var(--accent); }
+.btn-primary:hover:not(:disabled) { background: rgba(56, 189, 248, 0.12); }
+
 /* ---------- Direction utilities ---------- */
 .text-long { color: var(--long); }
 .text-short { color: var(--short); }

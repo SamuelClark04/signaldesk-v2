@@ -1,0 +1,21 @@
+/* Settings tab: Risk Management card. Inputs and .btn-primary come from main.css. */
+
+.settings-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.settings-status { color: var(--text-faint); font-size: 12px; align-self: center; }
+.settings-status.is-error { color: var(--short); }
+.settings-status.is-ok { color: var(--long); }
+
+.settings-facts {
+  margin: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.settings-facts strong { color: var(--text-muted); font-family: var(--font-mono); font-weight: 500; }
