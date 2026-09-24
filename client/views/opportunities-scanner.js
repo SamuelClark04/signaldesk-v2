@@ -189,6 +189,7 @@
       header(state, opts),
       filters(all, opts),
       funnel(state, symbols, root),
+      SD.scanLogView.render(state, { onReview: opts.onReview }),
       el('div', { className: 'scan-grid' }, [
         el('div', { className: 'scan-main' }, [results(rows, all.length, opts),
           el('div', { className: 'scan-diag' }, [coverage(state, symbols), excluded(state, symbols)])]),

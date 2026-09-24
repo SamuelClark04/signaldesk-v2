@@ -17,6 +17,7 @@ const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const { getDailyBars } = require('../connectors/daily-bars');
 const { checkTarget } = require('../risk/structure');
 const sentiment = require('../connectors/news-sentiment');
+const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'equity-swing';
 const MIN_DAYS_TO_EARNINGS = 3;
@@ -43,6 +44,7 @@ const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }
 
 const shieldLogged = new Set(); // "SYMBOL:date:reason": log each shield block once per day
 let blocks = []; // setups the shield blocked on the last pass: { id, reason, candidate }
+const tally = createTally(); // why each symbol produced no setup (scanner log)
 
 // Earnings Shield for a setup that has formed. Returns null (allowed) or the
 // rejection reason. Unknown earnings = blocked.
@@ -61,7 +63,7 @@ async function evaluate(symbol, livePrice, now) {
   // Setup first (cached real bars), shield second: the calendar is only asked,
   // and a block only recorded, when there is an actual setup to protect.
   const bars = await getDailyBars(symbol);
-  if (bars.length < CONFIG.slow) return null;
+  if (bars.length < CONFIG.slow) return tally.skip(symbol, 'Not enough daily history');
   const fast = sma(bars, CONFIG.fast);
   const slow = sma(bars, CONFIG.slow);
   const recentHigh = Math.max(...bars.slice(-CONFIG.highLookback).map((b) => b.high));
@@ -69,7 +71,9 @@ async function evaluate(symbol, livePrice, now) {
   const uptrend = fast > slow;
   const pulledBack = livePrice <= recentHigh * (1 - CONFIG.pullbackPct);
   const atSupport = Math.abs(livePrice - fast) / fast <= CONFIG.nearSmaPct && livePrice > slow;
-  if (!uptrend || !pulledBack || !atSupport) return null;
+  if (!uptrend) return tally.skip(symbol, `Not in an uptrend (SMA${CONFIG.fast} at or below SMA${CONFIG.slow})`);
+  if (!pulledBack) return tally.skip(symbol, `No ${(CONFIG.pullbackPct * 100).toFixed(0)}% pullback from the ${CONFIG.highLookback}-day high`);
+  if (!atSupport) return tally.skip(symbol, `Not at SMA${CONFIG.fast} support`);
 
   const guard = await shield(symbol, now);
   if (!guard.allowed) {
@@ -80,7 +84,7 @@ async function evaluate(symbol, livePrice, now) {
       shieldLogged.add(key);
       console.log(`[equity-swing] Earnings Shield blocked ${symbol}: ${guard.reason}`);
     }
-    return null;
+    return tally.skip(symbol, 'Rejected: Earnings Shield');
   }
   const { earnings } = guard;
 
@@ -96,7 +100,7 @@ async function evaluate(symbol, livePrice, now) {
   if (!tgt.ok) {
     blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: `RESISTANCE_BLOCKS_TARGET: ${tgt.text}`,
       candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
-    return null;
+    return tally.skip(symbol, 'Rejected: resistance below the target');
   }
   const news = await sentiment.getSentiment(symbol, now);
 
@@ -136,13 +140,15 @@ async function evaluate(symbol, livePrice, now) {
 
 async function generateCandidates(latestPricesMap, { symbols = CONFIG.symbols, now = Date.now() } = {}) {
   blocks = [];
+  tally.start();
   const candidates = [];
   for (const symbol of symbols) {
+    tally.checked();
     const livePrice = lookup(latestPricesMap, symbol);
-    if (!(livePrice > 0)) continue;
+    if (!(livePrice > 0)) { tally.skip(symbol, 'No live price'); continue; }
     try {
       const candidate = await evaluate(symbol, livePrice, now);
-      if (candidate) candidates.push(candidate);
+      if (candidate) { candidates.push(candidate); tally.setup(); }
     } catch (err) {
       console.error(`[equity-swing] ${symbol} failed: ${err.message}`);
     }
@@ -153,4 +159,4 @@ async function generateCandidates(latestPricesMap, { symbols = CONFIG.symbols, n
 // The pipeline reads (and clears) the shield blocks after each pass.
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 
-module.exports = { generateCandidates, takeBlocks, STRATEGY_ID, MIN_DAYS_TO_EARNINGS, CONFIG };
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, STRATEGY_ID, MIN_DAYS_TO_EARNINGS, CONFIG };

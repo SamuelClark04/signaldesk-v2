@@ -14,7 +14,8 @@ const { computeProximity } = require('../intelligence/trigger-proximity');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
-const { recordRejection } = require('./rejection-stats');
+const { recordRejection: recordStat } = require('./rejection-stats');
+const scanLog = require('./scan-log');
 const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
@@ -27,6 +28,13 @@ let pipelineTimer = null;
 let lastPricesKey = null;
 let proximityState = { items: [], thresholdPct: 0.015, at: null };
 const getProximity = () => proximityState;
+
+// Every dropped setup goes to the day's tally ("Why we passed", counted once)
+// and to the live scanner log (every pass, collapsed while it repeats).
+function recordRejection(id, reason, candidate) {
+  recordStat(id, reason, candidate);
+  scanLog.rejected(id, reason, candidate || {});
+}
 
 // Each strategy runs isolated: one failing never blocks the others' candidates.
 const STRATEGIES = [
@@ -88,6 +96,10 @@ async function pipelinePass() {
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
   for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
+  // Scanner log: what each strategy concluded per symbol on this pass.
+  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['equity-swing', equitySwing], ['options-system', optionsSystem]]) {
+    scanLog.scanned(id, mod.takeScan());
+  }
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) against the capital of the venue it would execute
   // on: the paper bankroll, or the LIVE broker account (cached ~60 s).
@@ -113,6 +125,7 @@ async function pipelinePass() {
     try {
       const staged = ledger.stageOrder(result);
       counts.staged += 1;
+      scanLog.staged(result);
       broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
       if (result.capitalCapped) console.warn(`[pipeline] ${result.id}: CAPITAL CAP ${result.capitalCapPct * 100}% of bankroll bound the size; `
@@ -187,6 +200,7 @@ async function pipelinePass() {
     console.error('[pipeline] dashboard intelligence failed:', err.message);
   }
 
+  scanLog.publish(); // SCAN_LOG to every client (server.js)
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
   return counts;
 }

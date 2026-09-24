@@ -7,7 +7,7 @@
   const SD = window.SignalDesk;
   const { el, age, price, money, signed, pnlClass } = SD.ui;
 
-  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto']];
+  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
   const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
 
   function segmented(options, current, className, onPick) {
@@ -28,9 +28,10 @@
     return el('label', { className: 'opp-search-wrap' }, input);
   }
 
-  // ---------- Active Positions: every open trade (paper, live, adopted) ----------
-  // Always all of them (not filtered): the point is never losing track of a
-  // trade. Clicking one charts its symbol with the Active Trade HUD.
+  // ---------- Active Positions: open trades (paper, live, adopted) ----------
+  // Filtered by the asset toggle only (never by search), and a filter that hides
+  // positions says so, so a trade is never silently out of sight. Clicking one
+  // charts its symbol with the Active Trade HUD.
   function positionRow(p, state, view) {
     const live = state.prices && state.prices[p.asset];
     const m = SD.portfolioMetrics.mark(p, live);
@@ -54,12 +55,15 @@
   }
 
   function activePositions(state, view) {
-    const list = [...(state.positions || [])].sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
-    if (!list.length) return [];
+    const all = [...(state.positions || [])].sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+    if (!all.length) return [];
+    const list = all.filter((p) => view.matchesAsset(p.market));
+    const hidden = all.length - list.length;
     return [
       el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Active positions' }),
-        el('span', { className: 'count', textContent: String(list.length) })]),
-      el('div', { className: 'opp-positions' }, list.map((p) => positionRow(p, state, view))),
+        el('span', { className: 'count', textContent: hidden ? `${list.length} / ${all.length}` : String(all.length) })]),
+      el('div', { className: 'opp-positions' }, [...list.map((p) => positionRow(p, state, view)),
+        ...(hidden ? [el('p', { className: 'opp-muted', textContent: `${hidden} open position${hidden === 1 ? '' : 's'} hidden by the ${view.assetFilter} filter` })] : [])]),
     ];
   }
 
@@ -109,19 +113,28 @@
     return btn;
   }
 
+  // Empty queue: the scanner is still working; point at its log (Scanner tab).
+  function logLink(state, view) {
+    const checked = (state.scanLog || []).filter((e) => e.kind === 'scan').reduce((n, e) => n + (e.checked || 0), 0);
+    const b = el('button', { type: 'button', className: 'scan-link opp-log-link',
+      textContent: checked ? `Last pass made ${checked} checks: see why nothing qualified →` : 'See the live scanner log →' });
+    b.onclick = view.onScannerLog;
+    return b;
+  }
+
   // view: { assetFilter, searchRaw, searching, filtered, real, visible, activeId,
-  //   watch, watchSymbol, isWatch, inFlight, onSearch, onFilter, onSelectSetup,
-  //   onWatch, onOpenPosition }
+  //   watch, watchSymbol, isWatch, inFlight, matchesAsset, onSearch, onFilter,
+  //   onSelectSetup, onWatch, onOpenPosition, onScannerLog }
   function rail(state, view) {
     const emptyText = view.real.length ? 'No setups match these filters.' : 'No setups pending. Watching the market until a strategy proposes one.';
     return el('aside', { className: 'opp-rail' }, [
       searchBox(view),
-      segmented(RAIL_TOGGLE, view.assetFilter === 'options' ? null : view.assetFilter, 'opp-segmented', view.onFilter),
+      segmented(RAIL_TOGGLE, view.assetFilter, 'opp-segmented', view.onFilter),
       ...activePositions(state, view),
       el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Queue' }),
         el('span', { className: 'count', textContent: view.filtered ? `${view.visible.length} / ${view.real.length}` : String(view.real.length) })]),
       el('div', { className: 'opp-queue' }, view.visible.length ? view.visible.map((o) => railCard(o, o.id === view.activeId, view))
-        : [el('p', { className: 'opp-muted', textContent: emptyText })]),
+        : [el('p', { className: 'opp-muted', textContent: emptyText }), logLink(state, view)]),
       el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch · heating up' }),
       el('p', { className: 'opp-heat-caption', textContent: view.searching ? 'Searching all monitored symbols' : view.watch.caption }),
       el('div', { className: 'opp-watchlist' }, view.watch.symbols.length

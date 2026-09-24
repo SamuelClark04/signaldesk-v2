@@ -7,6 +7,7 @@
 //                  ({ open, high, low, close, volume, time: ISO }), or { bars: [...] }
 //   newsContext:   Map or object, symbol -> array of headlines (string or { headline })
 const { scoreHeadline } = require('../intelligence/sentiment-nlp');
+const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'equity-day';
 const SESSION_OPEN = 9 * 60 + 30; // minutes after midnight, US/Eastern
@@ -79,14 +80,17 @@ function pickCatalyst(headlines) {
   return scored.reduce((best, h) => (Math.abs(h.score) >= Math.abs(best.score) ? h : best));
 }
 
+const tally = createTally(); // why each symbol produced no setup (scanner log)
+
 function detectOrb(symbol, rawBars, headlines) {
   const c = CONFIG;
   const { date, bars } = sessionBars(rawBars);
   const orEnd = SESSION_OPEN + c.openingRangeMinutes;
-  if (!bars.length || bars[bars.length - 1].minute < orEnd - 1) return null; // OR not finished
+  if (!bars.length) return tally.skip(symbol, 'No bars this session (market closed)');
+  if (bars[bars.length - 1].minute < orEnd - 1) return tally.skip(symbol, 'Opening range still forming'); // OR not finished
 
   const orBars = bars.filter((b) => b.minute < orEnd);
-  if (orBars.length < c.minOpeningRangeBars) return null;
+  if (orBars.length < c.minOpeningRangeBars) return tally.skip(symbol, 'Too few opening-range bars');
   const orHigh = Math.max(...orBars.map((b) => b.high));
   const orLow = Math.min(...orBars.map((b) => b.low));
   const orAvgVolume = orBars.reduce((s, b) => s + b.volume, 0) / (c.openingRangeMinutes / c.barMinutes);
@@ -94,13 +98,14 @@ function detectOrb(symbol, rawBars, headlines) {
   // Fresh breakout only: the FIRST 5m close above OR high must be the latest completed bar.
   const post = aggregate(bars, c.barMinutes).filter((k) => k.start >= orEnd);
   const breakout = post.find((k) => k.close > orHigh);
-  if (!breakout || breakout !== post[post.length - 1]) return null;
-  if (breakout.start > c.lastEntryMinute) return null;
-  if (breakout.close > orHigh * (1 + c.maxChasePct)) return null;
-  if (breakout.volume < orAvgVolume * c.volumeMultiple) return null;
+  if (!breakout) return tally.skip(symbol, 'No 5m close above the opening-range high');
+  if (breakout !== post[post.length - 1]) return tally.skip(symbol, 'Breakout happened earlier (not fresh)');
+  if (breakout.start > c.lastEntryMinute) return tally.skip(symbol, 'Past the entry cutoff');
+  if (breakout.close > orHigh * (1 + c.maxChasePct)) return tally.skip(symbol, 'Breakout too extended (no chasing)');
+  if (breakout.volume < orAvgVolume * c.volumeMultiple) return tally.skip(symbol, 'Breakout volume too low');
 
   const catalyst = pickCatalyst(headlines);
-  if (catalyst && catalyst.classification === 'NEGATIVE') return null; // no longs into bad news
+  if (catalyst && catalyst.classification === 'NEGATIVE') return tally.skip(symbol, 'Negative news catalyst'); // no longs into bad news
 
   const entryMax = cents(Math.max(breakout.close, orHigh * (1 + c.entryBufferPct)));
   const minStop = Math.floor(entryMax * (1 - c.minStopPct) * 100) / 100;
@@ -138,9 +143,11 @@ function detectOrb(symbol, rawBars, headlines) {
 
 function generateCandidates(marketDataMap, newsContext) {
   const candidates = [];
+  tally.start();
   for (const [symbol, bars] of entries(marketDataMap)) {
+    tally.checked();
     const candidate = detectOrb(symbol, bars, lookup(newsContext, symbol));
-    if (candidate) candidates.push(candidate);
+    if (candidate) { candidates.push(candidate); tally.setup(); }
   }
   return candidates;
 }
@@ -166,4 +173,4 @@ function proximity(marketDataMap) {
   return out;
 }
 
-module.exports = { generateCandidates, proximity, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, takeScan: tally.take, STRATEGY_ID, CONFIG };

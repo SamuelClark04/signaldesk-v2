@@ -192,3 +192,4 @@
 .opp-pos .opp-heat { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .opp-pos-pnl { font: 12px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .opp-heat.is-position.is-live { background: rgba(251, 113, 133, 0.14); color: var(--short); }
+.opp-log-link { align-self: flex-start; margin-top: 4px; font-size: 12px; text-align: left; }

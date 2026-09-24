@@ -17,6 +17,7 @@ const { createMessageHandler } = require('./execution/message-handler');
 const { startPipeline, stopPipeline, runPipeline, getScanStatus, getProximity } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
+const scanLog = require('./execution/scan-log');
 const watchlist = require('./execution/watchlist');
 const prices = require('./market/latest-prices');
 const referencePrices = require('./market/reference-prices');
@@ -85,6 +86,7 @@ function broadcast(type, payload) {
 
 const handleMessage = createMessageHandler({ send, broadcast });
 rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
+scanLog.onChange((log) => broadcast('SCAN_LOG', log)); // live scanner log, once per pass
 watchlist.onChange((items) => broadcast('WATCHLIST_UPDATED', items)); // "Watching"
 
 wss.on('connection', (ws) => {
@@ -102,6 +104,7 @@ wss.on('connection', (ws) => {
   send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
   send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
   send(ws, 'SCAN_STATUS', getScanStatus());
+  send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'UNIVERSE', universe.snapshot());
   send(ws, 'TRIGGER_PROXIMITY', getProximity());
   send(ws, 'BROKER_HOLDINGS', brokerSync.getSnapshot()); // last Sync Broker result (never auto-fetched)

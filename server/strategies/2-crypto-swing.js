@@ -24,6 +24,7 @@ const { getDailyBars } = require('../connectors/daily-bars');
 const { checkTarget } = require('../risk/structure');
 const { getRoundTripRate } = require('../risk/cost-authority');
 const sentiment = require('../connectors/news-sentiment');
+const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'crypto-swing';
 
@@ -48,6 +49,7 @@ const BAR_SEC = 4 * 3600;
 const candles = new Map(); // symbol -> { at, bars } (completed 4h bars, oldest first)
 const lastSignal = new Map(); // symbol -> time of the flush-low bar already signalled
 let blocks = []; // setups rejected on the last pass: { id, reason, candidate }
+const tally = createTally(); // why each coin produced no setup (scanner log)
 
 // Keep precision for sub-dollar coins: 2 decimals from $100, 4 from $1, else ~4 significant digits.
 const decimalsFor = (x) => (x >= 100 ? 2 : x >= 1 ? 4 : Math.min(12, 3 - Math.floor(Math.log10(x))));
@@ -115,23 +117,29 @@ function candidate(symbol, live, s, now, ctx) {
 
 async function generateCandidates(latestPricesMap, now = Date.now()) {
   blocks = [];
+  tally.start();
   const out = [];
   for (const symbol of CONFIG.symbols) {
+    tally.checked();
     const live = lookup(latestPricesMap, symbol);
-    if (!(live > 0)) continue;
+    if (!(live > 0)) { tally.skip(symbol, 'No live price'); continue; }
     try {
       const s = analyse(await completedBars(symbol, now));
-      if (!s || lastSignal.get(symbol) === s.flushBar.time) continue; // no flush, or this flush already signalled
-      if (!(s.lastClose <= s.mean && live > s.mean)) continue; // not a fresh reclaim
+      if (!s) { tally.skip(symbol, `No ${(CONFIG.flushPct * 100).toFixed(0)}% flush below the ${CONFIG.timeframe} mean`); continue; }
+      if (lastSignal.get(symbol) === s.flushBar.time) { tally.skip(symbol, 'This flush was already signalled'); continue; }
+      if (!(live > s.mean)) { tally.skip(symbol, 'Flushed, not yet reclaiming the mean'); continue; }
+      if (!(s.lastClose <= s.mean)) { tally.skip(symbol, 'Reclaim happened earlier (not fresh)'); continue; }
       // The 3R target must clear the fees AND sit below major daily resistance.
       const { entryMax, target } = levels(live);
       const t = checkTarget(await getDailyBars(symbol, now), entryMax, target, px);
       if (!t.ok) {
         blocks.push({ id: `${STRATEGY_ID}:REVERSAL:${symbol}:${s.flushBar.time}`, reason: `RESISTANCE_BLOCKS_TARGET: ${t.text}`,
           candidate: { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: 'Capitulation reversal', direction: 'long', timeframe: CONFIG.timeframe } });
+        tally.skip(symbol, 'Rejected: resistance below the target');
         continue; // not signalled: it may qualify once price breaks the level
       }
       lastSignal.set(symbol, s.flushBar.time);
+      tally.setup();
       out.push(candidate(symbol, live, s, now, { target: t, news: await sentiment.getSentiment(symbol, now) }));
     } catch (err) {
       console.error(`[crypto-swing] ${symbol} failed: ${err.message}`);
@@ -160,4 +168,4 @@ function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
 // The pipeline reads (and clears) the rejected setups after each pass.
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 
-module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, feeStopPct, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, takeBlocks, takeScan: tally.take, reset, analyse, feeStopPct, STRATEGY_ID, CONFIG };

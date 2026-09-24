@@ -27,6 +27,7 @@ const options = require('../connectors/options-data');
 const { exitValue } = require('../risk/option-pricing');
 const { checkTarget } = require('../risk/structure');
 const sentiment = require('../connectors/news-sentiment');
+const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'options-system';
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
@@ -51,6 +52,7 @@ const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }
 
 const coils = new Map(); // symbol -> latest analysis (for proximity; cached bars only)
 let blocks = [];
+const tally = createTally(); // why each symbol produced no setup (scanner log)
 
 // Squeeze state at bar index i: BB(20, 2sd) inside KC(20, 1.5 ATR20).
 function squeezeAt(bars, i, p = CONFIG.period) {
@@ -79,7 +81,7 @@ function analyse(bars) {
 function block(symbol, date, reason) {
   blocks.push({ id: `${STRATEGY_ID}:BREAKOUT:${symbol}:${date}`, reason,
     candidate: { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Squeeze breakout call', direction: 'long', timeframe: '1D' } });
-  return null;
+  return tally.skip(symbol, `Rejected: ${reason.split(':')[0].replace(/_/g, ' ').toLowerCase()}`);
 }
 
 async function earningsGuard(symbol, now) {
@@ -100,7 +102,9 @@ async function evaluate(symbol, live, now) {
   const bars = await getDailyBars(symbol, now);
   const s = analyse(bars);
   if (s) coils.set(symbol, s); else coils.delete(symbol);
-  if (!s || !(live > s.rangeHigh) || !(live > s.mean)) return null;
+  if (!s) return tally.skip(symbol, bars.length < CONFIG.period + CONFIG.squeezeLookback + 1 ? 'Not enough daily history' : 'No volatility squeeze');
+  if (!(live > s.rangeHigh)) return tally.skip(symbol, `In a squeeze, below the ${CONFIG.rangeDays}-day breakout level`);
+  if (!(live > s.mean)) return tally.skip(symbol, 'Below the 20-day average');
 
   const entryMax = cents(live * (1 + CONFIG.entryBufferPct));
   const invalidation = Math.floor((s.rangeHigh - CONFIG.stopAtr * s.atr) * 100) / 100;
@@ -164,13 +168,15 @@ async function evaluate(symbol, live, now) {
 
 async function generateCandidates(latestPricesMap, now = Date.now()) {
   blocks = [];
+  tally.start();
   const out = [];
   for (const symbol of CONFIG.symbols) {
+    tally.checked();
     const live = lookup(latestPricesMap, symbol);
-    if (!(live > 0)) continue;
+    if (!(live > 0)) { tally.skip(symbol, 'No live price'); continue; }
     try {
       const c = await evaluate(symbol, live, now);
-      if (c) out.push(c);
+      if (c) { out.push(c); tally.setup(); }
     } catch (err) {
       console.error(`[options-system] ${symbol} failed: ${err.message}`);
     }
@@ -193,4 +199,4 @@ function proximity(latestPricesMap) {
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 function reset() { coils.clear(); blocks = []; }
 
-module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, squeezeAt, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, takeBlocks, takeScan: tally.take, reset, analyse, squeezeAt, STRATEGY_ID, CONFIG };

@@ -151,3 +151,25 @@
   .scan-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .scan-run-wrap { align-items: flex-start; }
 }
+
+/* ---------- Live scanner log (Phase 40) ---------- */
+.slog { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.slog-bar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.slog-list { display: flex; flex-direction: column; gap: 6px; max-height: 360px; margin: 0; padding: 0 4px 0 0; overflow-y: auto; list-style: none; scrollbar-width: thin; }
+.slog-entry { padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 6px; background: var(--bg); }
+.slog-entry.is-rejected { border-left-color: var(--short); }
+.slog-entry.is-staged { border-left-color: var(--long); }
+.slog-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.slog-tag { padding: 0 6px; border-radius: 4px; font: 600 10px/16px var(--font-mono); text-transform: uppercase; background: var(--surface-2); color: var(--text-muted); }
+.slog-tag.is-rejected { background: rgba(251, 113, 133, 0.14); color: var(--short); }
+.slog-tag.is-staged { background: var(--long-bg); color: var(--long); }
+.slog-title { font: 600 13px var(--font-mono); color: var(--text); }
+.slog-time { margin-left: auto; color: var(--text-faint); font: 11px var(--font-mono); }
+.slog-muted { color: var(--text-faint); font-size: 12px; }
+.slog-text { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
+.slog-detail { margin: 2px 0 0; color: var(--text-faint); font: 11px var(--font-mono); overflow-wrap: anywhere; }
+.slog-reasons { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.slog-reason { display: grid; grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 2fr); gap: 8px; font-size: 12px; color: var(--text-muted); }
+.slog-count { font: 600 11px var(--font-mono); color: var(--text); }
+.slog-syms { color: var(--text-faint); font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) { .slog-reason { grid-template-columns: 1fr auto; } .slog-syms { grid-column: 1 / -1; } }

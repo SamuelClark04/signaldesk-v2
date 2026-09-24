@@ -113,7 +113,7 @@
   const onSelectSetup = (id) => { activeId = id; manualWatch = false; rerender(); };
   const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
   function onOpenPosition(p) {
-    if (!watchMarketOk(marketOf(p.asset)) || !matchesSearch(p.asset, p.asset.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
+    if (!matchesAsset(p.market) || !watchMarketOk(marketOf(p.asset)) || !matchesSearch(p.asset, p.asset.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
     onWatch(p.asset);
   }
   function onSearch(value) { search = value.trim().toLowerCase(); searchRaw = value; rerender(); }
@@ -138,8 +138,8 @@
     const active = visible.find((o) => o.id === activeId) || marketWatch(watchSymbol);
 
     const rail = SD.oppRail.rail(state, { assetFilter, searchRaw, searching: !!search, filtered: assetFilter !== 'all' || !!search,
-      real, visible, activeId, watch, watchSymbol, isWatch: !!active.isWatch, inFlight,
-      onSearch, onFilter: setFilter, onSelectSetup, onWatch, onOpenPosition });
+      real, visible, activeId, watch, watchSymbol, isWatch: !!active.isWatch, inFlight, matchesAsset,
+      onSearch, onFilter: setFilter, onSelectSetup, onWatch, onOpenPosition, onScannerLog: () => { subTab = 'scanner'; rerender(); } });
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
       refPrice: state.refPrices ? state.refPrices[active.asset] : null,
