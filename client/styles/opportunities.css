@@ -15,15 +15,13 @@
 
 /* ---------- 3-column grid ---------- */
 .opp-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
-.opp-grid.is-empty { grid-template-columns: 260px minmax(0, 1fr); }
-.opp-rail, .opp-center, .opp-right, .opp-empty {
+.opp-rail, .opp-center, .opp-right {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
   min-width: 0;
 }
-.opp-empty { color: var(--text-faint); display: grid; place-items: center; min-height: 240px; text-align: center; }
 .opp-section { margin: 0 0 8px; color: var(--text-faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .opp-muted { margin: 0; color: var(--text-faint); font-size: 13px; }
 .opp-k { color: var(--text-faint); }
@@ -44,6 +42,28 @@
 .opp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .opp-card-meta { font-size: 13px; color: var(--text-muted); }
 .opp-card-sub { font-size: 11px; color: var(--text-faint); }
+
+/* ---------- Market watch (rail list + center mode) ---------- */
+.opp-watch-head { margin-top: 10px; }
+.opp-watchlist { display: flex; flex-direction: column; gap: 4px; }
+.opp-watch {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 7px 10px; border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit; cursor: pointer;
+}
+.opp-watch:hover { border-color: var(--border-strong); }
+.opp-watch.is-active { border-left-color: var(--accent); background: var(--surface-2); }
+.opp-watch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.opp-watch-px { font: 12px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.opp-watch-tag {
+  padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: 4px;
+  color: var(--text-muted); font: 600 11px/18px var(--font-mono); text-transform: uppercase;
+}
+/* Message sits in the upper third so the centred Last-price line never crosses it. */
+.opp-watch-mode {
+  position: absolute; left: 0; right: 0; top: 28%; transform: translateY(-50%); padding: 0 20px;
+  color: var(--text-faint); font-size: 13px; text-align: center; pointer-events: none;
+}
 
 /* ---------- Center ---------- */
 .opp-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
@@ -94,7 +114,7 @@
   .opp-right { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
-  .opp-grid, .opp-grid.is-empty { grid-template-columns: 1fr; }
+  .opp-grid { grid-template-columns: 1fr; }
   .opp-chart { height: 220px; }
   .opp-last { margin-left: 0; }
 }

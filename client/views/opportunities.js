@@ -1,12 +1,13 @@
 // Opportunities tab: sub-navigation (Setups / Scanner / Saved) and the Setups
 // workspace: queue rail (left), analysis (center), risk & execution (right).
+// With no setup selected it shows Market Watch: live prices, nothing executable.
 // The server is the source of truth: buttons send APPROVE / REJECT intents (the
 // same messages the order guard, live routing and ORDER_BUSY lock protect), and
 // a setup leaves the rail only when the server's QUEUE_UPDATED removes it.
 // Exposes window.SignalDesk.opportunities.
 (() => {
   const SD = window.SignalDesk;
-  const { el, age } = SD.ui;
+  const { el, age, price } = SD.ui;
 
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
   let subTab = 'setups';
@@ -34,6 +35,15 @@
     return error;
   }
 
+  // Market Watch: when no queued setup is selected, the workspace follows a live
+  // symbol instead. It is NOT a candidate: no id, no levels, no size, so nothing
+  // can be approved from it (see send() and the right panel).
+  const DEFAULT_WATCH = 'BTC-USD'; // crypto streams 24/7, so there is always a live price
+  let watchSymbol = DEFAULT_WATCH;
+  let manualWatch = false; // user picked a watch symbol while setups exist
+  const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
+  const marketWatch = (symbol) => ({ isWatch: true, asset: symbol, market: marketOf(symbol), setupType: 'Market Watch', timeframe: '1h' });
+
   const rerender = () => { if (mounted) render(mounted.container, mounted.state); };
 
   function showNotice(text) {
@@ -45,6 +55,8 @@
 
   // ---------- Actions (intents only) ----------
   function send(type, id) {
+    // Only an id that is in the REAL queue can ever be sent (defence in depth).
+    if (!mounted || !mounted.state.pending.some((o) => o.id === id)) return;
     if (!transport.isOnline() || inFlight.has(id)) return;
     inFlight.add(id);
     transport.send({ type, id });
@@ -64,7 +76,7 @@
     showNotice(`${type === 'APPROVE' ? 'Approval' : 'Dismiss'} failed for ${who.asset}: ${describe(error)}`);
   }
 
-  // ---------- Rail ----------
+  // ---------- Rail: queue cards + market watch list ----------
   function railCard(o, active) {
     const dir = o.direction === 'short' ? 'short' : 'long';
     const btn = el('button', { type: 'button', className: `opp-card${active ? ' is-active' : ''}` }, [
@@ -76,32 +88,48 @@
       el('div', { className: 'opp-card-sub', textContent: `${o.strategyId} · staged ${age(o.stagedAt)} ago${inFlight.has(o.id) ? ' · sending…' : ''}` }),
     ]);
     btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = () => { activeId = o.id; rerender(); };
+    btn.onclick = () => { activeId = o.id; manualWatch = false; rerender(); };
     return btn;
   }
 
-  // ---------- Setups workspace ----------
+  // Every symbol with a live source: the default, the watchlist, then any streamed price.
+  function watchSymbols(state) {
+    const fromWatchlist = (state.watchlist || []).map((w) => w.symbol);
+    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {})])];
+  }
+
+  function watchButton(symbol, state, active) {
+    const p = state.prices && state.prices[symbol];
+    const market = marketOf(symbol);
+    const btn = el('button', { type: 'button', className: `opp-watch${active ? ' is-active' : ''}` }, [
+      el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: symbol, market }) }),
+      el('span', { className: 'opp-watch-px', textContent: p > 0 ? price(p, { market, entryPrice: p }) : '—' }),
+    ]);
+    btn.setAttribute('aria-pressed', String(active));
+    btn.onclick = () => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
+    return btn;
+  }
+
+  // ---------- Setups workspace (3 columns, always) ----------
   function setups(state) {
-    const pending = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
-    for (const id of inFlight) if (!pending.some((o) => o.id === id)) inFlight.delete(id);
-    if (!pending.some((o) => o.id === activeId)) activeId = pending.length ? pending[0].id : null;
-    const active = pending.find((o) => o.id === activeId);
+    const real = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
+    for (const id of inFlight) if (!real.some((o) => o.id === id)) inFlight.delete(id);
+    if (!real.some((o) => o.id === activeId)) activeId = !manualWatch && real.length ? real[0].id : null;
+    const active = real.find((o) => o.id === activeId) || marketWatch(watchSymbol);
 
     const rail = el('aside', { className: 'opp-rail' }, [
       el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Queue' }),
-        el('span', { className: 'count', textContent: String(pending.length) })]),
-      ...(pending.length ? pending.map((o) => railCard(o, o.id === activeId))
-        : [el('p', { className: 'opp-muted', textContent: 'No setups pending. New ones appear here as the risk engine approves them.' })]),
+        el('span', { className: 'count', textContent: String(real.length) })]),
+      ...(real.length ? real.map((o) => railCard(o, o.id === activeId))
+        : [el('p', { className: 'opp-muted', textContent: 'No setups pending. Watching the market until a strategy proposes one.' })]),
+      el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch' }),
+      el('div', { className: 'opp-watchlist' }, watchSymbols(state).map((s) => watchButton(s, state, active.isWatch && s === watchSymbol))),
     ]);
-    if (!active) {
-      return el('div', { className: 'opp-grid is-empty' }, [rail,
-        el('div', { className: 'opp-empty', textContent: 'Select a setup to review it. The queue is empty right now.' })]);
-    }
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
       settings: state.settings,
       online: transport.isOnline(),
-      busy: inFlight.has(active.id),
+      busy: !active.isWatch && inFlight.has(active.id),
       onApprove,
       onDismiss,
     };
@@ -135,6 +163,6 @@
     init: (t) => { transport = t; },
     render,
     actionFailed,
-    select: (id) => { activeId = id; subTab = 'setups'; },
+    select: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; },
   };
 })();
