@@ -49,7 +49,7 @@
           <div class="notice" id="queue-notice" role="status" hidden></div>
 
           <div class="table-wrap">
-            <table class="queue-table">
+            <table class="data-table queue-table">
               <thead>
                 <tr>
                   <th>Asset</th>
@@ -77,11 +77,58 @@
       </section>
 
       <section class="tab" id="tab-portfolio" data-title="Portfolio" hidden>
-        <div class="placeholder">Portfolio view is not built yet.</div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Active Positions</h2>
+            <span class="count" id="positions-count">0</span>
+            <span class="panel-hint">Filled paper trades, managed by the server's stop and target monitor</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Direction</th>
+                  <th class="num">Size</th>
+                  <th class="num">Entry price</th>
+                  <th class="num">Stop loss</th>
+                  <th class="num">Target 1</th>
+                </tr>
+              </thead>
+              <tbody id="positions-body"></tbody>
+            </table>
+          </div>
+
+          <div class="empty" id="positions-empty">No open positions. Approved setups appear here once filled.</div>
+        </div>
       </section>
 
       <section class="tab" id="tab-journal" data-title="Journal" hidden>
-        <div class="placeholder">Journal view is not built yet.</div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Closed Trades</h2>
+            <span class="count" id="journal-count">0</span>
+            <span class="panel-hint" id="journal-summary">Net of estimated fees and slippage</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Direction</th>
+                  <th>Exit reason</th>
+                  <th class="num">Net P/L</th>
+                  <th class="num">R-multiple</th>
+                </tr>
+              </thead>
+              <tbody id="journal-body"></tbody>
+            </table>
+          </div>
+
+          <div class="empty" id="journal-empty">No closed trades yet.</div>
+        </div>
       </section>
 
       <section class="tab" id="tab-settings" data-title="Settings" hidden>

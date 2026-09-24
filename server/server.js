@@ -58,6 +58,8 @@ wss.on('connection', (ws) => {
   });
   send(ws, 'hello', { server: 'signaldesk-v2', ts: Date.now() });
   send(ws, 'orders:snapshot', ledger.getPendingOrders());
+  send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
+  send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
 });
 
 // Client intents. The client only asks; the ledger decides and the server
@@ -84,6 +86,7 @@ function handleQueueAction(ws, { type, id }) {
     if (typeof id !== 'string' || !id) throw new Error('missing order id');
     const result = QUEUE_ACTIONS[type](id);
     console.log(`[ledger] ${type} ${id} -> ${result.status}`);
+    if (result.status === 'open') broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
   } catch (err) {
     console.warn(`[ledger] ${type} ${id} failed: ${err.message}`);
     send(ws, 'ACTION_FAILED', { type, id, error: err.message });
@@ -132,8 +135,13 @@ function runPipeline() {
 
   // Exit management for filled positions: stops and T1 targets on fresh prices.
   try {
-    for (const t of ledger.monitorPositions(prices.getLatestPrices())) {
+    const closed = ledger.monitorPositions(prices.getLatestPrices());
+    for (const t of closed) {
       console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)`);
+    }
+    if (closed.length) {
+      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
     }
   } catch (err) {
     console.error('[pipeline] position monitor failed:', err.message);

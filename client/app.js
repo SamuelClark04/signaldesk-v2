@@ -130,6 +130,53 @@
     renderQueue();
   }
 
+  // ---------- Portfolio & Journal (server snapshots replace local state) ----------
+  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit (T1)' };
+  const signed = (x, fmt) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${fmt(Math.abs(x))}`;
+  const pnlClass = (x) => (x > 0 ? 'pnl-pos' : x < 0 ? 'pnl-neg' : '');
+  const dirCell = (o) => td(o.direction, `text-upper text-${o.direction === 'short' ? 'short' : 'long'}`);
+  const assetCell = (o, subText) => el('td', {}, [el('span', { className: 'asset', textContent: o.asset }),
+    el('span', { className: 'sub', textContent: subText })]);
+  const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  function setTable(name, rows) {
+    $(`${name}-body`).replaceChildren(...rows);
+    $(`${name}-count`).textContent = rows.length;
+    $(`${name}-empty`).hidden = rows.length > 0;
+  }
+
+  function renderPositions(positions) {
+    const rows = [...positions].sort((a, b) => b.openedAt - a.openedAt).map((p) => {
+      const t1 = (p.targets || []).find((t) => t.level === 1) || (p.targets || [])[0];
+      return el('tr', {}, [
+        assetCell(p, `${p.market} · opened ${clock(p.openedAt)}`),
+        dirCell(p),
+        td(size(p), 'num'),
+        td(price(p.fillPrice, p), 'num'),
+        td(price(p.invalidation, p), 'num'),
+        td(t1 ? price(t1.price, p) : '—', 'num'),
+      ]);
+    });
+    setTable('positions', rows);
+  }
+
+  function renderJournal(trades) {
+    const sorted = [...trades].sort((a, b) => b.closedAt - a.closedAt);
+    setTable('journal', sorted.map((t) => el('tr', {}, [
+      assetCell(t, `${price(t.fillPrice, t)} → ${price(t.exitPrice, t)} · ${clock(t.closedAt)}`),
+      dirCell(t),
+      td(EXIT_LABELS[t.exitReason] || t.exitReason),
+      td(signed(t.netPnl, (x) => `$${x.toFixed(2)}`), `num ${pnlClass(t.netPnl)}`),
+      td(signed(t.rMultiple, (x) => `${x.toFixed(2)}R`), `num ${pnlClass(t.rMultiple)}`),
+    ])));
+
+    const net = trades.reduce((s, t) => s + t.netPnl, 0);
+    const wins = trades.filter((t) => t.netPnl > 0).length;
+    $('journal-summary').textContent = trades.length
+      ? `Net ${signed(net, (x) => `$${x.toFixed(2)}`)} · ${wins}W / ${trades.length - wins}L · after estimated fees`
+      : 'Net of estimated fees and slippage';
+  }
+
   // Keep the Age column fresh without a full re-render.
   setInterval(() => {
     document.querySelectorAll('td.age').forEach((c) => { c.textContent = age(Number(c.dataset.ts)); });
@@ -157,6 +204,8 @@
     'orders:snapshot': (orders) => receiveStagedOrders(orders, { replace: true }),
     'order:staged': (order) => receiveStagedOrders(order),
     QUEUE_UPDATED: (orders) => receiveStagedOrders(orders, { replace: true }),
+    POSITIONS_UPDATED: (positions) => renderPositions(positions || []),
+    JOURNAL_UPDATED: (trades) => renderJournal(trades || []),
     ACTION_FAILED: ({ type, id, error }) => {
       console.warn(`[signaldesk] ${type} ${id} failed: ${error}`);
       inFlight.delete(id);
@@ -192,5 +241,7 @@
 
   showTab(location.hash.slice(1));
   renderQueue();
+  renderPositions([]);
+  renderJournal([]);
   connect();
 })();

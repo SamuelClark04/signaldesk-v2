@@ -158,11 +158,11 @@ html, body {
   font: 12px/20px var(--font-mono);
 }
 
-/* ---------- Queue table ---------- */
+/* ---------- Data tables (queue, positions, journal) ---------- */
 .table-wrap { overflow-x: auto; }
 
-.queue-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
-.queue-table th {
+.data-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.data-table th {
   padding: 8px 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -173,11 +173,11 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.queue-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.queue-table tbody tr.row { cursor: pointer; }
-.queue-table tbody tr.row:hover { background: var(--surface-hover); }
-.queue-table .num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.queue-table th.num { font-family: var(--font-ui); }
+.data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.data-table tbody tr.row { cursor: pointer; }
+.data-table tbody tr.row:hover { background: var(--surface-hover); }
+.data-table .num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.data-table th.num { font-family: var(--font-ui); }
 
 .asset { font: 600 13px var(--font-mono); }
 .sub { display: block; color: var(--text-faint); font-size: 11px; }
@@ -228,6 +228,11 @@ html, body {
 }
 .badge-long { background: var(--long-bg); color: var(--long); }
 .badge-short { background: var(--short-bg); color: var(--short); }
+
+/* ---------- P/L utilities (same palette: green = gain, red = loss) ---------- */
+.pnl-pos { color: var(--long); }
+.pnl-neg { color: var(--short); }
+.text-upper { text-transform: uppercase; font: 600 12px var(--font-mono); }
 
 /* ---------- Small screens: sidebar becomes a top bar ---------- */
 @media (max-width: 760px) {
