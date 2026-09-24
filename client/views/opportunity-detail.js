@@ -70,7 +70,8 @@
   // Header: badge, symbol + name, big price with its change, setup meta.
   // Change: vs entry for a setup; over the loaded chart range in Market Watch.
   // The thesis lives in the analysis card below (setup-analysis.js).
-  function center(o, { livePrice, refPrice }) {
+  function center(o, ctx) {
+    const { livePrice, refPrice } = ctx;
     const ref = !(livePrice > 0) && refPrice && refPrice.price > 0 ? refPrice : null; // last close (display only)
     const watch = !hasLevels(o);
     const dir = o.direction === 'short' ? 'short' : 'long';
@@ -105,7 +106,8 @@
           el('span', { className: `badge-${dir}`, textContent: dir }),
           el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` })]),
       ]),
-      chart,
+      // Active Trade HUD floats over the chart when this symbol has open position(s).
+      el('div', { className: 'opp-chart-wrap' }, [chart, ...[SD.tradeHud.hud(o, ctx)].filter(Boolean)]),
     ]);
   }
 

@@ -5,11 +5,12 @@
 const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const alpacaNews = require('../connectors/alpaca-news-socket');
 const equityDay = require('../strategies/1-equity-day');
-const cryptoIntra = require('../strategies/2-crypto-intra');
+const cryptoSwing = require('../strategies/2-crypto-swing');
 const equitySwing = require('../strategies/3-equity-swing');
 const optionsSystem = require('../strategies/5-options-system');
 const { processCandidate } = require('../risk/risk-engine');
 const { sizingBankroll } = require('../risk/venue-capital');
+const { computeProximity } = require('../intelligence/trigger-proximity');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
@@ -23,11 +24,13 @@ const PIPELINE_INTERVAL_MS = 60000;
 let broadcast = () => {}; // set by startPipeline()
 let pipelineTimer = null;
 let lastPricesKey = null;
+let proximityState = { items: [], thresholdPct: 0.015, at: null };
+const getProximity = () => proximityState;
 
 // Each strategy runs isolated: one failing never blocks the others' candidates.
 const STRATEGIES = [
   ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
-  ['crypto-intraday', () => cryptoIntra.generateCandidates(prices.getLatestPrices())],
+  ['crypto-swing', () => cryptoSwing.generateCandidates(prices.getLatestPrices())],
   ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
   ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
 ];
@@ -156,6 +159,15 @@ async function pipelinePass() {
   if (positionsChanged) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
   if (journalChanged) broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
 
+  // "Heating up": distance to each strategy's trigger (Market Watch filter).
+  try {
+    const next = computeProximity(alpacaStocks.getLatestBars(), prices.getLatestPrices());
+    if (JSON.stringify(next.items) !== JSON.stringify(proximityState.items)) broadcast('TRIGGER_PROXIMITY', next);
+    proximityState = next;
+  } catch (err) {
+    console.error('[pipeline] trigger proximity failed:', err.message);
+  }
+
   // Dashboard intelligence (attention alerts + market context), after exits settle.
   try {
     publishIntelligence(broadcast);
@@ -185,4 +197,4 @@ function stopPipeline() {
   pipelineTimer = null;
 }
 
-module.exports = { startPipeline, stopPipeline, runPipeline, getScanStatus, PIPELINE_INTERVAL_MS };
+module.exports = { startPipeline, stopPipeline, runPipeline, getScanStatus, getProximity, PIPELINE_INTERVAL_MS };

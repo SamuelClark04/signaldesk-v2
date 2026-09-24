@@ -41,7 +41,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null,
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null, universe: null, proximity: null,
     // Venue filter shared by Today and Portfolio (lib/venue.js); remembered per device.
     activeVenue: (() => { try { return localStorage.getItem(VENUE_KEY) || 'paper'; } catch { return 'paper'; } })() };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
@@ -59,6 +59,8 @@
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
+    UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 80 monitored symbols + names
+    TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
     BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)
   };
 
@@ -113,7 +115,8 @@
   const HANDLERS = {
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
     ACTION_FAILED: (payload) => (payload && ['CLOSE_POSITION', 'ADOPT_POSITION', 'RELEASE_POSITION'].includes(payload.type)
-      ? SD.portfolio.actionFailed(payload) : SD.opportunities.actionFailed(payload)),
+      ? (SD.portfolio.actionFailed(payload), payload.type === 'CLOSE_POSITION' && SD.opportunities.actionFailed(payload))
+      : SD.opportunities.actionFailed(payload)),
     POSITIONS_UPDATED: () => SD.portfolio.positionsUpdated(), // closes a pending adoption form
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),

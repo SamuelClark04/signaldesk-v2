@@ -25,7 +25,8 @@
     NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
     LIVE_OPTIONS_UNSUPPORTED: 'live options execution is not supported yet (strikes are simulated). Nothing was sent; '
       + 'the order is still pending (set Alpaca mode to Paper to fill it on paper)',
-    ORDER_BUSY: 'an approval for this order is already in progress',
+    ORDER_BUSY: 'an action for this order is already in progress',
+    LIVE_CLOSE_UNSUPPORTED: 'it is a LIVE position: close it at the broker (its exits are orders there)',
   };
   function describe(error) {
     if (FAIL_REASONS[error]) return FAIL_REASONS[error];
@@ -71,10 +72,21 @@
   }
   const onDismiss = (o) => send('REJECT', o.id);
 
+  // HUD manual exit (paper only; the server refuses LIVE). Same confirm as Portfolio.
+  function onClosePosition(p, m) {
+    if (!transport.isOnline() || inFlight.has(p.id)) return;
+    const est = m.gross === null ? 'Options are booked at their value at expiry for this underlying price.'
+      : `Estimated P/L: ${m.gross >= 0 ? '+' : '−'}$${Math.abs(m.gross).toFixed(2)} gross${m.net === null ? '' : `, ${m.net >= 0 ? '+' : '−'}$${Math.abs(m.net).toFixed(2)} after fees`}.`;
+    if (!window.confirm(`Manual exit: close ${p.direction.toUpperCase()} ${p.asset} (paper) now at the live price ${price(m.price, p)}?\n\n${est}\n\nThis overrides the stop and targets.`)) return;
+    inFlight.add(p.id);
+    transport.send({ type: 'CLOSE_POSITION', id: p.id });
+    rerender();
+  }
+
   function actionFailed({ type, id, error }) {
     inFlight.delete(id);
     const who = (mounted && mounted.state.pending.find((o) => o.id === id)) || { asset: String(id).split(':')[2] || id };
-    showNotice(`${type === 'APPROVE' ? 'Approval' : 'Dismiss'} failed for ${who.asset}: ${describe(error)}`);
+    showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
   }
 
   // ---------- Rail: queue cards + market watch list ----------
@@ -133,11 +145,16 @@
   }
 
   // Every symbol with a price source: the default, the watchlist, streamed prices, last closes.
+  // "Heating up" only (watch-heat.js): near a trigger, queued, held, or on the chart.
+  let heat = new Map(); // symbol -> { reason, tag, title } for the rows being drawn
   function watchSymbols(state) {
-    const fromWatchlist = (state.watchlist || []).map((w) => w.symbol);
-    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {}), ...Object.keys(state.refPrices || {})])]
-      .filter((s) => watchMarketOk(marketOf(s)) && matchesSearch(s, s.replace('-', '/')));
+    const list = SD.watchHeat.heating(state, { selected: watchSymbol, searching: !!search,
+      keep: (s) => watchMarketOk(marketOf(s)) && matchesSearch(s, s.replace('-', '/'), SD.scannerData.nameOf(s)) });
+    heat = new Map(list.map((x) => [x.symbol, x]));
+    watchCaption = SD.watchHeat.caption(state, list);
+    return list.map((x) => x.symbol);
   }
+  let watchCaption = '';
 
   function watchButton(symbol, state, active) {
     const p = state.prices && state.prices[symbol];
@@ -146,8 +163,10 @@
     const market = marketOf(symbol);
     const px = el('span', { className: `opp-watch-px${ref ? ' is-stale' : ''}`, textContent: shown > 0 ? price(shown, { market, entryPrice: shown }) : '—' });
     if (ref) px.title = `Last close, ${new Date(ref.time).toLocaleString()} (no live price: market closed or feed quiet)`;
-    const btn = el('button', { type: 'button', className: `opp-watch${active ? ' is-active' : ''}` }, [
+    const h = heat.get(symbol);
+    const btn = el('button', { type: 'button', className: `opp-watch${active ? ' is-active' : ''}`, title: h && h.title ? h.title : '' }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: symbol, market }) }),
+      ...(h && h.tag ? [el('span', { className: `opp-heat is-${h.reason}`, textContent: h.tag })] : []),
       px,
     ]);
     btn.setAttribute('aria-pressed', String(active));
@@ -158,7 +177,7 @@
   // ---------- Setups workspace (3 columns, always) ----------
   function setups(state) {
     const real = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
-    for (const id of inFlight) if (!real.some((o) => o.id === id)) inFlight.delete(id);
+    for (const id of inFlight) if (!real.some((o) => o.id === id) && !(state.positions || []).some((p) => p.id === id)) inFlight.delete(id);
     const visible = real.filter((o) => matchesAsset(o.market)
       && matchesSearch(o.asset, SD.oppDetail.displaySymbol(o), o.setupType, o.strategyId, o.timeframe, o.thesis));
     const watchable = watchSymbols(state);
@@ -179,7 +198,8 @@
         el('span', { className: 'count', textContent: filtered ? `${visible.length} / ${real.length}` : String(real.length) })]),
       el('div', { className: 'opp-queue' }, visible.length ? visible.map((o) => railCard(o, o.id === activeId))
         : [el('p', { className: 'opp-muted', textContent: emptyText })]),
-      el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch' }),
+      el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch · heating up' }),
+      el('p', { className: 'opp-heat-caption', textContent: search ? 'Searching all monitored symbols' : watchCaption }),
       el('div', { className: 'opp-watchlist' }, watchable.length
         ? watchable.map((s) => watchButton(s, state, active.isWatch && s === watchSymbol))
         : [el('p', { className: 'opp-muted', textContent: 'No symbols match.' })]),
@@ -193,6 +213,8 @@
       busy: !active.isWatch && inFlight.has(active.id),
       onApprove,
       onDismiss,
+      onClosePosition,
+      closing: inFlight,
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
     return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);

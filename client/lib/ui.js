@@ -8,10 +8,16 @@
   // ---------- Formatting ----------
   // Prices: thousands separators (83,900.00) with a fixed number of decimals per
   // market (2, or 4 for sub-$10 crypto). en-US pinned, like money() below.
-  const decimals = (o) => (o.market === 'crypto' ? (o.entryPrice < 10 ? 4 : 2) : 2);
+  // Sub-cent coins (BONK, PEPE ~ $0.00001) get ~4 significant digits instead of 0.0000.
+  const decimals = (o, x) => {
+    if (o.market !== 'crypto') return 2;
+    const ref = o.entryPrice > 0 ? o.entryPrice : Math.abs(x);
+    if (!(ref < 1)) return ref < 10 ? 4 : 2;
+    return Math.min(10, Math.max(4, 3 - Math.floor(Math.log10(ref))));
+  };
   const price = (x, o) => {
     if (!Number.isFinite(x)) return '—';
-    const d = decimals(o || {});
+    const d = decimals(o || {}, x);
     return x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   };
   // Dollar amounts: thousands separators, always 2 decimals. Locale is pinned to

@@ -97,3 +97,24 @@
   .opp-head-meta { margin-left: 0; }
   .sa-col + .sa-col { padding-left: 0; border-left: 0; }
 }
+
+/* ---------- Active Trade HUD over the chart (Phase 30) ---------- */
+.opp-chart-wrap { position: relative; }
+.trade-hud { position: absolute; top: 52px; right: 78px; z-index: 5; display: flex; flex-direction: column; gap: 10px; width: 260px; padding: 12px;
+  border: 1px solid var(--border-strong); border-radius: 10px; background: rgba(17, 24, 39, 0.94); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.hud-title { color: var(--text-faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.hud-pos { display: flex; flex-direction: column; gap: 6px; }
+.hud-pos + .hud-pos { padding-top: 10px; border-top: 1px solid var(--border); }
+.hud-line { display: flex; align-items: center; gap: 8px; font: 12px var(--font-mono); color: var(--text-muted); }
+.hud-venue { padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 4px; font: 600 10px/16px var(--font-mono); }
+.hud-venue.is-live { border-color: rgba(45, 212, 191, 0.5); color: var(--long); }
+.hud-pnl { font: 600 22px var(--font-mono); font-variant-numeric: tabular-nums; }
+.hud-pnl span { font-size: 13px; }
+.hud-levels { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 11px var(--font-mono); }
+.hud-muted { color: var(--text-faint); font-size: 12px; }
+.hud-exit { width: 100%; padding: 8px; font-size: 12px; font-weight: 600; }
+.hud-exit.is-armed { border-color: var(--short); background: var(--short); color: #fff; }
+.hud-exit.is-armed:hover:not(:disabled) { filter: brightness(1.1); }
+@media (max-width: 760px) { .trade-hud { position: static; width: auto; margin-top: 8px; } }
+/* Keep the Market Watch banner clear of the HUD. */
+.opp-chart-wrap:has(.trade-hud) .opp-watch-mode { right: 350px; text-align: left; padding-left: 16px; }

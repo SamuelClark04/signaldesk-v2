@@ -141,4 +141,25 @@ function generateCandidates(marketDataMap, newsContext) {
   return candidates;
 }
 
-module.exports = { generateCandidates, STRATEGY_ID, CONFIG };
+// "Heating up": after the opening range is set and before the entry cutoff,
+// symbols still below the OR high (the breakout level) with no breakout yet.
+function proximity(marketDataMap) {
+  const c = CONFIG;
+  const out = [];
+  for (const [symbol, raw] of entries(marketDataMap)) {
+    const { bars } = sessionBars(raw);
+    const orEnd = SESSION_OPEN + c.openingRangeMinutes;
+    if (!bars.length || bars[bars.length - 1].minute < orEnd - 1 || bars[bars.length - 1].minute > c.lastEntryMinute) continue;
+    const orBars = bars.filter((b) => b.minute < orEnd);
+    if (orBars.length < c.minOpeningRangeBars) continue;
+    const orHigh = Math.max(...orBars.map((b) => b.high));
+    if (aggregate(bars, c.barMinutes).some((k) => k.start >= orEnd && k.close > orHigh)) continue; // already broke out
+    const last = bars[bars.length - 1].close;
+    if (!(last > 0) || last >= orHigh) continue;
+    out.push({ symbol, strategyId: STRATEGY_ID, trigger: cents(orHigh), distancePct: (orHigh - last) / last,
+      label: `ORB: ${c.barMinutes}m close above the opening-range high ${cents(orHigh)}` });
+  }
+  return out;
+}
+
+module.exports = { generateCandidates, proximity, STRATEGY_ID, CONFIG };

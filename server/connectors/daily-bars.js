@@ -1,51 +1,44 @@
 // Daily bars: on-demand completed daily OHLC history (REST by design).
 // The live streams only carry today's 1-minute bars, so multi-day indicators
 // (moving averages for the swing system) need a history fetch.
-// MOCK for now. The real version will call Alpaca's historical bars endpoint
-// (GET https://data.alpaca.markets/v2/stocks/{symbol}/bars?timeframe=1Day).
+// Real data: the same 1D history fetcher the Setups chart and adoption levels
+// use (history-bars.js: Alpaca IEX for stocks, Coinbase for crypto).
 //
+// Completed sessions only: today's still-forming bar is dropped (its ET date is
+// today), so indicators never mix a partial day with finished ones.
 // Completed daily bars only change once a day, so results are cached for hours:
 // the 60s pipeline never turns this into a poll loop.
+const { getHistory } = require('./history-bars');
+
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MOCK_DAYS = 60;
+const FAIL_TTL_MS = 5 * 60 * 1000; // retry a failed fetch sooner
 
-const cache = new Map(); // symbol -> { at, value }
-
-// Deterministic synthetic uptrend with a shallow pullback over the last few days:
-// rises ~0.4%/day from BASE, then eases ~3% off the recent high.
-const MOCK_BASE = Object.freeze({ NVDA: 100, AAPL: 180, SPY: 480 });
-
-function mockBars(symbol) {
-  const base = MOCK_BASE[symbol] || 100;
-  const bars = [];
-  for (let i = 0; i < MOCK_DAYS; i++) {
-    const trend = base * (1 + 0.004 * i);
-    const pullback = i >= MOCK_DAYS - 4 ? 1 - 0.01 * (i - (MOCK_DAYS - 5)) : 1;
-    const wiggle = 1 + 0.003 * Math.sin(i * 1.7);
-    const close = Math.round(trend * pullback * wiggle * 100) / 100;
-    bars.push({
-      day: i - MOCK_DAYS, // -60 .. -1 (yesterday)
-      open: close,
-      high: Math.round(close * 1.008 * 100) / 100,
-      low: Math.round(close * 0.992 * 100) / 100,
-      close,
-    });
-  }
-  return bars;
-}
+const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+const cache = new Map(); // symbol -> { at, ok, bars }
+const warned = new Set();
 
 async function fetchDailyBars(symbol) {
-  // TODO: replace with the Alpaca REST call described above.
-  return mockBars(symbol);
+  const r = await getHistory(symbol, '1d');
+  if (!r.ok) {
+    if (!warned.has(symbol)) console.warn(`[daily-bars] ${symbol}: no daily history (${r.error}); swing analysis skipped`);
+    warned.add(symbol);
+    return { ok: false, bars: [] };
+  }
+  warned.delete(symbol);
+  return { ok: true, bars: r.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })) };
 }
 
-// Completed daily bars, oldest first. Returns copies so callers can't corrupt the cache.
+// Completed daily bars, oldest first: [{ time, open, high, low, close }] ([] on
+// failure). Returns copies so callers can't corrupt the cache.
 async function getDailyBars(symbol, now = Date.now()) {
-  const hit = cache.get(symbol);
-  if (hit && now - hit.at < CACHE_TTL_MS) return hit.value.map((b) => ({ ...b }));
-  const value = await fetchDailyBars(symbol);
-  cache.set(symbol, { at: now, value });
-  return value.map((b) => ({ ...b }));
+  let hit = cache.get(symbol);
+  if (!hit || now - hit.at >= (hit.ok ? CACHE_TTL_MS : FAIL_TTL_MS)) {
+    hit = { at: now, ...(await fetchDailyBars(symbol)) };
+    cache.set(symbol, hit);
+  }
+  const today = etDate.format(now);
+  // A 1D bar is stamped at the start of its session (ET midnight), so its ET date is the session date.
+  return hit.bars.filter((b) => etDate.format(b.time * 1000) < today).map((b) => ({ ...b }));
 }
 
 module.exports = { getDailyBars, CACHE_TTL_MS };

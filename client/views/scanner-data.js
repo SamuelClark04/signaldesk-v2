@@ -32,12 +32,15 @@
 
   const marketOf = (s) => (s.includes('-') ? 'crypto' : 'stocks');
   const display = (asset, market) => (market === 'crypto' ? asset.replace('-', '/') : asset);
-  const nameOf = (asset) => NAMES[asset] || asset;
+  let serverNames = {}; // from UNIVERSE (server/market/universe.js)
+  const setNames = (names) => { serverNames = names || {}; };
+  const nameOf = (asset) => serverNames[asset] || NAMES[asset] || asset;
   const colorOf = (asset) => COLORS[asset] || '#38bdf8';
   const initials = (asset) => asset.replace(/-USD$/, '').slice(0, asset.includes('-') ? 1 : 2);
 
   function universe(state) {
-    return [...new Set([...(state.watchlist || []).map((w) => w.symbol), ...Object.keys(state.prices || {}),
+    const u = state.universe ? [...state.universe.stocks, ...state.universe.crypto] : [];
+    return [...new Set([...u, ...(state.watchlist || []).map((w) => w.symbol), ...Object.keys(state.prices || {}),
       ...Object.keys(state.refPrices || {}), ...(state.pending || []).map((o) => o.asset)])].sort();
   }
 
@@ -153,5 +156,5 @@
     return out;
   }
 
-  SD.scannerData = { buildRows, filterRows, funnel, gates, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
+  SD.scannerData = { setNames, buildRows, filterRows, funnel, gates, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
 })();

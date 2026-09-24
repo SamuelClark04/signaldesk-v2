@@ -167,3 +167,11 @@
 .opp-queue::-webkit-scrollbar-thumb:hover, .opp-watchlist::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 .opp-watch-px.is-stale { color: var(--text-faint); font-style: italic; }
 
+
+/* ---------- Market watch: heating-up tags (Phase 30) ---------- */
+.opp-heat-caption { margin: -4px 0 4px; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
+.opp-watch .asset { flex: 1; text-align: left; }
+.opp-heat { padding: 0 6px; border-radius: 4px; font: 600 10px/16px var(--font-mono); white-space: nowrap; }
+.opp-heat.is-trigger { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.opp-heat.is-queue { background: var(--long-bg); color: var(--long); }
+.opp-heat.is-position { background: rgba(56, 189, 248, 0.14); color: var(--accent); }

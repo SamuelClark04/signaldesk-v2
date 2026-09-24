@@ -14,13 +14,14 @@ const alpacaNews = require('./connectors/alpaca-news-socket');
 const coinbase = require('./connectors/coinbase-socket');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
-const { startPipeline, stopPipeline, runPipeline, getScanStatus } = require('./execution/pipeline');
+const { startPipeline, stopPipeline, runPipeline, getScanStatus, getProximity } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const watchlist = require('./execution/watchlist');
 const prices = require('./market/latest-prices');
 const referencePrices = require('./market/reference-prices');
-const { STOCKS, CRYPTO } = require('./market/universe');
+const universe = require('./market/universe');
+const { STOCKS, CRYPTO, STREAMED_STOCKS } = universe;
 const { getHistory } = require('./connectors/history-bars');
 const brokerSync = require('./connectors/broker-sync');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
@@ -100,6 +101,8 @@ wss.on('connection', (ws) => {
   send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
   send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
   send(ws, 'SCAN_STATUS', getScanStatus());
+  send(ws, 'UNIVERSE', universe.snapshot());
+  send(ws, 'TRIGGER_PROXIMITY', getProximity());
   send(ws, 'BROKER_HOLDINGS', brokerSync.getSnapshot()); // last Sync Broker result (never auto-fetched)
   try {
     send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
@@ -121,11 +124,11 @@ const heartbeat = setInterval(() => {
 }, 30000);
 
 function start() {
-  alpacaStocks.init({ symbols: STOCKS });
+  alpacaStocks.init({ symbols: STREAMED_STOCKS }); // free plan: 30 WebSocket symbols (universe.js)
   // News stream (Event Catalyst Engine). Alpaca's connection limit is per endpoint,
   // so it doesn't compete with the bar stream; a 406/404 is retried quietly with
   // backoff inside the connector (see alpaca-news-socket.js).
-  alpacaNews.init({ symbols: STOCKS });
+  alpacaNews.init({ symbols: STREAMED_STOCKS });
   coinbase.init({ symbols: CRYPTO });
   // Last closes for quiet stocks (display only), so a closed market isn't all "—".
   referencePrices.start({ symbols: STOCKS, onChange: (closes) => broadcast('REFERENCE_PRICES', closes) });
