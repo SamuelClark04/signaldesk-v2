@@ -1,0 +1,153 @@
+/* Opportunities → Scanner: header, filter bar, funnel, results table, detail
+   panel and diagnostics. Colors from main.css tokens. */
+
+.scan { display: flex; flex-direction: column; gap: 14px; }
+.scan-h { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.scan-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.scan-link:hover { text-decoration: underline; }
+
+/* ---------- Header ---------- */
+.scan-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.scan-title { margin: 0; font-size: 26px; font-weight: 700; }
+.scan-subtitle { margin: 4px 0 0; color: var(--text-muted); }
+.scan-run-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.scan-run { padding: 10px 26px; border-color: var(--solid); background: var(--solid); color: #fff; font-size: 15px; font-weight: 600; }
+.scan-run::before { content: '▶'; margin-right: 10px; font-size: 12px; }
+.scan-run:disabled { background: var(--surface-2); border-color: var(--border-strong); color: var(--text-muted); opacity: 1; }
+.scan-run-status { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
+.scan-run-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--long); }
+.scan-run-status.is-running::before { background: var(--warn); animation: scan-pulse 1s ease-in-out infinite; }
+.scan-run-sub { color: var(--text-faint); font-size: 12px; }
+@keyframes scan-pulse { 50% { opacity: 0.3; } }
+
+/* ---------- Filter bar ---------- */
+.scan-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.scan-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.scan-field-label { color: var(--text-muted); font-size: 12px; }
+.scan-select, .scan-input {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 13px;
+}
+.scan-select:focus, .scan-input:focus { outline: none; border-color: var(--accent); }
+.scan-tfs { display: flex; flex-wrap: wrap; gap: 4px 12px; min-height: 31px; align-items: center; }
+.scan-tf { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.scan-tf input { accent-color: var(--solid); width: 15px; height: 15px; }
+
+/* ---------- Funnel ---------- */
+.scan-funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; align-items: center; gap: 28px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.scan-stage { position: relative; display: flex; align-items: flex-end; gap: 12px; min-width: 0; }
+.scan-stage::after { /* chevron to the next stage */
+  content: ''; position: absolute; right: -18px; top: 50%; width: 7px; height: 7px; margin-top: -4px;
+  border-top: 2px solid var(--text-faint); border-right: 2px solid var(--text-faint); transform: rotate(45deg);
+}
+.scan-stage.is-last::after { display: none; }
+.scan-stage-text { display: flex; flex-direction: column; flex: none; }
+.scan-stage-text strong { font: 600 18px var(--font-mono); font-variant-numeric: tabular-nums; }
+.scan-stage-text span { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.scan-stage-bar, .scan-cov-bar { flex: 1; min-width: 30px; height: 7px; margin-bottom: 5px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.scan-stage-bar span, .scan-cov-bar span { display: block; height: 100%; border-radius: 2px; background: var(--solid); }
+.scan-stage.is-last .scan-stage-bar span { background: var(--warn); }
+.scan-skipped { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; border-left: 1px solid var(--border); font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.scan-skipped strong { color: var(--text); font-family: var(--font-mono); margin-right: 4px; }
+.scan-skipped .scan-link { text-align: left; }
+
+/* ---------- Layout: table + diagnostics | detail ---------- */
+.scan-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
+.scan-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---------- Results table ---------- */
+.scan-results { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); min-width: 0; }
+.scan-table { white-space: normal; }
+.scan-table th { padding: 12px 8px; font-size: 12px; white-space: nowrap; }
+.scan-table td { padding: 9px 8px; font-size: 13px; vertical-align: middle; }
+.scan-table td:first-child, .scan-table th:first-child { padding-left: 14px; }
+.scan-table td:last-child, .scan-table th:last-child { padding-right: 14px; }
+.scan-table td.num { white-space: nowrap; }
+.scan-table tr.row.is-selected td { background: rgba(47, 129, 247, 0.08); }
+.scan-table tr.row.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--solid); }
+.scan-sortable { cursor: pointer; user-select: none; }
+.scan-asset { display: flex; align-items: center; gap: 10px; }
+.scan-asset div { display: flex; flex-direction: column; }
+.scan-asset strong { font-family: var(--font-mono); }
+.scan-asset div span { color: var(--text-muted); font-size: 12px; }
+.scan-badge {
+  display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--badge); color: #fff; font: 700 11px var(--font-ui); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.scan-badge.is-big { width: 40px; height: 40px; font-size: 14px; }
+.scan-side { font-weight: 700; font-family: var(--font-mono); }
+.scan-statecell { display: flex; flex-direction: column; gap: 2px; }
+.scan-statecell small, .scan-pill small { color: var(--text-muted); font-size: 11px; padding-left: 15px; }
+.scan-state { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; }
+.scan-state::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.scan-state.is-ready { color: var(--long); }
+.scan-state.is-ready::before { background: var(--long); }
+.scan-state.is-watching { color: var(--accent); }
+.scan-state.is-watching::before { background: var(--accent); }
+.scan-state.is-waiting { color: var(--warn); }
+.scan-state.is-waiting::before { background: var(--warn); }
+.scan-state.is-failed { color: var(--short); }
+.scan-state.is-failed::before { background: var(--short); }
+.scan-stale { color: var(--text-faint); }
+.scan-action { text-align: right; }
+.scan-btn { min-width: 84px; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+.scan-foot-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; flex-wrap: wrap; font-size: 12px; }
+.scan-pages { display: flex; gap: 6px; }
+.scan-page { min-width: 30px; height: 30px; border: 1px solid var(--border-strong); border-radius: 4px; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+.scan-page.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); color: var(--text); }
+.scan-page:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- Diagnostics ---------- */
+.scan-diag { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.scan-panel { padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.scan-panel-sub { margin: 2px 0 12px; color: var(--text-muted); font-size: 12px; }
+.scan-cov { display: grid; grid-template-columns: 60px minmax(0, 1fr) 60px 40px; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; }
+.scan-cov .scan-cov-bar { margin: 0; }
+.scan-cov-n { font-family: var(--font-mono); text-align: right; }
+.scan-cov-pct { color: var(--text-muted); text-align: right; }
+.scan-excl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; font-size: 13px; }
+.scan-excl dt { color: var(--text-muted); }
+.scan-excl dd { margin: 0; font-family: var(--font-mono); text-align: right; }
+
+/* ---------- Detail panel ---------- */
+.scan-detail { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.scan-detail-head { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.scan-detail-title { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.scan-detail-title strong { font: 600 18px var(--font-mono); }
+.scan-detail-title span { color: var(--text-muted); font-size: 13px; }
+.scan-pill { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 12px; max-width: 150px; }
+.scan-pill.is-ready { border-color: rgba(45, 212, 191, 0.5); background: var(--long-bg); }
+.scan-pill.is-failed { border-color: rgba(251, 113, 133, 0.5); background: var(--short-bg); }
+.scan-summary { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.scan-gates-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+.scan-gates-n { color: var(--text-muted); font-size: 13px; }
+.scan-gates { margin: 0; padding: 0; list-style: none; }
+.scan-gate { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.scan-gate:last-child { border-bottom: 0; }
+.scan-gate-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.scan-gate.is-pass .scan-gate-icon { background: var(--solid); color: #fff; }
+.scan-gate.is-fail .scan-gate-icon { background: var(--short); color: #fff; }
+.scan-gate.is-wait .scan-gate-icon { background: rgba(251, 191, 36, 0.2); color: var(--warn); }
+.scan-gate-text { display: flex; flex-direction: column; min-width: 0; font-size: 13px; }
+.scan-gate-text span { color: var(--text-muted); font-size: 12px; }
+.scan-gate-value { font-family: var(--font-mono); font-size: 13px; text-align: right; }
+.scan-detail-go { width: 100%; padding: 9px; }
+.scan-note { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; }
+.scan-note p { margin: 0 0 4px; }
+.scan-note-icon { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border: 1.5px solid var(--accent); border-radius: 50%; color: var(--accent); font-size: 11px; font-weight: 700; }
+.scan-note-fine { margin-top: 8px !important; color: var(--text-faint); font-size: 12px; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1300px) {
+  .scan-grid { grid-template-columns: 1fr; }
+  .scan-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .scan-funnel { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .scan-skipped { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--border); }
+}
+@media (max-width: 800px) {
+  .scan-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .scan-stage::after { display: none; }
+  .scan-diag { grid-template-columns: 1fr; }
+  .scan-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scan-run-wrap { align-items: flex-start; }
+}

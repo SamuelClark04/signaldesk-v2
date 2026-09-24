@@ -45,14 +45,28 @@ async function collectCandidates() {
 
 // One pipeline pass. Strategies only propose; the risk engine decides; only
 // the ledger holds state. A failure on one candidate never stops the others.
+// Scan status for the Scanner ("Complete · 3 seconds"), broadcast as SCAN_STATUS
+// when a pass starts and ends. priceTimes gives each fresh price's real age.
 let pipelineRunning = false;
-async function runPipeline() {
+const scanStatus = { running: false, trigger: null, startedAt: null, finishedAt: null, durationMs: null, counts: null, priceTimes: {}, intervalMs: PIPELINE_INTERVAL_MS };
+const getScanStatus = () => ({ ...scanStatus, counts: scanStatus.counts && { ...scanStatus.counts }, priceTimes: { ...scanStatus.priceTimes } });
+
+async function runPipeline({ trigger = 'timer' } = {}) {
   if (pipelineRunning) return console.warn('[pipeline] previous pass still running; skipping this tick');
   pipelineRunning = true;
+  const startedAt = Date.now();
+  Object.assign(scanStatus, { running: true, trigger, startedAt });
+  broadcast('SCAN_STATUS', getScanStatus());
+  let counts = null;
   try {
-    return await pipelinePass();
+    counts = await pipelinePass();
+    return counts;
   } finally {
     pipelineRunning = false;
+    let priceTimes = {};
+    try { priceTimes = prices.getPriceTimes(); } catch { /* keep empty */ }
+    Object.assign(scanStatus, { running: false, finishedAt: Date.now(), durationMs: Date.now() - startedAt, counts, priceTimes });
+    broadcast('SCAN_STATUS', getScanStatus());
   }
 }
 
@@ -75,7 +89,7 @@ async function pipelinePass() {
     const result = processCandidate(candidate, bankroll);
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
-      recordRejection(result.candidateId, result.reason); // counted once per setup per reason
+      recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason
       continue;
     }
     counts.approved += 1;
@@ -160,4 +174,4 @@ function stopPipeline() {
   pipelineTimer = null;
 }
 
-module.exports = { startPipeline, stopPipeline, runPipeline, PIPELINE_INTERVAL_MS };
+module.exports = { startPipeline, stopPipeline, runPipeline, getScanStatus, PIPELINE_INTERVAL_MS };

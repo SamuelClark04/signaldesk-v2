@@ -8,7 +8,7 @@
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
-const { grossPnl, optionsValueAt, priceScenarios } = require('../risk/scenarios');
+const { grossPnl, optionsValueAt, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -37,7 +37,7 @@ function stageOrder(sizedCandidate) {
   const order = { ...sizedCandidate, status: 'pending', stagedAt: Date.now() };
   pendingOrders.push(order);
   store.save();
-  return { ...order, scenarios: priceScenarios(order) };
+  return { ...order, scenarios: priceScenarios(order), costs: costBreakdown(order) };
 }
 
 // fillPrice defaults to the risk engine's worst-case entry price. `extra` records
@@ -188,8 +188,9 @@ function voidLivePosition(candidateId, reason) {
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
-const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o) }));
-const getActivePositions = () => activePositions.map((p) => ({ ...p }));
+const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
+// Open positions carry their fee model (derived, not stored) for live P/L marks.
+const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
 // Hand the lists to the store once: it restores them from disk, then saves on every change.

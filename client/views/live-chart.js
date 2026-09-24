@@ -1,28 +1,31 @@
-// Opportunities center chart: TradingView Lightweight Charts candlesticks.
-// History: the last 100 real 1-minute bars from /api/history/:symbol (Alpaca IEX
-// for stocks, Coinbase for crypto), fetched when a symbol is first shown. The
-// forming candle is then updated from real PRICES_UPDATED ticks (1m buckets).
-// One chart instance is reused across re-renders: its host node is handed back
-// to the view each time, so the canvas survives.
+// Opportunities center chart: TradingView Lightweight Charts candlesticks + volume.
+// History: the last 100 real bars of the chosen timeframe from /api/history
+// (Alpaca IEX for stocks, Coinbase for crypto). The forming candle is updated
+// from real PRICES_UPDATED ticks (kept as 1m bars, folded into the timeframe).
+// One chart instance (with its toolbar) is reused across re-renders: its host
+// node is handed back to the view each time, so the canvas survives.
 // Exposes window.SignalDesk.liveChart. mount() returns null if the library
 // failed to load (offline), and the view falls back to the static level chart.
 (() => {
   const SD = window.SignalDesk;
   const { el, price } = SD.ui;
 
-  const BAR_SEC = 60;
+  const TIMEFRAMES = [['1m', '1m', 60], ['15m', '15m', 900], ['1h', '1h', 3600], ['4h', '4h', 14400], ['1d', '1D', 86400]];
+  const TF_SEC = Object.fromEntries(TIMEFRAMES.map(([k, , s]) => [k, s]));
   const MAX_LIVE_BARS = 600;
-  const REFETCH_MS = 5 * 60 * 1000; // history older than this is refetched when the symbol is shown again
+  const REFETCH_MS = 5 * 60 * 1000; // history older than this is refetched when shown again
   const UP = '#26a69a';
   const DOWN = '#ef5350';
 
   const live = new Map(); // symbol -> real 1m bars from ticks, oldest first
-  const history = new Map(); // symbol -> { status: 'loading'|'ok'|'error', bars, byTime, error, at }
+  const history = new Map(); // `${symbol}|${tf}` -> { status, bars, error, at }
+  let tf = '15m';
+  let follow = true;
   let view = null; // chart instance + what it currently shows
 
-  // ---------- Live candles from ticks (called for every PRICES_UPDATED) ----------
+  // ---------- Live 1m candles from ticks (called for every PRICES_UPDATED) ----------
   function record(prices) {
-    const bucket = Math.floor(Date.now() / 1000 / BAR_SEC) * BAR_SEC;
+    const bucket = Math.floor(Date.now() / 60000) * 60;
     for (const [symbol, p] of Object.entries(prices || {})) {
       if (!(p > 0)) continue;
       const bars = live.get(symbol) || [];
@@ -38,30 +41,31 @@
   }
 
   // ---------- Real history ----------
-  function loadHistory(symbol) {
-    const current = history.get(symbol);
+  function loadHistory(symbol, frame) {
+    const key = `${symbol}|${frame}`;
+    const current = history.get(key);
     const maxAge = current && current.status === 'error' ? 30000 : REFETCH_MS; // retry failures sooner
     if (current && (current.status === 'loading' || Date.now() - current.at < maxAge)) return;
-    history.set(symbol, { ...(current || { bars: [], byTime: new Map() }), status: 'loading', at: Date.now() });
-    SD.api.getJson(`/api/history/${encodeURIComponent(symbol)}?tf=1m`)
-      .then((bars) => {
-        const clean = (Array.isArray(bars) ? bars : []).filter((b) => b && Number.isFinite(b.time) && b.close > 0);
-        history.set(symbol, { status: 'ok', bars: clean, byTime: new Map(clean.map((b) => [b.time, b])), at: Date.now() });
-      })
-      .catch((err) => history.set(symbol, { status: 'error', bars: [], byTime: new Map(), error: err.message, at: Date.now() }))
-      .finally(() => { if (view && view.o && view.o.asset === symbol) paint(); });
+    history.set(key, { bars: [], ...current, status: 'loading', at: Date.now() });
+    SD.api.getJson(`/api/history/${encodeURIComponent(symbol)}?tf=${frame}`)
+      .then((bars) => history.set(key, { status: 'ok', bars: (Array.isArray(bars) ? bars : []).filter((b) => b && Number.isFinite(b.time) && b.close > 0), at: Date.now() }))
+      .catch((err) => history.set(key, { status: 'error', bars: [], error: err.message, at: Date.now() }))
+      .finally(() => { if (view && view.o && view.o.asset === symbol && tf === frame) paint(); });
   }
 
-  // A live bar merged into the history bar of the same minute (history knows the true open/high/low).
-  function mergeBar(h, b) {
-    const hb = h && h.byTime.get(b.time);
-    return hb ? { time: b.time, open: hb.open, high: Math.max(hb.high, b.high), low: Math.min(hb.low, b.low), close: b.close } : { ...b };
-  }
-
-  function mergedBars(symbol) {
-    const h = history.get(symbol);
+  // History bars plus live 1m bars folded into the timeframe grid of the last
+  // history bar. Live bars inside an already completed history bar are skipped.
+  function mergedBars(symbol, frame) {
+    const h = history.get(`${symbol}|${frame}`);
     const byTime = new Map(((h && h.bars) || []).map((b) => [b.time, { ...b }]));
-    for (const b of live.get(symbol) || []) byTime.set(b.time, mergeBar(h, b));
+    const lastHist = h && h.bars.length ? h.bars[h.bars.length - 1].time : null;
+    const sec = TF_SEC[frame];
+    for (const b of live.get(symbol) || []) {
+      const t = lastHist === null ? Math.floor(b.time / sec) * sec : lastHist + Math.floor((b.time - lastHist) / sec) * sec;
+      if (lastHist !== null && t < lastHist) continue;
+      const cur = byTime.get(t);
+      byTime.set(t, cur ? { ...cur, high: Math.max(cur.high, b.high), low: Math.min(cur.low, b.low), close: b.close } : { ...b, time: t });
+    }
     return [...byTime.values()].sort((a, b) => a.time - b.time);
   }
 
@@ -71,27 +75,46 @@
   }
   const localTime = (t, opts) => new Date(t * 1000).toLocaleString([], opts);
 
+  function toolbar() {
+    const tfs = el('div', { className: 'lwc-tfs', role: 'group' }, TIMEFRAMES.map(([key, label]) => {
+      const b = el('button', { type: 'button', className: 'lwc-tf', textContent: label, dataset: { tf: key } });
+      b.onclick = () => { tf = key; loadHistory(view.o.asset, tf); paint(); };
+      return b;
+    }));
+    const followBox = el('input', { type: 'checkbox', checked: follow });
+    followBox.onchange = () => { follow = followBox.checked; view.chart.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: follow }); if (follow) view.chart.timeScale().scrollToRealTime(); };
+    const fitBtn = el('button', { type: 'button', className: 'lwc-tool', textContent: '⤢ Fit', title: 'Fit all bars' });
+    fitBtn.onclick = () => view.chart.timeScale().fitContent();
+    const full = el('button', { type: 'button', className: 'lwc-tool', textContent: '⛶', title: 'Full screen' });
+    full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : view.host.requestFullscreen && view.host.requestFullscreen());
+    return el('div', { className: 'lwc-bar' }, [tfs, el('label', { className: 'lwc-tool lwc-follow' }, [followBox, 'Follow price']), fitBtn, full]);
+  }
+
   function create() {
     const LWC = window.LightweightCharts;
-    const host = el('div', { className: 'opp-chart opp-lwc' });
+    const host = el('div', { className: 'opp-lwc-wrap' });
+    const box = el('div', { className: 'opp-chart opp-lwc' });
     const canvas = el('div', { className: 'opp-lwc-canvas' });
     const note = el('div', { className: 'opp-chart-note' });
     const banner = el('div', { className: 'opp-watch-mode' });
-    host.append(canvas, banner, note);
+    box.append(canvas, banner, note);
+    host.append(toolbar(), box);
     const grid = 'rgba(148, 163, 184, 0.06)';
     const chart = LWC.createChart(canvas, {
       width: 0, height: 0, // sized by fit(): autoSize misses the first layout of a detached host
       layout: { background: { type: 'solid', color: css('--bg', '#0b1120') }, textColor: css('--text-muted', '#94a3b8'), fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
-      rightPriceScale: { borderColor: css('--border', '#1f2a3c') },
+      rightPriceScale: { borderColor: css('--border', '#1f2a3c'), scaleMargins: { top: 0.08, bottom: 0.22 } },
       // Real bars carry real timestamps: show them in the viewer's local time, not UTC.
       localization: { timeFormatter: (t) => localTime(t, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) },
       timeScale: {
-        borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4,
+        borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4, shiftVisibleRangeOnNewBar: follow,
         tickMarkFormatter: (t, type) => (type < 3 ? localTime(t, { month: 'short', day: 'numeric' }) : localTime(t, { hour: '2-digit', minute: '2-digit' })),
       },
       crosshair: { mode: LWC.CrosshairMode.Normal },
     });
+    const volume = chart.addSeries(LWC.HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     const series = chart.addSeries(LWC.CandlestickSeries, {
       upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false,
       // Keep every level line on screen even when price is far from it.
@@ -104,7 +127,7 @@
       },
     });
     new ResizeObserver(() => fit()).observe(canvas);
-    return { host, canvas, note, banner, chart, series, o: null, opts: {}, symbol: null, histRef: null, shownLive: 0, lastTime: 0, levelsKey: '', lines: [], levels: [] };
+    return { host, box, canvas, note, banner, chart, series, volume, o: null, opts: {}, shown: '', histRef: null, lastTime: 0, levelsKey: '', lines: [], levels: [] };
   }
 
   // Matches the chart to its box. Re-renders detach and re-attach the host, and
@@ -128,55 +151,47 @@
       { title: 'T1', price: t[0] && t[0].price, color: css('--long', '#2dd4bf') },
       { title: 'Entry', price: o.entryZone.max, color: css('--accent', '#38bdf8') },
       { title: 'Entry', price: o.entryZone.min !== o.entryZone.max ? o.entryZone.min : 0, color: css('--accent', '#38bdf8') },
-      { title: 'SL', price: o.invalidation, color: css('--short', '#fb7185') },
+      { title: 'Stop', price: o.invalidation, color: css('--short', '#fb7185') },
     ].filter((s) => s.price > 0);
     const key = JSON.stringify(specs);
     if (key === view.levelsKey) return;
     view.levelsKey = key;
     for (const line of view.lines) view.series.removePriceLine(line);
-    view.lines = specs.map((s) => view.series.createPriceLine({
-      price: s.price, color: s.color, title: s.title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-    }));
+    view.lines = specs.map((s) => view.series.createPriceLine({ price: s.price, color: s.color, title: s.title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
     view.levels = specs.map((s) => s.price);
   }
 
-  // Full reload on symbol or history change, else series.update() for the live
-  // candle(s) that moved since the last paint.
+  const volBar = (b) => ({ time: b.time, value: b.volume || 0, color: b.close >= b.open ? 'rgba(38, 166, 154, 0.35)' : 'rgba(239, 83, 80, 0.35)' });
+
+  // Full reload when the symbol, timeframe or history changes; otherwise update()
+  // only the bars at or after the last one shown (the forming candle).
   function sync(symbol) {
-    const h = history.get(symbol);
-    const bars = live.get(symbol) || [];
-    let full = view.symbol !== symbol || view.histRef !== h;
-    if (!full) {
-      // A capped buffer drops old bars from the front; resume from the last one shown.
-      for (let i = Math.max(0, Math.min(view.shownLive, bars.length) - 1); i < bars.length; i += 1) {
-        const bar = mergeBar(h, bars[i]);
-        if (bar.time < view.lastTime) { full = true; break; } // update() can't go back in time
-        view.series.update(bar);
-        view.lastTime = bar.time;
-      }
-    }
-    if (full) {
-      const data = mergedBars(symbol);
-      const last = data[data.length - 1];
+    const h = history.get(`${symbol}|${tf}`);
+    const data = mergedBars(symbol, tf);
+    const last = data[data.length - 1];
+    const shown = `${symbol}|${tf}`;
+    if (view.shown !== shown || view.histRef !== h) {
       if (last) view.series.applyOptions({ priceFormat: priceFormat(last.close) });
       view.series.setData(data);
-      // Scroll to the newest bar once the host is on screen and sized.
+      view.volume.setData(data.map(volBar));
       requestAnimationFrame(() => requestAnimationFrame(() => view.chart.timeScale().scrollToRealTime()));
-      view.lastTime = last ? last.time : 0;
+    } else {
+      for (const b of data) if (b.time >= view.lastTime) { view.series.update(b); view.volume.update(volBar(b)); }
+      if (follow && last && last.time > view.lastTime) view.chart.timeScale().scrollToRealTime();
     }
-    view.symbol = symbol;
+    view.shown = shown;
     view.histRef = h;
-    view.shownLive = bars.length;
+    view.lastTime = last ? last.time : 0;
   }
 
   function noteText(o) {
-    const h = history.get(o.asset);
+    const h = history.get(`${o.asset}|${tf}`);
     const src = o.market === 'crypto' ? 'Coinbase' : 'Alpaca IEX';
-    const hasLive = (live.get(o.asset) || []).length > 0;
-    const tail = hasLive ? ' · live' : '';
-    if (!h || h.status === 'loading') return h && h.bars.length ? `1m candles · ${src} · refreshing…` : `Loading 1m history from ${src}…`;
-    if (h.status === 'error') return `History unavailable (${String(h.error).slice(0, 60)})${hasLive ? ' · live ticks only' : ''}`;
-    return h.bars.length ? `1m candles · ${src}${tail}` : `No recent history from ${src}${tail}`;
+    const label = TIMEFRAMES.find(([k]) => k === tf)[1];
+    const tail = (live.get(o.asset) || []).length ? ' · live' : '';
+    if (!h || h.status === 'loading') return h && h.bars.length ? `${label} candles · ${src} · refreshing…` : `Loading ${label} history from ${src}…`;
+    if (h.status === 'error') return `History unavailable (${String(h.error).slice(0, 60)})${tail ? ' · live ticks only' : ''}`;
+    return h.bars.length ? `${label} candles · ${src}${tail}` : `No recent history from ${src}${tail}`;
   }
 
   function paint() {
@@ -186,22 +201,32 @@
     view.note.textContent = noteText(o);
     view.banner.textContent = opts.banner || '';
     view.banner.hidden = !opts.banner;
+    view.host.querySelectorAll('.lwc-tf').forEach((b) => b.classList.toggle('is-active', b.dataset.tf === tf));
     const bars = live.get(o.asset) || [];
     const last = bars.length ? bars[bars.length - 1].close : 0;
-    view.host.setAttribute('aria-label', `${o.asset} candlestick chart${last > 0 ? `, last ${price(last, o)}` : ''}`);
+    view.box.setAttribute('aria-label', `${o.asset} candlestick chart${last > 0 ? `, last ${price(last, o)}` : ''}`);
   }
 
   // o: pending order or Market Watch object; withLevels: draw its levels.
   function mount(o, { withLevels, banner = '' } = {}) {
     if (!window.LightweightCharts) return null;
-    if (!view) { view = create(); view.host.setAttribute('role', 'img'); }
+    if (!view) { view = create(); view.box.setAttribute('role', 'img'); }
     view.o = o;
     view.opts = { withLevels, banner };
-    if (view.symbol !== o.asset) loadHistory(o.asset);
+    loadHistory(o.asset, tf); // no-op while fresh
     paint();
     requestAnimationFrame(fit);
     return view.host;
   }
 
-  SD.liveChart = { record, mount };
+  // High/low/first/last of what the chart shows (for the Price structure tab).
+  function stats(symbol) {
+    const h = history.get(`${symbol}|${tf}`);
+    if (!h || !h.bars.length) return null; // live ticks alone are not a range
+    const data = mergedBars(symbol, tf);
+    return { tf: TIMEFRAMES.find(([k]) => k === tf)[1], bars: data.length, high: Math.max(...data.map((b) => b.high)), low: Math.min(...data.map((b) => b.low)),
+      first: data[0], last: data[data.length - 1] };
+  }
+
+  SD.liveChart = { record, mount, stats };
 })();

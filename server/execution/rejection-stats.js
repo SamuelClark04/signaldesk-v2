@@ -7,6 +7,7 @@
 //     numbers, e.g. "Bankroll too small: one contract risks $252.00 ...");
 //   - duplicates ("already staged") are not rejections and are never recorded;
 //   - the tally resets at US/Eastern midnight (it feeds the Today dashboard).
+// It also keeps the latest rejection per symbol (for the Scanner's "View reason").
 // In memory only: a restart starts the day's tally again.
 const { MAX_FEE_DRAG } = require('../risk/cost-authority');
 
@@ -27,6 +28,7 @@ const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }
 let day = etDate.format(Date.now());
 let counts = new Map(); // label -> count
 let seen = new Set(); // `${candidateId}|${label}` already counted today
+let latest = new Map(); // `${market}|${asset}` -> latest rejection today, with setup context
 let listener = null;
 
 function bucket(rawReason) {
@@ -42,18 +44,26 @@ function rollDay(now) {
   day = today;
   counts = new Map();
   seen = new Set();
+  latest = new Map();
 }
 
 function snapshot(now = Date.now()) {
   rollDay(now);
   const reasons = [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
-  return { date: day, total: reasons.reduce((s, r) => s + r.count, 0), reasons };
+  const bySymbol = [...latest.values()].sort((a, b) => b.at - a.at).slice(0, 50).map((r) => ({ ...r }));
+  return { date: day, total: reasons.reduce((s, r) => s + r.count, 0), reasons, latest: bySymbol };
 }
 
-// Record one dropped setup. Returns true if the tally changed.
-function recordRejection(candidateId, rawReason, now = Date.now()) {
+// Record one dropped setup. `candidate` (optional) is the candidate or order, for
+// the per-symbol view. Returns true if the tally changed.
+function recordRejection(candidateId, rawReason, candidate = null, now = Date.now()) {
+  if (typeof candidate === 'number') { now = candidate; candidate = null; } // older (id, reason, now) calls
   rollDay(now);
   const label = bucket(rawReason);
+  if (candidate && candidate.asset) {
+    const { asset, market = null, setupType = null, direction = null, timeframe = null, strategyId = null } = candidate;
+    latest.set(`${market}|${asset}`, { asset, market, setupType, direction, timeframe, strategyId, reason: label, detail: String(rawReason || '').slice(0, 200), at: now });
+  }
   const key = `${candidateId || '?'}|${label}`;
   if (seen.has(key)) return false;
   seen.add(key);

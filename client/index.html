@@ -7,6 +7,8 @@
   <!-- main.css first: view sheets build on its tokens and base rules. -->
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/opportunities.css">
+  <link rel="stylesheet" href="styles/scanner.css">
+  <link rel="stylesheet" href="styles/setups.css">
   <link rel="stylesheet" href="styles/portfolio.css">
   <link rel="stylesheet" href="styles/journal.css">
   <link rel="stylesheet" href="styles/settings.css">
@@ -49,77 +51,7 @@
       </section>
 
       <section class="tab" id="tab-portfolio" data-title="Portfolio" hidden>
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">Trading Capital</h2>
-            <span class="panel-hint" id="capital-hint">Per execution venue</span>
-          </div>
-          <div class="capital" id="capital"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">What to Buy (Allocator)</h2>
-            <span class="panel-hint">Buy-only rebalance toward the target model. Suggestions only; nothing is staged.</span>
-          </div>
-
-          <form class="alloc-form" id="alloc-form" novalidate>
-            <label class="field">
-              <span class="field-label">Deposit amount</span>
-              <span class="input-wrap">
-                <span class="input-prefix">$</span>
-                <input class="input" id="alloc-amount" type="number" min="1" step="any" inputmode="decimal" placeholder="1000" required>
-              </span>
-            </label>
-            <button class="btn btn-primary" id="alloc-submit" type="submit">Calculate</button>
-            <span class="alloc-status" id="alloc-status" role="status"></span>
-          </form>
-
-          <div id="alloc-result" hidden>
-            <div class="alloc-summary" id="alloc-summary"></div>
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Asset</th>
-                    <th class="num">Current</th>
-                    <th class="num">Target</th>
-                    <th class="num">Buy</th>
-                    <th class="num">≈ Units</th>
-                  </tr>
-                </thead>
-                <tbody id="alloc-body"></tbody>
-              </table>
-            </div>
-            <ul class="alloc-notes" id="alloc-notes"></ul>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">Active Positions</h2>
-            <span class="count" id="positions-count">0</span>
-            <span class="panel-hint">Filled paper trades, managed by the server's stop and target monitor</span>
-          </div>
-
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Direction</th>
-                  <th class="num">Size</th>
-                  <th class="num">Entry price</th>
-                  <th class="num">Stop loss</th>
-                  <th class="num">Target 1</th>
-                </tr>
-              </thead>
-              <tbody id="positions-body"></tbody>
-            </table>
-          </div>
-
-          <div class="empty" id="positions-empty">No open positions. Approved setups appear here once filled.</div>
-        </div>
+        <div class="pf" id="portfolio-root"></div>
       </section>
 
       <section class="tab" id="tab-journal" data-title="Journal" hidden>
@@ -200,7 +132,13 @@
   <script src="lib/ui.js"></script>
   <script src="views/live-chart.js"></script>
   <script src="views/opportunity-detail.js"></script>
+  <script src="views/setup-analysis.js"></script>
+  <script src="views/scanner-data.js"></script>
+  <script src="views/scanner-detail.js"></script>
+  <script src="views/opportunities-scanner.js"></script>
   <script src="views/opportunities.js"></script>
+  <script src="views/portfolio-table.js"></script>
+  <script src="views/portfolio-pilot.js"></script>
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
   <script src="views/settings.js"></script>

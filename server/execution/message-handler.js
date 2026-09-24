@@ -9,6 +9,7 @@ const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 const { publishBrokerState } = require('./broker-state');
 const { recordRejection } = require('./rejection-stats');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
+const { runPipeline, getScanStatus } = require('./pipeline');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 
@@ -67,16 +68,30 @@ async function approveWithGuard(id) {
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
   if (check.reason !== 'NO_LIVE_PRICE') {
     ledger.discardOrder(id);
-    recordRejection(id, check.reason);
+    recordRejection(id, check.reason, order);
   }
   throw new Error(check.reason);
+}
+
+// Manual close from the Portfolio tab. PAPER positions only, at a fresh live
+// price, booked by the ledger exactly like a stop/target exit (same fee model).
+// A LIVE position is closed at the broker (its bracket orders live there); the
+// reconciler then records the real fill.
+function closeManually(id) {
+  const pos = ledger.getActivePositions().find((p) => p.id === id);
+  if (!pos) throw new Error(`no open position ${id}`);
+  if (pos.execution === 'LIVE') throw new Error('LIVE_CLOSE_UNSUPPORTED');
+  const livePrice = prices.getLatestPrice(pos.asset);
+  if (!(livePrice > 0)) throw new Error('NO_LIVE_PRICE');
+  return ledger.closePosition(id, livePrice, 'MANUAL_CLOSE');
 }
 
 const QUEUE_ACTIONS = {
   APPROVE: (id) => approveWithGuard(id),
   REJECT: (id) => {
+    const order = ledger.getPendingOrders().find((o) => o.id === id);
     const discarded = ledger.discardOrder(id);
-    recordRejection(id, 'REJECTED_BY_USER');
+    recordRejection(id, 'REJECTED_BY_USER', order);
     return discarded;
   },
 };
@@ -85,6 +100,11 @@ const QUEUE_ACTIONS = {
 // without this a double-click could send two orders, or a REJECT could remove an
 // order the broker is filling.
 const inFlight = new Set();
+
+// Manual "Run scan": one extra pipeline pass (the same pass the 60s timer runs),
+// at most once per MANUAL_SCAN_GAP_MS and never on top of a running pass.
+const MANUAL_SCAN_GAP_MS = 10000;
+let lastManualScan = 0;
 
 function createMessageHandler({ send, broadcast }) {
   async function handleQueueAction(ws, { type, id }) {
@@ -108,6 +128,25 @@ function createMessageHandler({ send, broadcast }) {
       inFlight.delete(id);
     }
     broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
+  }
+
+  function handleClose(ws, { id }) {
+    if (typeof id !== 'string' || !id) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'missing position id' });
+    if (inFlight.has(id)) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'ORDER_BUSY' });
+    inFlight.add(id);
+    try {
+      const trade = closeManually(id);
+      console.log(`[ledger] CLOSE_POSITION ${id} @ ${trade.exitPrice}: net ${trade.netPnl.toFixed(2)} (${trade.rMultiple.toFixed(2)}R)`);
+      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
+      try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
+    } catch (err) {
+      console.warn(`[ledger] CLOSE_POSITION ${id} failed: ${err.message}`);
+      send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: err.message });
+    } finally {
+      inFlight.delete(id);
+    }
+    return undefined;
   }
 
   // Allocator: read-only math, answered to the requesting client only.
@@ -135,6 +174,16 @@ function createMessageHandler({ send, broadcast }) {
     }
   }
 
+  function handleRunScan(ws) {
+    const status = getScanStatus();
+    if (status.running || Date.now() - lastManualScan < MANUAL_SCAN_GAP_MS) {
+      return send(ws, 'SCAN_STATUS', { ...status, notice: 'A scan just ran or is running. Try again in a few seconds.' });
+    }
+    lastManualScan = Date.now();
+    console.log('[pipeline] manual scan requested');
+    return runPipeline({ trigger: 'manual' }).catch((err) => console.error('[pipeline] manual scan failed:', err));
+  }
+
   // Entry point for every raw client frame.
   return function handleMessage(ws, raw) {
     let msg;
@@ -145,6 +194,8 @@ function createMessageHandler({ send, broadcast }) {
     }
     if (msg.type === 'CALCULATE_ALLOCATION') return handleAllocation(ws, msg);
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
+    if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
+    if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };
 }

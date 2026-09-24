@@ -67,40 +67,45 @@
     return chart;
   }
 
+  // Header: badge, symbol + name, big price with its change, setup meta.
+  // Change: vs entry for a setup; over the loaded chart range in Market Watch.
+  // The thesis lives in the analysis card below (setup-analysis.js).
   function center(o, { livePrice, refPrice }) {
-    // No live price: show the last close (display only) instead of a bare "—".
-    const ref = !(livePrice > 0) && refPrice && refPrice.price > 0 ? refPrice : null;
+    const ref = !(livePrice > 0) && refPrice && refPrice.price > 0 ? refPrice : null; // last close (display only)
     const watch = !hasLevels(o);
     const dir = o.direction === 'short' ? 'short' : 'long';
-    const change = !watch && livePrice > 0 && o.entryPrice > 0 ? livePrice / o.entryPrice - 1 : null;
+    const shown = livePrice > 0 ? livePrice : ref ? ref.price : null;
+    // Live candles when the chart library loaded; static level chart otherwise.
+    const chart = SD.liveChart.mount(o, { withLevels: !watch, banner: watch ? WATCH_TEXT : '' })
+      || (watch ? watchChart(o, livePrice) : levelChart(o, livePrice));
+    let change = null;
+    let basis = '';
+    if (!watch && livePrice > 0 && o.entryPrice > 0) {
+      change = livePrice / o.entryPrice - 1;
+      basis = 'vs entry';
+    } else if (watch && shown) {
+      const s = SD.liveChart.stats && SD.liveChart.stats(o.asset);
+      if (s && s.first.open > 0) { change = shown / s.first.open - 1; basis = `over ${s.bars} × ${s.tf}`; }
+    }
+    const note = livePrice > 0 ? '' : ref
+      ? `Last close · ${new Date(ref.time).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })} · no live price (market closed or feed quiet)`
+      : 'No fresh price (market closed or feed quiet)';
     return el('section', { className: 'opp-center' }, [
       el('header', { className: 'opp-head' }, [
-        el('h2', { className: 'opp-symbol', textContent: displaySymbol(o) }),
-        ...(watch ? [el('span', { className: 'opp-watch-tag', textContent: 'Market watch' })] : [el('span', { className: `badge-${dir}`, textContent: dir })]),
-        el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}${o.strategyId ? ` · ${o.strategyId}` : ''}` }),
-        el('span', { className: 'opp-last' }, [
-          el('span', { className: 'opp-k', textContent: ref ? 'Last close ' : 'Last ' }),
-          el('strong', { textContent: livePrice > 0 ? px(livePrice, o) : ref ? px(ref.price, o) : '—' }),
-          ...(change === null ? [] : [el('span', { className: pnlClass(change), textContent: ` ${change >= 0 ? '+' : '−'}${Math.abs(change * 100).toFixed(2)}% vs entry` })]),
-          ...(livePrice > 0 ? [] : [el('span', { className: 'opp-k', textContent: ref
-            ? ` · ${new Date(ref.time).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, no live price (market closed or feed quiet)`
-            : ' · no fresh price (market closed or feed quiet)' })]),
+        SD.scannerDetail.badge(o.asset, true),
+        el('div', { className: 'opp-title' }, [el('h2', { className: 'opp-symbol', textContent: displaySymbol(o) }),
+          el('span', { className: 'opp-name', textContent: SD.scannerData.nameOf(o.asset) })]),
+        el('div', { className: 'opp-price' }, [
+          el('strong', { className: 'opp-price-big', textContent: shown ? px(shown, { ...o, entryPrice: o.entryPrice || shown }) : '—' }),
+          ...(change === null ? [] : [el('span', { className: `opp-price-chg ${pnlClass(change)}`, textContent: `${change >= 0 ? '+' : '−'}${Math.abs(change * 100).toFixed(2)}%` }),
+            el('span', { className: 'opp-k', textContent: basis })]),
+          ...(note ? [el('span', { className: 'opp-k opp-price-note', textContent: note })] : []),
         ]),
+        el('div', { className: 'opp-head-meta' }, watch ? [el('span', { className: 'opp-watch-tag', textContent: 'Market watch' })] : [
+          el('span', { className: `badge-${dir}`, textContent: dir }),
+          el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` })]),
       ]),
-      // Live candles when the chart library loaded; static level chart otherwise.
-      SD.liveChart.mount(o, { withLevels: !watch, banner: watch ? WATCH_TEXT : '' })
-        || (watch ? watchChart(o, livePrice) : levelChart(o, livePrice)),
-      el('div', { className: 'opp-thesis' }, watch ? [
-        el('p', { className: 'opp-thesis-text', textContent: WATCH_TEXT }),
-        el('p', { className: 'opp-muted', textContent: 'Setups appear in the queue when a strategy proposes one and the risk engine approves it. '
-          + 'Pick any symbol under Market watch to follow its live price meanwhile.' }),
-      ] : [
-        el('p', { className: 'opp-thesis-text', textContent: o.thesis || 'No thesis provided.' }),
-        ...(o.catalyst && o.catalyst.headline ? [el('p', { className: 'opp-catalyst' }, [
-          el('span', { className: 'opp-k', textContent: 'Catalyst ' }),
-          `${o.catalyst.headline} (sentiment ${o.catalyst.sentimentScore > 0 ? '+' : ''}${o.catalyst.sentimentScore})`])] : []),
-        el('ul', { className: 'opp-criteria' }, (o.confirmationCriteria || []).map((c) => el('li', { textContent: c }))),
-      ]),
+      chart,
     ]);
   }
 
@@ -108,15 +113,14 @@
   function scenarioTable(o) {
     const s = hasLevels(o) ? o.scenarios || {} : {};
     const rows = hasLevels(o) ? [['Stop', s.stop], ['T1', s.t1], ['T2', s.t2]].filter(([, v]) => v) : [['Stop'], ['T1'], ['T2']];
-    const dash = (cls = 'num') => el('td', { className: cls, textContent: '—' });
+    const dash = () => el('td', { className: 'num', textContent: '—' });
     return el('table', { className: 'data-table opp-scenarios' }, [
-      el('thead', {}, el('tr', {}, ['At', 'Price', 'Gross P&L', 'Est. fees', 'Net'].map((h, i) => el('th', { textContent: h, className: i ? 'num' : '' })))),
-      el('tbody', {}, rows.map(([name, v]) => el('tr', {}, !v ? [el('td', { textContent: name }), dash(), dash(), dash(), dash()] : [
-        el('td', { textContent: name }),
+      el('thead', {}, el('tr', {}, ['Level', 'Price', 'Gross P&L', 'Est. net (fees)'].map((h, i) => el('th', { textContent: h, className: i ? 'num' : '' })))),
+      el('tbody', {}, rows.map(([name, v]) => el('tr', {}, !v ? [el('td', { textContent: name }), dash(), dash(), dash()] : [
+        el('td', { className: name === 'Stop' ? 'text-short' : 'text-long', textContent: name }),
         el('td', { className: 'num', textContent: px(v.price, o) }),
         el('td', { className: `num ${pnlClass(v.gross)}`, textContent: signed(v.gross, money) }),
-        el('td', { className: 'num', textContent: money(v.fees) }),
-        el('td', { className: `num ${pnlClass(v.net)}` }, [signed(v.net, money),
+        el('td', { className: `num ${pnlClass(v.net)}`, title: `Estimated fees ${money(v.fees)}` }, [signed(v.net, money),
           ...(Number.isFinite(v.r) ? [el('span', { className: 'opp-r', textContent: `${v.r >= 0 ? '+' : ''}${v.r.toFixed(2)}R` })] : [])]),
       ]))),
     ]);
@@ -135,11 +139,13 @@
     if (!ready) label = 'Waiting for Setup';
     const primary = el('button', {
       type: 'button',
-      className: `btn ${live && ready ? 'btn-live' : 'btn-primary'} opp-go`,
+      className: `btn ${live && ready ? 'btn-live' : 'btn-solid'} opp-go`,
       textContent: label,
       disabled: !ready || !ctx.online || ctx.busy || liveOptions,
       title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : '',
     });
+    const analysis = el('button', { type: 'button', className: 'btn', textContent: 'View full analysis' });
+    analysis.onclick = () => { const a = document.getElementById('opp-analysis'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     const dismiss = el('button', { type: 'button', className: 'btn', textContent: 'Dismiss', disabled: !ready || !ctx.online || ctx.busy });
     if (ready) {
       primary.onclick = () => ctx.onApprove(o, { live, broker });
@@ -147,9 +153,11 @@
     }
     const mode = live ? `LIVE · ${broker}` : `Paper · ${broker}`;
     return el('div', { className: 'opp-actions' }, [
-      el('div', { className: `opp-venue${live && ready ? ' is-live' : ''}`, textContent: ready ? (live ? `LIVE · real order at ${broker}` : `Paper · ${broker} mode is Paper`) : `${mode} · no setup selected, nothing can be sent` }),
       primary,
-      dismiss,
+      el('div', { className: 'opp-actions-row' }, [analysis, dismiss]),
+      el('div', { className: `opp-venue${live && ready ? ' is-live' : ''}`, textContent: ready
+        ? (live ? `LIVE · a real order is sent to ${broker} on approval` : `Paper tracking · no broker order (${broker} mode is Paper)`)
+        : `${mode} · no setup selected, nothing can be sent` }),
     ]);
   }
 
@@ -157,23 +165,42 @@
     const ready = hasLevels(o);
     const t = o.targets || [];
     const s = o.scenarios || {};
+    const c = o.costs || {};
     const lv = (fn) => (ready ? fn() : '—');
+    const cost = (x) => (Number.isFinite(x) ? money(x) : '—');
     const rr = ready && s.t1 && s.stop && s.stop.net < 0 ? `${(s.t1.net / -s.stop.net).toFixed(2)} : 1` : '—';
     const bankroll = ctx.settings && ctx.settings.bankroll;
-    const riskPct = bankroll > 0 && o.dollarRisk > 0 ? ` · ${((o.dollarRisk / bankroll) * 100).toFixed(2)}% of bankroll` : '';
+    const riskPct = bankroll > 0 && o.dollarRisk > 0 ? ` (${((o.dollarRisk / bankroll) * 100).toFixed(2)}%)` : '';
+    const summary = ready && o.thesis ? o.thesis.split(/(?<=\.)\s/)[0] : '';
     return el('aside', { className: 'opp-right' }, [
-      el('h3', { className: 'opp-section', textContent: 'Levels' }),
-      kv('Entry range', lv(() => `${px(o.entryZone.min, o)} – ${px(o.entryZone.max, o)}`)),
-      kv('Invalidation (stop)', lv(() => px(o.invalidation, o)), ready ? 'text-short' : ''),
-      kv('Take profit 1', lv(() => (t[0] ? px(t[0].price, o) : '—')), ready ? 'text-long' : ''),
-      kv('Take profit 2', lv(() => (t[1] ? px(t[1].price, o) : '—')), ready ? 'text-long' : ''),
-      ...(ready && o.optionsData ? [kv('Structure', `${(o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${o.optionsData.debit} debit`)] : []),
-      el('h3', { className: 'opp-section', textContent: 'Risk' }),
-      kv('Planned size', lv(() => size(o))),
-      kv('Risk amount', lv(() => `${money(o.dollarRisk)}${riskPct}`)),
-      kv('Net reward / risk (T1)', rr),
-      kv('Fee drag', ready && Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—'),
-      el('h3', { className: 'opp-section', textContent: 'Price scenario' }),
+      el('header', { className: 'opp-right-head' }, [
+        SD.scannerDetail.badge(o.asset, true),
+        el('div', { className: 'opp-title' }, [el('strong', { className: 'opp-right-symbol', textContent: displaySymbol(o) }),
+          el('span', { className: 'opp-name', textContent: ready ? `${o.direction === 'short' ? 'Short' : 'Long'} — ${o.setupType || 'Setup'}` : 'Market watch' })]),
+        el('span', { className: `opp-pill${ready ? ' is-ready' : ''}`, textContent: ready ? 'Ready for review' : 'Waiting for setup' }),
+      ]),
+      ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),
+      el('div', { className: 'opp-kv-group' }, [
+        kv('Entry range', lv(() => `${px(o.entryZone.min, o)} – ${px(o.entryZone.max, o)}`)),
+        kv('Invalidation (stop)', lv(() => px(o.invalidation, o)), ready ? 'text-short' : ''),
+        kv('Take profit 1 (T1)', lv(() => (t[0] ? px(t[0].price, o) : '—')), ready ? 'text-long' : ''),
+        kv('Take profit 2 (T2)', lv(() => (t[1] ? px(t[1].price, o) : '—')), ready ? 'text-long' : ''),
+        ...(ready && o.optionsData ? [kv('Structure', `${(o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${o.optionsData.debit} debit`)] : []),
+      ]),
+      el('div', { className: 'opp-kv-group' }, [
+        kv('Planned size (USD)', lv(() => cost(o.notional))),
+        kv('Quantity (est.)', lv(() => size(o))),
+      ]),
+      el('div', { className: 'opp-kv-group' }, [
+        kv('Sizing basis', bankroll > 0 ? `${money(bankroll)} configured bankroll` : '—'),
+        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`)),
+        kv('Estimated entry cost', lv(() => cost(c.entry))),
+        kv('Estimated exit cost (T1)', lv(() => cost(c.exitT1))),
+        kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),
+        kv('Net reward / risk (T1)', rr),
+        kv('Fee drag', ready && Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—'),
+      ]),
+      el('h3', { className: 'opp-section opp-scen-title', textContent: ready ? `Price scenario (per ${size(o)})` : 'Price scenario' }),
       scenarioTable(o),
       actions(o, ctx),
     ]);

@@ -166,3 +166,4 @@
 .opp-queue::-webkit-scrollbar-thumb, .opp-watchlist::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 .opp-queue::-webkit-scrollbar-thumb:hover, .opp-watchlist::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 .opp-watch-px.is-stale { color: var(--text-faint); font-style: italic; }
+

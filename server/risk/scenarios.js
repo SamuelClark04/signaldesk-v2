@@ -1,7 +1,7 @@
 // P/L maths shared by the ledger (bookings) and the Setups view (previews), so a
 // scenario shown before approval is computed exactly like the trade would be
 // booked. Pure functions: no state, no I/O.
-const { estimateRoundTripFees } = require('./cost-authority');
+const { estimateRoundTripFees, getRoundTripRate } = require('./cost-authority');
 
 // Options value per share of underlying: each leg's intrinsic value at the
 // underlying price (buy legs +, sell legs -). Intrinsic ignores remaining time
@@ -47,4 +47,29 @@ function priceScenarios(order) {
   return out;
 }
 
-module.exports = { optionsValueAt, grossPnl, priceScenarios };
+// Cost breakdown for the Setups panel, from the same fee model as the ledger:
+// { entry, exitT1, breakEvenPct }. The round-trip rate is split evenly across
+// the two legs (k per leg), so a long breaks even at entry*(1+k)/(1-k).
+// Options are costed per contract; their break-even depends on the legs: null.
+function costBreakdown(order) {
+  const q = order.positionSize;
+  const e = order.entryPrice;
+  const t1 = order.targets && order.targets[0] && order.targets[0].price;
+  if (!(q > 0) || !(e > 0)) return null;
+  if (order.market === 'options') {
+    const perLeg = estimateRoundTripFees('options', q) / 2;
+    return { entry: perLeg, exitT1: t1 > 0 ? perLeg : null, breakEvenPct: null };
+  }
+  const k = getRoundTripRate(order.market) / 2;
+  const breakEvenPct = order.direction === 'short' ? 1 - (1 - k) / (1 + k) : (1 + k) / (1 - k) - 1;
+  return { entry: k * q * e, exitT1: t1 > 0 ? k * q * t1 : null, breakEvenPct };
+}
+
+// The fee model behind estimateRoundTripFees, for client-side marks: fees at an
+// exit price x are legRate * size * (fill + x); options pay a flat round trip.
+function feeModel(market) {
+  if (market === 'options') return { perContractRoundTrip: estimateRoundTripFees('options', 1) };
+  return { legRate: getRoundTripRate(market) / 2 };
+}
+
+module.exports = { optionsValueAt, grossPnl, priceScenarios, costBreakdown, feeModel };

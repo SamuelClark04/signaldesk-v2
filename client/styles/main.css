@@ -12,6 +12,7 @@
   --text-muted: #94a3b8;
   --text-faint: #64748b;
   --accent: #38bdf8;
+  --solid: #2f81f7; /* filled primary buttons (Run scan, Review, Start paper tracking) */
   --long: #2dd4bf;
   --long-bg: rgba(45, 212, 191, 0.12);
   --short: #fb7185;

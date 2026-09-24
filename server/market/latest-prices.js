@@ -28,8 +28,17 @@ function getLatestPrices(now = Date.now()) {
   return fresh;
 }
 
+// Map of asset -> time (ms) of its fresh price, for "data age" displays.
+function getPriceTimes(now = Date.now()) {
+  const times = {};
+  for (const [asset, { price, time }] of collect()) {
+    if (price > 0 && now - time <= MAX_PRICE_AGE_MS) times[asset] = time;
+  }
+  return times;
+}
+
 function getLatestPrice(asset, now = Date.now()) {
   return getLatestPrices(now).get(asset);
 }
 
-module.exports = { getLatestPrices, getLatestPrice, MAX_PRICE_AGE_MS };
+module.exports = { getLatestPrices, getLatestPrice, getPriceTimes, MAX_PRICE_AGE_MS };

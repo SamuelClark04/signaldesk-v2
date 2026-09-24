@@ -9,10 +9,15 @@ const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
 const LIMIT = 100;
 const CACHE_MS = 30 * 1000;
 const TIMEOUT_MS = 8000;
+// Coinbase has no 4-hour candles: 4h is built from 1-hour candles (`group`).
 const TIMEFRAMES = Object.freeze({
   '1m': { alpaca: '1Min', coinbase: 'ONE_MINUTE', sec: 60, lookbackDays: 7 },
+  '15m': { alpaca: '15Min', coinbase: 'FIFTEEN_MINUTE', sec: 900, lookbackDays: 14 },
   '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30 },
+  '4h': { alpaca: '4Hour', coinbase: 'ONE_HOUR', sec: 14400, lookbackDays: 180, group: 4 },
+  '1d': { alpaca: '1Day', coinbase: 'ONE_DAY', sec: 86400, lookbackDays: 200 },
 });
+const COINBASE_MAX_CANDLES = 350;
 
 const cache = new Map(); // `${symbol}|${tf}` -> { at, bars }
 const isCrypto = (symbol) => symbol.includes('-');
@@ -46,17 +51,34 @@ async function fetchStock(symbol, tf) {
   const query = `timeframe=${tf.alpaca}&limit=${LIMIT}&feed=iex&sort=desc&start=${encodeURIComponent(start)}`;
   const r = await getJson(`${alpacaData()}/v2/stocks/${encodeURIComponent(symbol)}/bars?${query}`, headers);
   if (!r.ok) return r;
-  const bars = (r.json.bars || []).map((b) => ({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c }));
+  const bars = (r.json.bars || []).map((b) => ({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
   return { ok: true, bars };
 }
 
 async function fetchCrypto(symbol, tf) {
+  const group = tf.group || 1;
+  const baseSec = tf.sec / group;
+  const count = Math.min(LIMIT * group, COINBASE_MAX_CANDLES);
   const end = Math.floor(Date.now() / 1000);
-  const query = `start=${end - LIMIT * tf.sec}&end=${end}&granularity=${tf.coinbase}&limit=${LIMIT}`;
+  const query = `start=${end - count * baseSec}&end=${end}&granularity=${tf.coinbase}&limit=${count}`;
   const r = await getJson(`${coinbaseBase()}/api/v3/brokerage/market/products/${encodeURIComponent(symbol)}/candles?${query}`);
   if (!r.ok) return r;
-  const bars = (r.json.candles || []).map((c) => ({ time: Number(c.start), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) }));
-  return { ok: true, bars };
+  const bars = (r.json.candles || []).map((c) => ({
+    time: Number(c.start), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
+  }));
+  return { ok: true, bars: group > 1 ? regroup(bars, tf.sec) : bars };
+}
+
+// Merges smaller candles into tfSec buckets (UTC-aligned), e.g. 1h -> 4h.
+function regroup(bars, tfSec) {
+  const out = new Map();
+  for (const b of [...bars].sort((x, y) => x.time - y.time)) {
+    const t = Math.floor(b.time / tfSec) * tfSec;
+    const g = out.get(t);
+    if (!g) out.set(t, { ...b, time: t });
+    else Object.assign(g, { high: Math.max(g.high, b.high), low: Math.min(g.low, b.low), close: b.close, volume: (g.volume || 0) + (b.volume || 0) });
+  }
+  return [...out.values()];
 }
 
 // Oldest first, one bar per timestamp, finite prices only.
@@ -65,10 +87,10 @@ function clean(bars) {
   for (const b of bars) {
     if ([b.time, b.open, b.high, b.low, b.close].every(Number.isFinite) && b.close > 0) byTime.set(b.time, b);
   }
-  return [...byTime.values()].sort((a, b) => a.time - b.time);
+  return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-LIMIT);
 }
 
-// { ok: true, bars: [{ time (unix seconds), open, high, low, close }] } or { ok: false, status, error }.
+// { ok: true, bars: [{ time (unix seconds), open, high, low, close, volume }] } or { ok: false, status, error }.
 async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
   const s = String(symbol || '').trim().toUpperCase();
   if (!SYMBOL_RE.test(s)) return { ok: false, status: 400, error: `invalid symbol "${String(symbol).slice(0, 20)}"` };

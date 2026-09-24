@@ -40,7 +40,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null };
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -55,6 +55,7 @@
     DASHBOARD_INTELLIGENCE: (intel) => { state.intelligence = intel; },
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
+    SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
   };
 
   // State-driven views: rendered on entering their tab and on every state change
@@ -62,6 +63,7 @@
   function refreshView() {
     if (currentTab === 'today') SD.today.renderToday($('today-root'), state);
     if (currentTab === 'opportunities') SD.opportunities.render($('opportunities-root'), state);
+    if (currentTab === 'portfolio') SD.portfolio.render($('portfolio-root'), state);
   }
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
@@ -93,13 +95,11 @@
   SD.settings.init(transport);
 
   const HANDLERS = {
-    POSITIONS_UPDATED: (positions) => SD.portfolio.render(positions || []),
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
-    ACTION_FAILED: (payload) => SD.opportunities.actionFailed(payload),
+    ACTION_FAILED: (payload) => (payload && payload.type === 'CLOSE_POSITION' ? SD.portfolio.actionFailed(payload) : SD.opportunities.actionFailed(payload)),
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
-    BROKER_STATE: (state) => SD.portfolio.renderBrokerState(state),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
   };
 
@@ -134,7 +134,6 @@
   }
 
   showTab(location.hash.slice(1));
-  SD.portfolio.render([]);
   SD.journal.render([]);
   connect();
 })();

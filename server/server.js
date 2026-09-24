@@ -14,7 +14,7 @@ const alpacaNews = require('./connectors/alpaca-news-socket');
 const coinbase = require('./connectors/coinbase-socket');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
-const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeline');
+const { startPipeline, stopPipeline, runPipeline, getScanStatus } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const watchlist = require('./execution/watchlist');
@@ -38,7 +38,7 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), clients: wss.clients.size });
 });
 
-// Chart history: last 100 bars (?tf=1m default, or 1h) from Alpaca (stocks) or
+// Chart history: last 100 bars (?tf=1m default; 15m, 1h, 4h, 1d) from Alpaca (stocks) or
 // Coinbase (crypto, symbols with "-"). Read-only, but it spends broker API quota,
 // so it is guarded like the socket (origin + LAN token).
 app.get('/api/history/:symbol', async (req, res) => {
@@ -98,6 +98,7 @@ wss.on('connection', (ws) => {
   send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());
   send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
   send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
+  send(ws, 'SCAN_STATUS', getScanStatus());
   try {
     send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
   } catch (err) {

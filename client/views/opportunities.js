@@ -78,15 +78,19 @@
 
   // ---------- Rail: queue cards + market watch list ----------
   function railCard(o, active) {
-    const dir = o.direction === 'short' ? 'short' : 'long';
+    const dir = o.direction === 'short' ? 'Short' : 'Long';
     const btn = el('button', { type: 'button', className: `opp-card${active ? ' is-active' : ''}` }, [
-      el('div', { className: 'opp-card-top' }, [
+      SD.scannerDetail.badge(o.asset),
+      el('div', { className: 'opp-card-body' }, [
         el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(o) }),
-        el('span', { className: `badge-${dir}`, textContent: dir }),
+        el('span', { className: 'opp-card-meta', textContent: `${dir} — ${o.setupType || 'Setup'}` }),
+        el('span', { className: 'opp-card-sub' }, [`${String(o.timeframe || '—').toUpperCase()} `,
+          el('span', { className: 'scan-state is-ready', textContent: inFlight.has(o.id) ? 'Sending…' : 'Ready' }),
+          ` · ${age(o.stagedAt)} ago`]),
       ]),
-      el('div', { className: 'opp-card-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` }),
-      el('div', { className: 'opp-card-sub', textContent: `${o.strategyId} · staged ${age(o.stagedAt)} ago${inFlight.has(o.id) ? ' · sending…' : ''}` }),
+      el('span', { className: 'opp-card-chev', textContent: '›' }),
     ]);
+    btn.title = `${o.strategyId} · staged ${age(o.stagedAt)} ago`;
     btn.setAttribute('aria-pressed', String(active));
     btn.onclick = () => { activeId = o.id; manualWatch = false; rerender(); };
     return btn;
@@ -188,13 +192,29 @@
       onApprove,
       onDismiss,
     };
-    return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx)]);
+    const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
+    return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);
   }
 
   const PLACEHOLDER = {
-    scanner: 'Scanner is not built yet. It will list setups the strategies are forming but have not proposed.',
     saved: 'Saved setups are not built yet.',
   };
+
+  // Scanner sub-tab: its own view; Review / Watch jump back into the Setups workspace.
+  function scanner(state) {
+    const host = el('div', { className: 'opp-scanner' });
+    SD.oppScanner.renderScanner(host, state, {
+      market: assetFilter,
+      onMarket: setFilter,
+      matchesAsset,
+      online: transport.isOnline(),
+      onRunScan: () => { if (transport.isOnline()) transport.send({ type: 'RUN_SCAN' }); },
+      onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; rerender(); },
+      onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; rerender(); },
+      rerender,
+    });
+    return host;
+  }
 
   function render(container, state) {
     mounted = { container, state };
@@ -211,12 +231,15 @@
       b.onclick = () => { subTab = t; rerender(); };
       return b;
     }));
+    const scanBtn = el('button', { type: 'button', className: 'btn opp-scan-btn', textContent: 'Scan markets' });
+    scanBtn.onclick = () => { subTab = 'scanner'; rerender(); };
     // Top-right asset tabs: clicking the active tab again clears the filter.
     const assetTabs = segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
     container.replaceChildren(
-      el('div', { className: 'opp-toolbar' }, [tabs, assetTabs]),
+      // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
+      el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs] : [tabs, el('div', { className: 'opp-toolbar-right' }, [scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
-      subTab === 'setups' ? setups(state) : el('div', { className: 'placeholder', textContent: PLACEHOLDER[subTab] }),
+      subTab === 'setups' ? setups(state) : subTab === 'scanner' ? scanner(state) : el('div', { className: 'placeholder', textContent: PLACEHOLDER[subTab] }),
     );
 
     const input = container.querySelector('#opp-search');
