@@ -225,3 +225,9 @@
 /* ---------- Chart rotation toggle (Phase 46) ---------- */
 .opp-rotate { font-size: 12px; }
 .opp-rotate.is-on { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Speculative Moonshot tag (System 6) ---------- */
+.opp-moon { align-self: flex-start; padding: 1px 8px; border-radius: 10px; background: linear-gradient(90deg, rgba(168, 85, 247, 0.25), rgba(236, 72, 153, 0.25));
+  border: 1px solid rgba(217, 70, 239, 0.6); color: #f0abfc; font: 700 10px/16px var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.apv-card.is-moon { border-left-color: #d946ef; }
+.opp-moon-note { border-left: 3px solid #d946ef; padding-left: 8px; color: #f0abfc; }

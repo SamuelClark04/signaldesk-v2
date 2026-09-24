@@ -38,9 +38,10 @@
     const dismiss = el('button', { type: 'button', className: 'btn apv-dismiss', textContent: 'Dismiss', disabled: busy || !ctx.online });
     dismiss.onclick = () => ctx.onDismiss(o);
     const od = o.optionsData;
-    return el('article', { className: 'apv-card' }, [
+    return el('article', { className: `apv-card${o.speculative ? ' is-moon' : ''}` }, [
       el('header', { className: 'apv-head' }, [
         SD.scannerDetail.badge(o.asset),
+        ...(o.speculative ? [el('span', { className: 'opp-moon', textContent: 'Speculative Moonshot' })] : []),
         el('div', { className: 'apv-title' }, [el('strong', { textContent: `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
         el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` }),
@@ -53,6 +54,7 @@
         kv('Risk', `${money(o.dollarRisk)} (${o.sizingBankroll > 0 ? ((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2) : '—'}%)`),
         kv('Reward : risk', rr),
       ]),
+      ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Speculative micro-size: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
       ...(o.capitalCapped ? [el('p', { className: 'apv-note', textContent: `Capital cap: risking ${(o.actualRiskPct * 100).toFixed(2)}% instead of ${(o.riskPct * 100).toFixed(2)}%.` })] : []),
       ...(o.cappedByAmount ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
       ...catalystChips(o.catalysts),

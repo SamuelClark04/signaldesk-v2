@@ -8,6 +8,7 @@ const equityDay = require('../strategies/1-equity-day');
 const cryptoSwing = require('../strategies/2-crypto-swing');
 const equitySwing = require('../strategies/3-equity-swing');
 const optionsSystem = require('../strategies/5-options-system');
+const speculativeCrypto = require('../strategies/6-speculative-crypto'); // System 6, additive
 const { processCandidate } = require('../risk/risk-engine');
 const strictness = require('../risk/strictness');
 const { sizingBankroll } = require('../risk/venue-capital');
@@ -45,6 +46,7 @@ const STRATEGIES = [
   ['crypto-swing', () => cryptoSwing.generateCandidates(prices.getLatestPrices())],
   ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
   ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
+  ['speculative-crypto', () => speculativeCrypto.generateCandidates(prices.getLatestPrices())],
 ];
 
 async function collectCandidates() {
@@ -101,9 +103,9 @@ async function pipelinePass() {
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
+  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks(), ...speculativeCrypto.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
   // Scanner log: what each strategy concluded per symbol on this pass.
-  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['equity-swing', equitySwing], ['options-system', optionsSystem]]) {
+  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
     scanLog.scanned(id, mod.takeScan());
   }
   // Read once per pass: every candidate is sized with the same risk profile

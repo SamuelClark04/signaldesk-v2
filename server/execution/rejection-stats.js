@@ -30,6 +30,7 @@ const BUCKETS = [
   [/^OPTIONS_CHAIN_UNAVAILABLE/, 'Options: chain data unavailable'],
   [/^OPTIONS_NO_CONTRACT/, 'Options: no liquid 30-45 DTE contract near 0.35 delta'],
   [/^OPTIONS_REWARD_TOO_LOW/, 'Options: contract reward too low vs risk'],
+  [/^SPECULATIVE_SENTIMENT_WEAK/, 'Moonshot: spike without strong news sentiment'],
 ];
 
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD

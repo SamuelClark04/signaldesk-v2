@@ -55,6 +55,7 @@ function detailRows(o) {
     ['Size', sizeLabel(o)],
     ['Risk', `${usd(o.dollarRisk)}${Number.isFinite(o.feeDrag) ? ` · fee drag ${o.feeDrag.toFixed(2)}R` : ''}`],
   ];
+  if (o.speculative) rows.push(['Speculative', `Moonshot micro-size: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll)`]);
   if (o.capitalCapped) rows.push(['Capital cap', `size limited to ${o.capitalCapPct * 100}% of the bankroll: risking ${(o.actualRiskPct * 100).toFixed(2)}%, not ${(o.riskPct * 100).toFixed(2)}%`]);
   if (o.optionsData) {
     const legs = (o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ');
@@ -66,7 +67,7 @@ function detailRows(o) {
 }
 
 function buildAlert(o) {
-  const subject = `[ACTION REQUIRED] SignalDesk: ${o.direction} ${o.asset} (${o.strategyId})`;
+  const subject = `[ACTION REQUIRED]${o.speculative ? ' [SPECULATIVE MOONSHOT]' : ''} SignalDesk: ${o.direction} ${o.asset} (${o.strategyId})`;
   const created = Date.parse(o.timestamp);
   const expiry = Number.isFinite(created)
     ? `Approve before ${etTime(created + MAX_CANDIDATE_AGE_MS)}; after that the order guard expires it.`

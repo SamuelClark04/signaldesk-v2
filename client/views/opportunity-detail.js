@@ -259,6 +259,7 @@
       ]),
       ...[ready ? holdChip(o) : null].filter(Boolean),
       ...(ready ? SD.oppApprovals.catalystChips(o.catalysts) : []), // FOMC / CPI / FDA inside the expected hold
+      ...(ready && o.speculative ? [el('p', { className: 'opp-size-warn opp-moon-note', textContent: `Speculative Moonshot: micro-sized at ${Math.round(o.speculativeScale * 100)}% of normal risk (conviction ${o.conviction}).` })] : []),
       ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),
       SD.sentiment.badge(o.asset, { compact: true }),
       el('div', { className: 'opp-kv-group' }, [

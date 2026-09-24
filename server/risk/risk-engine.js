@@ -19,6 +19,15 @@ const MAX_PREMIUM_R = 3; // full-premium loss capped at 3x the per-trade risk bu
 // bankroll (notional for stocks/crypto, premium for options), however tight the
 // stop. Risk-based size first, then min(risk size, cap size); when the cap
 // binds, the order carries capitalCapped + the risk % it actually takes.
+// Speculative Moonshots (System 6, candidate.speculative): "smart" micro-sizing.
+// The risk budget is only 10% to 25% of the profile's normal budget, scaled by
+// the setup's conviction (0-1: sentiment strength + volume surge), so a failed
+// hype trade costs a fraction of a normal loss. Every other gate applies as usual.
+const SPECULATIVE_SCALE = { min: 0.10, max: 0.25 };
+const speculativeScale = (c) => {
+  const k = Number.isFinite(c.conviction) ? Math.max(0, Math.min(1, c.conviction)) : 0;
+  return SPECULATIVE_SCALE.min + (SPECULATIVE_SCALE.max - SPECULATIVE_SCALE.min) * k;
+};
 const MAX_CAPITAL_ALLOCATION = (() => {
   const v = Number(process.env.MAX_CAPITAL_ALLOCATION);
   return v > 0 && v <= 1 ? v : 0.25;
@@ -105,7 +114,8 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     : candidate.invalidation - entryPrice;
   if (!(stopDistance > 0)) return reject(candidate, 'Invalidation is on the wrong side of entry');
 
-  const riskBudget = configuredBankroll * riskPct;
+  const scale = candidate.speculative ? speculativeScale(candidate) : 1;
+  const riskBudget = configuredBankroll * riskPct * scale;
   const sizing = candidate.market === 'options'
     ? sizeOptions(candidate, riskBudget, configuredBankroll, maxLeverage)
     : sizeLinear(candidate, configuredBankroll, riskBudget, maxLeverage, entryPrice, stopDistance);
@@ -123,6 +133,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     stopDistance,
     notional: sizing.notional,
     riskPct,
+    ...(candidate.speculative ? { speculativeScale: scale, speculativeRiskPct: riskPct * scale } : {}),
     // What it was sized against: the approval step refuses a LIVE execution of
     // an order that was not sized from that live account (venue-capital.js).
     sizingBankroll: configuredBankroll,
@@ -145,4 +156,4 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R, MAX_CAPITAL_ALLOCATION };
+module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R, MAX_CAPITAL_ALLOCATION, SPECULATIVE_SCALE };
