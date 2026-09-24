@@ -60,6 +60,45 @@
 
   $('alloc-form').addEventListener('submit', requestAllocation);
 
+  // ---------- Trading capital (BROKER_STATE from the server) ----------
+  function capitalTile(v, bankroll) {
+    const live = v.mode === 'live';
+    const failed = live && !v.ok;
+    const body = [];
+    if (!live) {
+      body.push(el('div', { className: 'capital-label', textContent: 'Paper bankroll' }),
+        el('div', { className: 'capital-value', textContent: money(bankroll) }),
+        el('div', { className: 'capital-sub', textContent: 'Simulated; approvals fill in the paper ledger' }));
+    } else if (failed) {
+      body.push(el('div', { className: 'capital-label', textContent: 'Live buying power' }),
+        el('div', { className: 'capital-value', textContent: '—' }),
+        el('div', { className: 'capital-error', textContent: `Account unavailable: ${v.error}` }));
+    } else {
+      const extra = v.balances ? `USD ${money(v.balances.USD)} + USDC ${money(v.balances.USDC)}`
+        : `Cash ${money(v.cash)} · equity ${money(v.equity)}${v.tradingBlocked ? ' · TRADING BLOCKED' : ''}`;
+      body.push(el('div', { className: 'capital-label', textContent: 'Live buying power' }),
+        el('div', { className: 'capital-value', textContent: money(v.buyingPower) }),
+        el('div', { className: 'capital-sub', textContent: `${extra} · as of ${clock(v.fetchedAt)}` }));
+    }
+    return el('div', { className: `capital-tile${live ? ' is-live' : ''}${failed ? ' is-error' : ''}` }, [
+      el('div', { className: 'capital-head' }, [
+        el('span', { className: 'capital-mode', textContent: live ? 'LIVE' : 'Paper' }),
+        `${v.label} · ${v.markets}`,
+      ]),
+      ...body,
+    ]);
+  }
+
+  function renderBrokerState(state) {
+    if (!state || !state.venues) return;
+    const venues = Object.values(state.venues);
+    $('capital').replaceChildren(...venues.map((v) => capitalTile(v, state.bankroll)));
+    // Be explicit about what the risk engine actually sizes from.
+    $('capital-hint').textContent = venues.some((v) => v.mode === 'live')
+      ? `Position sizing still uses the paper bankroll (${money(state.bankroll)}) for every venue`
+      : 'Per execution venue';
+  }
+
   function render(positions) {
     const rows = [...positions].sort((a, b) => b.openedAt - a.openedAt).map((p) => {
       const t1 = (p.targets || []).find((t) => t.level === 1) || (p.targets || [])[0];
@@ -79,5 +118,6 @@
     init: (t) => { transport = t; },
     render,
     renderAllocation,
+    renderBrokerState,
   };
 })();

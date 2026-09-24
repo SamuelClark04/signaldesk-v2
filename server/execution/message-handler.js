@@ -6,6 +6,7 @@ const ledger = require('./paper-ledger');
 const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
+const { publishBrokerState } = require('./broker-state');
 
 // Which settings key decides the execution venue for each market.
 const MODE_KEY_BY_MARKET = { stocks: 'stockMode', options: 'stockMode', crypto: 'cryptoMode' };
@@ -71,6 +72,9 @@ function createMessageHandler({ send, broadcast }) {
       const settings = ledger.updateSettings(payload);
       console.log(`[settings] updated: ${JSON.stringify(settings)}`);
       broadcast('SETTINGS_UPDATED', settings);
+      // Modes or bankroll changed: refresh what each venue has to trade with.
+      publishBrokerState(broadcast, { force: true })
+        .catch((err) => console.error('[broker] publish after settings update failed:', err.message));
     } catch (err) {
       console.warn(`[settings] rejected update ${JSON.stringify(payload)}: ${err.message}`);
       send(ws, 'SETTINGS_ERROR', { error: err.message, settings: ledger.getSettings() });

@@ -15,6 +15,7 @@ const coinbase = require('./connectors/coinbase-socket');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
 const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeline');
+const { getBrokerState } = require('./execution/broker-state');
 
 const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
 const PORT = Number(process.env.PORT) || 3000;
@@ -32,7 +33,26 @@ app.get('/api/health', (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+
+// ---------- CSWSH shield ----------
+// Browsers do not apply same-origin rules to WebSockets, so any page the user
+// has open could otherwise connect to ws://127.0.0.1 and send APPROVE or
+// UPDATE_SETTINGS. Only the terminal's own origin may open the socket; a
+// missing Origin (non-browser client) is rejected too.
+const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const { pathname } = new URL(req.url, 'http://placeholder');
+  const origin = req.headers.origin;
+  if (pathname !== '/ws' || !ALLOWED_ORIGINS.has(origin)) {
+    console.warn(`[security] rejected WebSocket upgrade: path=${pathname} origin=${origin || '(none)'}`);
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+});
 
 function send(ws, type, payload) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, payload }));
@@ -53,6 +73,9 @@ wss.on('connection', (ws) => {
   send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
+  getBrokerState()
+    .then((state) => send(ws, 'BROKER_STATE', state))
+    .catch((err) => console.error('[broker] state for new client failed:', err.message));
 });
 
 // Drop dead client connections every 30s.

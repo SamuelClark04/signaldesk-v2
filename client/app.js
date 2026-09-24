@@ -46,6 +46,7 @@
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
+    BROKER_STATE: (state) => SD.portfolio.renderBrokerState(state),
   };
 
   function setConn(state, label) {

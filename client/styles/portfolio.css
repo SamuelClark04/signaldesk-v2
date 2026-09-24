@@ -1,6 +1,21 @@
 /* Portfolio tab: What to Buy allocator. Positions table uses shared .data-table;
    inputs and .btn-primary are shared form controls in main.css. */
 
+/* ---------- Trading capital (one tile per venue) ---------- */
+.capital { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.capital-tile { padding: 14px 16px; border-left: 3px solid var(--border-strong); }
+.capital-tile + .capital-tile { border-top: 1px solid var(--border); }
+@media (min-width: 761px) { .capital-tile + .capital-tile { border-top: 0; } }
+.capital-tile.is-live { border-left-color: var(--short); background: var(--short-bg); }
+.capital-tile.is-error { border-left-color: var(--warn); }
+.capital-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.capital-mode { padding: 0 6px; border-radius: 4px; font: 600 10px/16px var(--font-mono); text-transform: uppercase; background: var(--surface-2); color: var(--text-muted); }
+.capital-tile.is-live .capital-mode { background: var(--short); color: var(--bg); }
+.capital-label { margin-top: 8px; color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.capital-value { font: 600 20px var(--font-mono); font-variant-numeric: tabular-nums; }
+.capital-sub { margin-top: 2px; color: var(--text-faint); font-size: 12px; }
+.capital-error { margin-top: 6px; color: var(--warn); font-size: 12px; }
+
 /* ---------- Allocator form ---------- */
 .alloc-form {
   display: flex;
