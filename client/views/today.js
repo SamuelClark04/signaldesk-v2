@@ -1,9 +1,10 @@
 // Today tab: the command-center dashboard. Pure render from the shared client
 // state (settings, broker, positions, journal, pending); app.js calls
 // renderToday() whenever that state changes while the tab is visible.
-// Real data: metric banner, briefing count, Ready-for-review (live queue).
-// SAMPLE data (tagged, never actionable): attention, watching, why-we-passed,
-// market context, and the review cards when the queue is empty.
+// Real data: metric banner, briefing count, Ready-for-review (live queue),
+// Why we passed (server rejection tally).
+// SAMPLE data (tagged, never actionable): attention, watching, market context,
+// and the review cards when the queue is empty.
 // Exposes window.SignalDesk.today.
 (() => {
   const SD = window.SignalDesk;
@@ -147,9 +148,16 @@
     ]))),
   ]));
 
-  const passed = () => card('Why we passed', '', true, el('ul', { className: 'today-list' },
-    SAMPLE.passed.map((p) => el('li', { className: 'today-count' }, [
-      el('span', { textContent: p.reason }), el('span', { className: 'today-count-n', textContent: String(p.count) })]))));
+  // Real: today's REJECTION_STATS from the server (one count per setup per reason).
+  function passed(state) {
+    const stats = state.rejections;
+    const reasons = (stats && stats.reasons) || [];
+    const body = reasons.length
+      ? el('ul', { className: 'today-list' }, reasons.map((r) => el('li', { className: 'today-count' }, [
+        el('span', { textContent: r.reason }), el('span', { className: 'today-count-n', textContent: String(r.count) })])))
+      : el('p', { className: 'today-empty', textContent: stats ? 'Nothing passed on yet today.' : 'Waiting for the server…' });
+    return card('Why we passed', stats && stats.total ? `${stats.total} setup${stats.total === 1 ? '' : 's'} today` : 'Today', false, body);
+  }
 
   const context = () => card('Market context', '', true, el('ul', { className: 'today-list' },
     SAMPLE.context.map((c) => el('li', { className: 'today-context' }, [
@@ -164,7 +172,7 @@
       ...metricBanner(state),
       briefing(state),
       el('div', { className: 'today-split' }, [readyForReview(state), attention()]),
-      el('div', { className: 'today-support' }, [watching(), passed(), context()]),
+      el('div', { className: 'today-support' }, [watching(), passed(state), context()]),
     );
   }
 

@@ -7,6 +7,7 @@ const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 const { publishBrokerState } = require('./broker-state');
+const { recordRejection } = require('./rejection-stats');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 
@@ -63,13 +64,20 @@ async function approveWithGuard(id) {
   const check = validateApproval(order, livePrice);
   if (check.valid) return routeApproved(order, livePrice);
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
-  if (check.reason !== 'NO_LIVE_PRICE') ledger.discardOrder(id);
+  if (check.reason !== 'NO_LIVE_PRICE') {
+    ledger.discardOrder(id);
+    recordRejection(id, check.reason);
+  }
   throw new Error(check.reason);
 }
 
 const QUEUE_ACTIONS = {
   APPROVE: (id) => approveWithGuard(id),
-  REJECT: (id) => ledger.discardOrder(id),
+  REJECT: (id) => {
+    const discarded = ledger.discardOrder(id);
+    recordRejection(id, 'REJECTED_BY_USER');
+    return discarded;
+  },
 };
 
 // Orders with an APPROVE/REJECT in progress. A live submit awaits the broker, so

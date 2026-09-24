@@ -30,7 +30,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by the Today dashboard) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [] };
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -40,6 +40,7 @@
     JOURNAL_UPDATED: (trades) => { state.journal = trades || []; },
     SETTINGS_UPDATED: (settings) => { state.settings = settings; },
     BROKER_STATE: (broker) => { state.broker = broker; },
+    REJECTION_STATS: (stats) => { state.rejections = stats; },
   };
 
   // Rendered on entering the tab and on every state change while it is visible.

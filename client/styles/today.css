@@ -78,6 +78,7 @@
 .today-alert-detail { margin-top: 2px; color: var(--text-faint); font-size: 12px; }
 .today-count { display: flex; justify-content: space-between; gap: 12px; color: var(--text-muted); font-size: 13px; }
 .today-count-n { font: 600 13px var(--font-mono); color: var(--text); }
+.today-empty { margin: 0; color: var(--text-faint); font-size: 13px; }
 .today-context { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 13px; }
 .today-context-breadth { grid-column: 1 / -1; color: var(--text-faint); font-size: 12px; }
 .today-trend { font: 600 12px var(--font-mono); }

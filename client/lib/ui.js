@@ -6,8 +6,14 @@
   const $ = (id) => document.getElementById(id);
 
   // ---------- Formatting ----------
+  // Prices: thousands separators (83,900.00) with a fixed number of decimals per
+  // market (2, or 4 for sub-$10 crypto). en-US pinned, like money() below.
   const decimals = (o) => (o.market === 'crypto' ? (o.entryPrice < 10 ? 4 : 2) : 2);
-  const price = (x, o) => (Number.isFinite(x) ? x.toFixed(decimals(o)) : '—');
+  const price = (x, o) => {
+    if (!Number.isFinite(x)) return '—';
+    const d = decimals(o || {});
+    return x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  };
   // Dollar amounts: thousands separators, always 2 decimals. Locale is pinned to
   // en-US so "$" always pairs with "," grouping and "." decimals ($50,000.00),
   // whatever the browser's language. Negatives keep their sign: -$98.83.

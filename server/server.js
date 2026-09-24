@@ -16,6 +16,7 @@ const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
 const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
+const rejectionStats = require('./execution/rejection-stats');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
 const { HOST, LAN_ACCESS, checkUpgrade, lanUrls } = require('./security/access-policy');
@@ -62,6 +63,7 @@ function broadcast(type, payload) {
 }
 
 const handleMessage = createMessageHandler({ send, broadcast });
+rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
@@ -72,6 +74,7 @@ wss.on('connection', (ws) => {
   send(ws, 'POSITIONS_UPDATED', ledger.getActivePositions());
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
+  send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
   getBrokerState()
     .then((state) => send(ws, 'BROKER_STATE', state))
     .catch((err) => console.error('[broker] state for new client failed:', err.message));
@@ -88,7 +91,11 @@ const heartbeat = setInterval(() => {
 
 function start() {
   alpacaStocks.init({ symbols: STOCK_WATCHLIST });
-  alpacaNews.init({ symbols: STOCK_WATCHLIST });
+  // News stream disabled: on Alpaca's free tier it competes with the bar stream
+  // for the single allowed connection (406 "connection limit exceeded").
+  // Without it, getNewsContext() is empty: equity-day ORB setups carry a
+  // 'technical' catalyst and its negative-news veto is inactive.
+  // alpacaNews.init({ symbols: STOCK_WATCHLIST });
   coinbase.init({ symbols: CRYPTO_WATCHLIST });
   startPipeline({ broadcast });
 }

@@ -12,6 +12,7 @@ const { processCandidate } = require('../risk/risk-engine');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
+const { recordRejection } = require('./rejection-stats');
 const prices = require('../market/latest-prices');
 
 const PIPELINE_INTERVAL_MS = 60000;
@@ -71,6 +72,7 @@ async function pipelinePass() {
     const result = processCandidate(candidate, bankroll);
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
+      recordRejection(result.candidateId, result.reason); // counted once per setup per reason
       continue;
     }
     counts.approved += 1;
