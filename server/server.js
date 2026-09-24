@@ -4,6 +4,7 @@
 require('dotenv').config();
 
 const http = require('http');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer, WebSocket } = require('ws');
@@ -25,6 +26,7 @@ const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD'];
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'client')));
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), clients: wss.clients.size });
@@ -51,6 +53,7 @@ wss.on('connection', (ws) => {
     send(ws, 'error', `unknown message type: ${msg.type}`);
   });
   send(ws, 'hello', { server: 'signaldesk-v2', ts: Date.now() });
+  send(ws, 'orders:snapshot', ledger.getPendingOrders());
 });
 
 // Drop dead client connections every 30s.
@@ -82,8 +85,9 @@ function runPipeline() {
     }
     counts.approved += 1;
     try {
-      ledger.stageOrder(result);
+      const staged = ledger.stageOrder(result);
       counts.staged += 1;
+      broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
     } catch (err) {
       // Expected when the same breakout is re-proposed on the next tick (duplicate id).

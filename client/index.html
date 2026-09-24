@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SignalDesk</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">SD</span>
+        <span class="brand-name">SignalDesk</span>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <a class="nav-link" href="#today" data-tab="today">Today</a>
+        <a class="nav-link" href="#opportunities" data-tab="opportunities">Opportunities</a>
+        <a class="nav-link" href="#portfolio" data-tab="portfolio">Portfolio</a>
+        <a class="nav-link" href="#journal" data-tab="journal">Journal</a>
+        <a class="nav-link" href="#settings" data-tab="settings">Settings</a>
+      </nav>
+
+      <div class="conn" id="conn" data-state="connecting">
+        <span class="conn-dot"></span>
+        <span class="conn-label" id="conn-label">Connecting…</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="page-title" id="page-title">Opportunities</h1>
+        <span class="mode-badge">Paper</span>
+      </header>
+
+      <section class="tab" id="tab-today" data-title="Today" hidden>
+        <div class="placeholder">Today view is not built yet.</div>
+      </section>
+
+      <section class="tab" id="tab-opportunities" data-title="Opportunities" hidden>
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Approvals Queue</h2>
+            <span class="count" id="queue-count">0</span>
+            <span class="panel-hint">Staged candidates that passed the risk and cost gate</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="queue-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Setup</th>
+                  <th>Dir</th>
+                  <th class="num">Entry zone</th>
+                  <th class="num">Stop</th>
+                  <th class="num">Targets</th>
+                  <th class="num">Size</th>
+                  <th class="num">Risk $</th>
+                  <th class="num">Fee drag</th>
+                  <th>Catalyst</th>
+                  <th class="num">Age</th>
+                  <th class="actions-col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="queue-body"></tbody>
+            </table>
+          </div>
+
+          <div class="empty" id="queue-empty">
+            No staged candidates. New setups appear here as soon as the risk engine approves them.
+          </div>
+        </div>
+      </section>
+
+      <section class="tab" id="tab-portfolio" data-title="Portfolio" hidden>
+        <div class="placeholder">Portfolio view is not built yet.</div>
+      </section>
+
+      <section class="tab" id="tab-journal" data-title="Journal" hidden>
+        <div class="placeholder">Journal view is not built yet.</div>
+      </section>
+
+      <section class="tab" id="tab-settings" data-title="Settings" hidden>
+        <div class="placeholder">Settings view is not built yet.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
