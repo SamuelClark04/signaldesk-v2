@@ -18,6 +18,7 @@ const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeli
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const watchlist = require('./execution/watchlist');
+const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
 const { HOST, LAN_ACCESS, checkUpgrade, lanUrls } = require('./security/access-policy');
@@ -78,6 +79,11 @@ wss.on('connection', (ws) => {
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
   send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
   send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());
+  try {
+    send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
+  } catch (err) {
+    console.error('[intel] snapshot for new client failed:', err.message);
+  }
   getBrokerState()
     .then((state) => send(ws, 'BROKER_STATE', state))
     .catch((err) => console.error('[broker] state for new client failed:', err.message));

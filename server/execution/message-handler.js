@@ -8,6 +8,7 @@ const prices = require('../market/latest-prices');
 const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 const { publishBrokerState } = require('./broker-state');
 const { recordRejection } = require('./rejection-stats');
+const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 
@@ -96,7 +97,10 @@ function createMessageHandler({ send, broadcast }) {
       if (typeof id !== 'string' || !id) throw new Error('missing order id');
       const result = await QUEUE_ACTIONS[type](id);
       console.log(`[ledger] ${type} ${id} -> ${result.status}${result.execution === 'LIVE' ? ` (LIVE ${result.brokerId})` : ''}`);
-      if (result.status === 'open') broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      if (result.status === 'open') {
+        broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+        try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
+      }
     } catch (err) {
       console.warn(`[ledger] ${type} ${id} failed: ${err.message}`);
       send(ws, 'ACTION_FAILED', { type, id, error: err.message });

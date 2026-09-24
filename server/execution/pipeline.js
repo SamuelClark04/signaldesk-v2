@@ -14,6 +14,7 @@ const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
 const { recordRejection } = require('./rejection-stats');
 const watchlist = require('./watchlist');
+const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
 
 const PIPELINE_INTERVAL_MS = 60000;
@@ -121,6 +122,13 @@ async function pipelinePass() {
   }
   if (positionsChanged) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
   if (journalChanged) broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
+
+  // Dashboard intelligence (attention alerts + market context), after exits settle.
+  try {
+    publishIntelligence(broadcast);
+  } catch (err) {
+    console.error('[pipeline] dashboard intelligence failed:', err.message);
+  }
 
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
   return counts;

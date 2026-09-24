@@ -13,15 +13,6 @@
 .today-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .today-card-title { margin: 0; font-size: 14px; font-weight: 600; }
 .today-card-hint { margin-left: auto; color: var(--text-faint); font-size: 12px; }
-.today-tag {
-  padding: 0 6px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 4px;
-  color: var(--text-faint);
-  font: 600 10px/16px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
 
 /* ---------- Metric banner ---------- */
 .today-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }

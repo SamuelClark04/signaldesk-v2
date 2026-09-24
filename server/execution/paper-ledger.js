@@ -220,6 +220,8 @@ module.exports = {
   getActivePositions,
   getTradeJournal,
   // Settings live in the store; re-exported so callers keep one ledger API.
+  // Mark-to-market for monitoring (same math as closePosition, before fees).
+  unrealizedPnl: (position, price) => grossPnlAt(position, price).grossPnl,
   getSettings: store.getSettings,
   updateSettings: store.updateSettings,
 };
