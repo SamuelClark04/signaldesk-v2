@@ -1,100 +1,161 @@
-// Strategy 5: Options Intelligence with the IV Crush Shield.
-// PROPOSER ONLY: reads live prices and the options chain, returns Canonical
-// Candidates (same schema as 1-equity-day.js). Never sizes, stages or executes.
+// Strategy 5: Options Swing, long calls on a daily volatility-squeeze breakout.
+// PROPOSER ONLY: reads real daily bars, live prices and the real options chain;
+// returns Canonical Candidates. Never sizes, stages or executes.
 //
-// IV Crush Shield: when implied volatility is rich (IVP > 80), buying a single
-// leg overpays for premium that deflates after the event, so the setup becomes a
-// vertical debit spread (the short leg finances the long one). Otherwise a
-// single-leg call.
-//
-// market 'options': the risk engine sizes in contracts from optionsData.debit
-// (max loss = debit × multiplier), and the ledger values the position from its
-// legs. Entry zone, invalidation and targets are UNDERLYING price levels: they
-// drive the approval guard and the exit monitor.
-// Until the real chain is wired, debit and strikes are simulated (see CONFIG).
-const { getATMStraddle } = require('../connectors/options-chain');
-const { calculateExpectedMove } = require('../intelligence/expected-move');
+// Trigger (real daily bars, connectors/daily-bars.js, + the live price):
+//   squeeze   within the last SQUEEZE_LOOKBACK completed days, the 20-day
+//             Bollinger Bands (2 sd) sat inside the Keltner Channel (1.5 ATR20):
+//             volatility compressed, a coil
+//   breakout  the live price clears the highest high of the last RANGE_DAYS
+//             completed days and trades above the 20-day average
+// Levels (UNDERLYING prices; the exit monitor watches the underlying):
+//   stop      STOP_ATR x ATR20 under the broken range high (back inside = failed)
+//   target    2R on the underlying, which must sit below major daily resistance
+// Contract (connectors/options-data.js, real Alpaca chain): the call expiring
+// in 30-45 days whose delta is nearest 0.35 (0.30-0.40), with a fresh two-sided
+// quote and a spread under 10% of mid. Entry premium = the real ASK. The stop's
+// cost is the real premium paid less what the option is modelled to fetch at
+// the stop price (option-pricing.js: its real IV, sold at the BID side), which
+// is what the risk engine sizes on (riskPerShare).
+// One idea per symbol per day (the id carries the date; the ledger refuses repeats).
+// Shields: stocks (not index ETFs) are blocked when earnings fall inside the
+// hold (fail closed, like equity-swing); rejected setups go out via takeBlocks().
+const { STREAMED_STOCKS } = require('../market/universe');
+const { getDailyBars } = require('../connectors/daily-bars');
+const { getEarningsStatus } = require('../connectors/corporate-calendar');
+const options = require('../connectors/options-data');
+const { exitValue } = require('../risk/option-pricing');
+const { checkTarget } = require('../risk/structure');
+const sentiment = require('../connectors/news-sentiment');
 
 const STRATEGY_ID = 'options-system';
-const IVP_SHIELD_THRESHOLD = 80;
-
-// Placeholder triggers until a real options signal exists: go long when the
-// underlying trades above a level.
-const TRIGGERS = { AAPL: { above: 100 } };
+const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
 
 const CONFIG = {
   tradeType: 'Options Swing',
-  expectedDuration: 'Days to weeks (until expiry)',
-  entryBufferPct: 0.002, // entry zone: live price up to +0.2%
-  stopFractionOfMove: 0.5, // invalidation at half the expected move below entry => T1 ~ 2R
-  minStopPct: 0.0035, // minimum underlying distance to the invalidation level
-  spreadDebitFraction: 0.6, // SIMULATED: vertical debit ≈ 60% of the ATM call
-  strikeIncrement: 1, // SIMULATED: strikes on $1 increments
-  multiplier: 100, // shares per standard equity option contract
+  expectedDuration: '5-15 trading days (exit well before expiry)',
+  symbols: [...STREAMED_STOCKS], // live-streamed stocks/ETFs (a live price is required)
+  period: 20, bbSd: 2, kcAtr: 1.5, squeezeLookback: 5, rangeDays: 10,
+  stopAtr: 0.75, targetR: 2, entryBufferPct: 0.002,
+  earningsBufferDays: 15, // trading days: no earnings report inside the planned hold
+  contract: { type: 'call', minDte: 30, maxDte: 45, minDelta: 0.30, maxDelta: 0.40, targetDelta: 0.35,
+    maxSpreadPct: 0.10, minBid: 0.10, maxQuoteAgeMs: 15 * 60 * 1000 },
+  strikeWindow: [0.98, 1.25], // chain request: strikes from 2% under to 25% over spot
+  minOptionR: 1.5, // the option's own reward at the target / its risk at the stop
+  multiplier: 100,
 };
-
-const toStrike = (x) => Math.round(x / CONFIG.strikeIncrement) * CONFIG.strikeIncrement;
-
-// Long ATM call; the spread sells a call at the top of the expected move (T1),
-// which caps the payoff exactly where the trade takes profit anyway.
-function buildOptionsData(shielded, livePrice, t1, callPrice) {
-  const longStrike = toStrike(livePrice);
-  const legs = [{ side: 'buy', type: 'call', strike: longStrike, ratio: 1 }];
-  if (!shielded) return { debit: callPrice, multiplier: CONFIG.multiplier, legs };
-
-  const shortStrike = Math.max(toStrike(t1), longStrike + CONFIG.strikeIncrement);
-  legs.push({ side: 'sell', type: 'call', strike: shortStrike, ratio: 1 });
-  return { debit: cents(callPrice * CONFIG.spreadDebitFraction), multiplier: CONFIG.multiplier, legs };
-}
 
 const cents = (x) => Math.round(x * 100) / 100;
 const lookup = (src, key) => (src instanceof Map ? src.get(key) : src && src[key]);
+const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 
-const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+const coils = new Map(); // symbol -> latest analysis (for proximity; cached bars only)
+let blocks = [];
 
-async function buildCandidate(asset, livePrice, now) {
-  const { callPrice, putPrice, ivp } = await getATMStraddle(asset);
-  const expectedMove = calculateExpectedMove(callPrice, putPrice);
-  if (!(expectedMove > 0)) return null;
+// Squeeze state at bar index i: BB(20, 2sd) inside KC(20, 1.5 ATR20).
+function squeezeAt(bars, i, p = CONFIG.period) {
+  const w = bars.slice(i - p + 1, i + 1);
+  const mean = w.reduce((s, b) => s + b.close, 0) / p;
+  const sd = Math.sqrt(w.reduce((s, b) => s + (b.close - mean) ** 2, 0) / p);
+  const atr = w.reduce((s, b, k) => {
+    const prev = bars[i - p + k].close;
+    return s + Math.max(b.high - b.low, Math.abs(b.high - prev), Math.abs(b.low - prev));
+  }, 0) / p;
+  return { mean, sd, atr, on: CONFIG.bbSd * sd < CONFIG.kcAtr * atr };
+}
 
-  const shielded = ivp > IVP_SHIELD_THRESHOLD;
-  const setupType = shielded ? 'Vertical Debit Spread' : 'Single Leg Call';
+// { mean, atr, rangeHigh, squeezeDays } from completed bars, or null (too short / no coil).
+function analyse(bars) {
+  const n = bars.length;
+  if (n < CONFIG.period + CONFIG.squeezeLookback + 1) return null;
+  const now = squeezeAt(bars, n - 1);
+  let squeezeDays = 0;
+  for (let i = n - CONFIG.squeezeLookback; i < n; i += 1) if (squeezeAt(bars, i).on) squeezeDays += 1;
+  if (!squeezeDays) return null;
+  const rangeHigh = Math.max(...bars.slice(-CONFIG.rangeDays).map((b) => b.high));
+  return { mean: now.mean, atr: now.atr, rangeHigh, squeezeDays };
+}
 
-  const entryMax = cents(livePrice * (1 + CONFIG.entryBufferPct));
-  const stopDistance = Math.max(expectedMove * CONFIG.stopFractionOfMove, entryMax * CONFIG.minStopPct);
-  const invalidation = Math.floor((entryMax - stopDistance) * 100) / 100;
-  if (!(invalidation > 0)) return null;
+function block(symbol, date, reason) {
+  blocks.push({ id: `${STRATEGY_ID}:BREAKOUT:${symbol}:${date}`, reason,
+    candidate: { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Squeeze breakout call', direction: 'long', timeframe: '1D' } });
+  return null;
+}
 
-  const t1 = cents(livePrice + expectedMove);
+async function earningsGuard(symbol, now) {
+  if (ETFS.has(symbol)) return { ok: true, text: 'Index ETF: no earnings.' };
+  const e = await getEarningsStatus(symbol, now);
+  if (!e.ok) return { ok: false, reason: `EARNINGS_UNKNOWN: ${e.error}` };
+  if (e.date && e.tradingDaysAway < CONFIG.earningsBufferDays) {
+    return { ok: false, reason: `OPTIONS_EARNINGS_IN_HOLD: reports ${e.date}, ${e.tradingDaysAway} trading day(s) away (IV crush risk)` };
+  }
+  return { ok: true, text: e.date ? `Next earnings ${e.date} (${e.tradingDaysAway} trading days away, after the planned hold).` : 'No earnings in the next 60 days.' };
+}
+
+const fmtExp = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const etTime = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
+
+async function evaluate(symbol, live, now) {
   const date = etDate.format(now);
-  const optionsData = buildOptionsData(shielded, livePrice, t1, callPrice);
-  const strikes = optionsData.legs.map((l) => `${l.side} ${l.strike}C`).join(' / ');
+  const bars = await getDailyBars(symbol, now);
+  const s = analyse(bars);
+  if (s) coils.set(symbol, s); else coils.delete(symbol);
+  if (!s || !(live > s.rangeHigh) || !(live > s.mean)) return null;
+
+  const entryMax = cents(live * (1 + CONFIG.entryBufferPct));
+  const invalidation = Math.floor((s.rangeHigh - CONFIG.stopAtr * s.atr) * 100) / 100;
+  const t1 = cents(entryMax + CONFIG.targetR * (entryMax - invalidation));
+  const tgt = checkTarget(bars, entryMax, t1, cents);
+  if (!tgt.ok) return block(symbol, date, `RESISTANCE_BLOCKS_TARGET: ${tgt.text}`);
+  const guard = await earningsGuard(symbol, now);
+  if (!guard.ok) return block(symbol, date, guard.reason);
+
+  const chain = await options.getChain(symbol, { type: 'call', minDte: CONFIG.contract.minDte, maxDte: CONFIG.contract.maxDte,
+    strikeMin: live * CONFIG.strikeWindow[0], strikeMax: live * CONFIG.strikeWindow[1] }, now);
+  if (!chain.ok) return block(symbol, date, `OPTIONS_CHAIN_UNAVAILABLE: ${chain.error}`);
+  const pick = options.selectContract(chain.contracts, CONFIG.contract, now);
+  if (!pick.ok) return block(symbol, date, `OPTIONS_NO_CONTRACT: ${pick.error}`);
+  const k = pick.contract;
+
+  const optionsData = { contract: k.symbol, underlying: symbol, type: 'call', strike: k.strike, expiration: k.expiration, dte: k.dte,
+    bid: k.bid, ask: k.ask, spread: cents(k.ask - k.bid), iv: k.iv, delta: k.delta, theta: k.theta, quoteTime: k.quoteTime, feed: chain.feed,
+    refSpot: live, refMid: k.mid, refAt: now, // the model is anchored to this real quote (option-pricing.js)
+    debit: k.ask, multiplier: CONFIG.multiplier, legs: [{ side: 'buy', type: 'call', strike: k.strike, ratio: 1 }] };
+  const atStop = cents(exitValue(optionsData, invalidation, now));
+  const atTarget = cents(exitValue(optionsData, t1, now));
+  optionsData.riskPerShare = cents(Math.max(0.01, k.ask - atStop));
+  optionsData.valueAtStop = atStop;
+  optionsData.valueAtTarget = atTarget;
+  const optionR = (atTarget - k.ask) / optionsData.riskPerShare;
+  if (!(optionR >= CONFIG.minOptionR)) {
+    return block(symbol, date, `OPTIONS_REWARD_TOO_LOW: ${k.symbol} gains ${cents(atTarget - k.ask)} at the target vs ${optionsData.riskPerShare} at risk (${optionR.toFixed(2)}R < ${CONFIG.minOptionR}R)`);
+  }
+  const news = await sentiment.getSentiment(symbol, now);
+  const perContract = (x) => `$${(x * CONFIG.multiplier).toFixed(0)}`;
+  const label = `${symbol} ${fmtExp(k.expiration)} ${k.strike} call`;
 
   return {
-    // One options idea per asset per day, whichever structure the shield picked.
-    id: `${STRATEGY_ID}:LONG:${asset}:${date}`,
-    asset,
-    market: 'options',
-    strategyId: STRATEGY_ID,
-    setupType,
-    direction: 'long',
-    timeframe: '1d',
-    tradeType: CONFIG.tradeType,
-    expectedDuration: CONFIG.expectedDuration,
-    entryZone: { min: cents(livePrice), max: entryMax },
+    id: `${STRATEGY_ID}:BREAKOUT:${symbol}:${date}`,
+    asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Squeeze breakout call', direction: 'long', timeframe: '1D',
+    tradeType: CONFIG.tradeType, expectedDuration: CONFIG.expectedDuration, resistance: tgt.resistance,
+    newsSentiment: news.ok ? { score: news.score, label: news.label, source: news.source } : null,
+    entryZone: { min: cents(live), max: entryMax },
     invalidation,
     targets: [{ level: 1, price: t1, allocation: 1 }],
     catalyst: { type: 'volatility', headline: null, sentimentScore: 0 },
-    thesis: `${asset} at ${cents(livePrice)} with an ATM straddle of ${cents(callPrice + putPrice)} implies a `
-      + `±${cents(expectedMove)} expected move. IV percentile ${ivp} is `
-      + `${shielded ? `above ${IVP_SHIELD_THRESHOLD}: IV Crush Shield on, use a vertical debit spread` : `at or below ${IVP_SHIELD_THRESHOLD}: single-leg call`}. `
-      + `Target the top of the expected move (${t1}); invalid below ${invalidation}.`,
+    thesis: `${symbol} coiled in a daily squeeze (Bollinger Bands inside the Keltner Channel on ${s.squeezeDays} of the last ${CONFIG.squeezeLookback} days) `
+      + `and is breaking out at ${cents(live)}, above its ${CONFIG.rangeDays}-day high ${cents(s.rangeHigh)} and 20-day average ${cents(s.mean)}. `
+      + `Contract: ${k.symbol} (${label}, ${k.dte} DTE). Premium: ask ${k.ask} / bid ${k.bid} (${chain.feed} feed, ${etTime(k.quoteTime)} ET), `
+      + `delta ${k.delta.toFixed(2)}, IV ${(k.iv * 100).toFixed(1)}%. Why this contract: of ${pick.candidates} liquid calls in the ${CONFIG.contract.minDte}-${CONFIG.contract.maxDte} DTE window, `
+      + `its delta is nearest ${CONFIG.contract.targetDelta}, enough time for the move without paying for far-dated premium. `
+      + `Bought at the ask (${perContract(k.ask)} per contract). If ${symbol} falls back to ${invalidation} (inside the range) the call is modelled to sell near ${atStop}: `
+      + `${perContract(optionsData.riskPerShare)} at risk per contract. At the ${t1} target it is modelled near ${atTarget} (${optionR.toFixed(1)}R). `
+      + `A gap through the stop or holding to expiry can lose the whole premium. ${tgt.text} ${guard.text} ${sentiment.describe(news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
-      `${asset} trading above trigger level ${TRIGGERS[asset].above}`,
-      `Expected move ±${cents(expectedMove)} = (call ${callPrice} + put ${putPrice}) × 0.85`,
-      `IVP ${ivp} ${shielded ? '>' : '≤'} ${IVP_SHIELD_THRESHOLD} → ${setupType}`,
-      `${strikes} for ${optionsData.debit} debit (max loss $${cents(optionsData.debit * optionsData.multiplier)} per contract)`,
-      'Stop and target are underlying levels; strikes and debit are simulated until the live chain is wired',
+      `Squeeze on ${s.squeezeDays}/${CONFIG.squeezeLookback} recent days: 2 sd Bollinger width inside 1.5 ATR20 Keltner (ATR ${cents(s.atr)})`,
+      `Live price above the ${CONFIG.rangeDays}-day high ${cents(s.rangeHigh)} and the 20-day average`,
+      `${k.symbol}: ${k.dte} DTE, delta ${k.delta.toFixed(2)}, spread ${(k.spreadPct * 100).toFixed(1)}% of mid, quote ${etTime(k.quoteTime)} ET`,
+      `Entry at the ask ${k.ask}; stop and target are ${symbol} prices, the option sells at the bid`,
     ],
     timestamp: new Date(now).toISOString(),
     optionsData,
@@ -102,18 +163,34 @@ async function buildCandidate(asset, livePrice, now) {
 }
 
 async function generateCandidates(latestPricesMap, now = Date.now()) {
-  const candidates = [];
-  for (const [asset, trigger] of Object.entries(TRIGGERS)) {
-    const livePrice = lookup(latestPricesMap, asset);
-    if (!(livePrice > trigger.above)) continue;
+  blocks = [];
+  const out = [];
+  for (const symbol of CONFIG.symbols) {
+    const live = lookup(latestPricesMap, symbol);
+    if (!(live > 0)) continue;
     try {
-      const candidate = await buildCandidate(asset, livePrice, now);
-      if (candidate) candidates.push(candidate);
+      const c = await evaluate(symbol, live, now);
+      if (c) out.push(c);
     } catch (err) {
-      console.error(`[options-system] ${asset} failed: ${err.message}`);
+      console.error(`[options-system] ${symbol} failed: ${err.message}`);
     }
   }
-  return candidates;
+  return out;
 }
 
-module.exports = { generateCandidates, STRATEGY_ID, IVP_SHIELD_THRESHOLD, TRIGGERS };
+// "Heating up": coiled symbols still under their breakout level (cached analyses only).
+function proximity(latestPricesMap) {
+  const out = [];
+  for (const [symbol, s] of coils) {
+    const live = lookup(latestPricesMap, symbol);
+    if (!(live > 0) || live > s.rangeHigh) continue;
+    out.push({ symbol, strategyId: STRATEGY_ID, trigger: s.rangeHigh, distancePct: (s.rangeHigh - live) / live,
+      label: `Daily squeeze; call breakout above ${cents(s.rangeHigh)}` });
+  }
+  return out;
+}
+
+function takeBlocks() { const b = blocks; blocks = []; return b; }
+function reset() { coils.clear(); blocks = []; }
+
+module.exports = { generateCandidates, proximity, takeBlocks, reset, analyse, squeezeAt, STRATEGY_ID, CONFIG };

@@ -8,7 +8,8 @@
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
-const { grossPnl, optionsValueAt, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
+const { grossPnl, optionsSaleValue, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
+const { freshQuote } = require('../connectors/options-data');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -78,9 +79,14 @@ function discardOrder(candidateId) {
 
 // Gross P/L before fees, plus the per-share option value at exit (options only).
 // The maths lives in risk/scenarios.js, shared with the Setups view's previews.
+// A real contract with a fresh quote (options-data.js, refreshed by the pipeline
+// while it is held) is valued at its real BID; otherwise at the model's bid side.
 function grossPnlAt(pos, exitPrice) {
+  const od = pos.market === 'options' ? pos.optionsData : null;
+  const q = od && od.contract ? freshQuote(od.contract) : null;
+  if (q) return { grossPnl: (q.bid - od.debit) * od.multiplier * pos.positionSize, optionsExitValue: q.bid, optionsExitBasis: 'bid' };
   const result = { grossPnl: grossPnl(pos, pos.fillPrice, exitPrice) };
-  if (pos.market === 'options') result.optionsExitValue = optionsValueAt(pos.optionsData.legs, exitPrice);
+  if (od) Object.assign(result, { optionsExitValue: optionsSaleValue(od, exitPrice, Date.now()), optionsExitBasis: od.contract ? 'model' : 'intrinsic' });
   return result;
 }
 
@@ -93,7 +99,7 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
 
   // Compute everything before removing the position, so a failure leaves it open.
   const pos = activePositions[i];
-  const { grossPnl, optionsExitValue: exitValue } = grossPnlAt(pos, exitPrice);
+  const { grossPnl, optionsExitValue: exitValue, optionsExitBasis } = grossPnlAt(pos, exitPrice);
   // Broker-reconciled closes pass the broker's actual fees; real fill prices already
   // include slippage, so the estimate would double-count it.
   const fees = Number.isFinite(extra.actualFees)
@@ -112,7 +118,7 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
     netPnl,
     rMultiple: netPnl / pos.dollarRisk,
     ...extra,
-    ...(exitValue === undefined ? {} : { optionsExitValue: exitValue }),
+    ...(exitValue === undefined ? {} : { optionsExitValue: exitValue, optionsExitBasis }),
   };
   activePositions.splice(i, 1);
   tradeJournal.push(entry);
@@ -241,8 +247,10 @@ function unsaveSetup(candidateId) {
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
 const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
-// Open positions carry their fee model (derived, not stored) for live P/L marks.
-const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market) }));
+// Open positions carry their fee model (derived, not stored) for live P/L marks,
+// and real option contracts their latest fresh quote (optionQuote: { bid, ask, quoteTime }).
+const optionQuote = (p) => (p.market === 'options' && p.optionsData && p.optionsData.contract ? freshQuote(p.optionsData.contract) : null);
+const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market), optionQuote: optionQuote(p) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 const getSavedSetups = () => savedSetups.map((s) => ({ ...s }));
 

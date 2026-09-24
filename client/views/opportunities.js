@@ -14,6 +14,7 @@
   let subTab = 'setups';
   let activeId = null;
   const inFlight = new Set(); // ids with an APPROVE/REJECT awaiting the server
+  const closing = new Set(); // position ids with a CLOSE_POSITION awaiting the server (same id as the order)
   let notice = null;
   let noticeTimer = null;
   let mounted = null; // { container, state } of the last render, for local re-renders
@@ -24,7 +25,7 @@
     PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
     INVALIDATED: 'price is already through the stop and the setup was discarded',
     NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
-    LIVE_OPTIONS_UNSUPPORTED: 'live options execution is not supported yet (strikes are simulated). Nothing was sent; '
+    LIVE_OPTIONS_UNSUPPORTED: 'live options orders are not wired to Alpaca yet (the contract and prices are real; the order routing is not). Nothing was sent; '
       + 'the order is still pending (set Alpaca mode to Paper to fill it on paper)',
     ORDER_BUSY: 'an action for this order is already in progress',
     LIVE_CLOSE_UNSUPPORTED: 'it is a LIVE position: close it at the broker (its exits are orders there)',
@@ -75,17 +76,18 @@
 
   // HUD manual exit (paper only; the server refuses LIVE). Same confirm as Portfolio.
   function onClosePosition(p, m) {
-    if (!transport.isOnline() || inFlight.has(p.id)) return;
-    const est = m.gross === null ? 'Options are booked at their value at expiry for this underlying price.'
+    if (!transport.isOnline() || closing.has(p.id)) return;
+    const est = m.gross === null ? 'Options are booked at the contract’s real bid when a fresh quote exists, otherwise at its modelled bid.'
       : `Estimated P/L: ${m.gross >= 0 ? '+' : '−'}$${Math.abs(m.gross).toFixed(2)} gross${m.net === null ? '' : `, ${m.net >= 0 ? '+' : '−'}$${Math.abs(m.net).toFixed(2)} after fees`}.`;
     if (!window.confirm(`Manual exit: close ${p.direction.toUpperCase()} ${p.asset} (paper) now at the live price ${price(m.price, p)}?\n\n${est}\n\nThis overrides the stop and targets.`)) return;
-    inFlight.add(p.id);
+    closing.add(p.id);
     transport.send({ type: 'CLOSE_POSITION', id: p.id });
     rerender();
   }
 
   function actionFailed({ type, id, error }) {
     inFlight.delete(id);
+    closing.delete(id);
     const who = (mounted && mounted.state.pending.find((o) => o.id === id)) || { asset: String(id).split(':')[2] || id };
     showNotice(`${{ APPROVE: 'Approval', REJECT: 'Dismiss', CLOSE_POSITION: 'Close', SAVE_SETUP: 'Save', UNSAVE_SETUP: 'Remove bookmark' }[type] || 'Action'} failed for ${who.asset}: ${describe(error)}`);
   }
@@ -119,13 +121,17 @@
   // ---------- Setups workspace (3 columns, always) ----------
   function setups(state) {
     const real = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
-    for (const id of inFlight) if (!real.some((o) => o.id === id) && !(state.positions || []).some((p) => p.id === id)) inFlight.delete(id);
+    for (const id of inFlight) if (!real.some((o) => o.id === id)) inFlight.delete(id); // approved (now a position) or dismissed
+    for (const id of closing) if (!(state.positions || []).some((p) => p.id === id)) closing.delete(id); // closed
     const visible = real.filter((o) => matchesAsset(o.market)
       && matchesSearch(o.asset, SD.oppDetail.displaySymbol(o), o.setupType, o.strategyId, o.timeframe, o.thesis));
     const watch = SD.oppRail.watchList(state, { selected: watchSymbol, searching: !!search,
       keep: (sym) => watchMarketOk(marketOf(sym)) && matchesSearch(sym, sym.replace('-', '/'), SD.scannerData.nameOf(sym)) });
     const watchable = watch.symbols;
 
+    // An executed setup becomes a position: keep its chart (and HUD) on screen.
+    const executed = activeId && (state.positions || []).find((p) => p.id === activeId);
+    if (executed) { watchSymbol = executed.asset; activeId = null; manualWatch = true; }
     // Selection follows the filters: never keep something the filters hide.
     if (!visible.some((o) => o.id === activeId)) activeId = !manualWatch && visible.length ? visible[0].id : null;
     if (!activeId && !watchable.includes(watchSymbol) && watchable.length) watchSymbol = watchable[0];
@@ -144,7 +150,7 @@
       onApprove,
       onDismiss,
       onClosePosition,
-      closing: inFlight,
+      closing,
       isSaved,
       onToggleSave,
       onPickSymbol,

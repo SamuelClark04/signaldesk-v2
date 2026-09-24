@@ -27,8 +27,15 @@
       : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
     if (!(livePrice > 0)) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
     if (p.market === 'options') {
-      return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null,
-        underlyingMove: livePrice / p.fillPrice - 1 };
+      const underlyingMove = livePrice / p.fillPrice - 1;
+      const q = p.optionQuote; // real contract: its latest fresh quote, sold at the bid
+      if (q && q.bid > 0 && p.optionsData) {
+        const gross = (q.bid - p.optionsData.debit) * p.optionsData.multiplier * p.positionSize;
+        const fees = exitFees(livePrice);
+        return { live: true, price: livePrice, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
+          pctGross: cost > 0 ? gross / cost : null, r: p.dollarRisk > 0 ? gross / p.dollarRisk : null, underlyingMove, optionBid: q.bid };
+      }
+      return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null, underlyingMove };
     }
     const sign = p.direction === 'short' ? -1 : 1;
     const gross = (livePrice - p.fillPrice) * p.positionSize * sign;

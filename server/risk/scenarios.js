@@ -2,6 +2,7 @@
 // scenario shown before approval is computed exactly like the trade would be
 // booked. Pure functions: no state, no I/O.
 const { estimateRoundTripFees, getRoundTripRate } = require('./cost-authority');
+const { exitValue, modelled } = require('./option-pricing');
 
 // Options value per share of underlying: each leg's intrinsic value at the
 // underlying price (buy legs +, sell legs -). Intrinsic ignores remaining time
@@ -16,15 +17,20 @@ function optionsValueAt(legs, underlyingPrice) {
   }, 0);
 }
 
+// Per-share value an option position would sell for at underlying price S:
+// real-contract positions (IV + expiration) via option-pricing.js at time `at`;
+// older positions at intrinsic value.
+const optionsSaleValue = (od, S, at) => (modelled(od) ? exitValue(od, S, at) : optionsValueAt(od.legs, S));
+
 // Gross P/L (before fees) of `pos` entered at `entryPrice`, exited at `exitPrice`
-// (always the UNDERLYING price for options).
-function grossPnl(pos, entryPrice, exitPrice) {
+// (always the UNDERLYING price for options; the premium paid is the debit).
+function grossPnl(pos, entryPrice, exitPrice, at = Date.now()) {
   if (pos.market !== 'options') {
     const sign = pos.direction === 'short' ? -1 : 1;
     return (exitPrice - entryPrice) * pos.positionSize * sign;
   }
-  const { debit, multiplier, legs } = pos.optionsData;
-  return (optionsValueAt(legs, exitPrice) - debit) * multiplier * pos.positionSize;
+  const { debit, multiplier } = pos.optionsData;
+  return (optionsSaleValue(pos.optionsData, exitPrice, at) - debit) * multiplier * pos.positionSize;
 }
 
 // Price scenarios for a sized order at its worst-case entry: stop, T1, T2.
@@ -72,4 +78,4 @@ function feeModel(market) {
   return { legRate: getRoundTripRate(market) / 2 };
 }
 
-module.exports = { optionsValueAt, grossPnl, priceScenarios, costBreakdown, feeModel };
+module.exports = { optionsValueAt, optionsSaleValue, grossPnl, priceScenarios, costBreakdown, feeModel };

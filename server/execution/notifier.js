@@ -45,7 +45,8 @@ function detailRows(o) {
   ];
   if (o.optionsData) {
     const legs = (o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ');
-    rows.push(['Options', `${legs} for ${o.optionsData.debit} debit`]);
+    rows.push(['Options', o.optionsData.contract ? `${o.optionsData.contract} at ${o.optionsData.debit} ask (bid ${o.optionsData.bid}), ${o.optionsData.dte} DTE, delta ${Number(o.optionsData.delta).toFixed(2)}`
+      : `${legs} for ${o.optionsData.debit} debit`]);
   }
   if (o.catalyst && o.catalyst.headline) rows.push(['Catalyst', `${o.catalyst.headline} (${o.catalyst.sentimentScore})`]);
   return rows;

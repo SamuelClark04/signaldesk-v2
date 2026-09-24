@@ -127,11 +127,24 @@
   // setups fall back to their strategy's defaults.
   const DURATION = {
     'equity-day': ['Day Trade', '1-4 hours (closed by the end of the session)'], 'crypto-swing': ['Swing Trade', '2-7 days'],
-    'equity-swing': ['Swing Trade', '3-10 days'], 'options-system': ['Options Swing', 'Days to weeks (until expiry)'],
+    'equity-swing': ['Swing Trade', '3-10 days'], 'options-system': ['Options Swing', '5-15 trading days (exit well before expiry)'],
   };
   function holdChip(o) {
     const [type, dur] = o.tradeType ? [o.tradeType, o.expectedDuration] : DURATION[o.strategyId] || [];
     return type ? el('div', { className: 'opp-hold' }, [el('strong', { textContent: type }), ` · expected hold ${dur}`]) : null;
+  }
+
+  // Options: the real contract (Phase 37) or, for older setups, the legs + debit.
+  // Entry, stop and targets above are UNDERLYING prices; the premium is per share.
+  function optionRows(od) {
+    if (!od.contract) return [kv('Structure', `${(od.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${od.debit} debit`)];
+    const exp = new Date(`${od.expiration}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    return [
+      kv('Contract', `${od.contract} (${exp} ${od.strike}C)`),
+      kv('Premium (ask / bid)', `${od.ask} / ${od.bid} · $${(od.ask * od.multiplier).toFixed(0)} per contract`),
+      kv('DTE · delta · IV', `${od.dte} days · ${Number(od.delta).toFixed(2)} · ${(od.iv * 100).toFixed(1)}%`),
+      kv('Option at stop / T1 (bid)', `${od.valueAtStop} / ${od.valueAtTarget} (modelled)`),
+    ];
   }
 
   const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity' };
@@ -189,7 +202,7 @@
     const live = ctx.settings && modeKey && ctx.settings[modeKey] === 'live';
     const liveOptions = live && o.market === 'options';
     let label = live ? `Execute live on ${broker}` : 'Start paper tracking';
-    if (liveOptions) label = 'Live options not supported';
+    if (liveOptions) label = 'Live options orders not wired yet';
     const wrongSizing = sizing(o, ctx).mismatch;
     if (wrongSizing) label = `Sized for ${sizing(o, ctx).basis === 'paper' ? 'paper' : 'another venue'}: dismiss & re-scan`;
     if (ctx.busy) label = 'Sending…';
@@ -249,7 +262,7 @@
         kv('Invalidation (stop)', lv(() => px(o.invalidation, o)), ready ? 'text-short' : ''),
         kv('Take profit 1 (T1)', lv(() => (t[0] ? px(t[0].price, o) : '—')), ready ? 'text-long' : ''),
         kv('Take profit 2 (T2)', lv(() => (t[1] ? px(t[1].price, o) : '—')), ready ? 'text-long' : ''),
-        ...(ready && o.optionsData ? [kv('Structure', `${(o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${o.optionsData.debit} debit`)] : []),
+        ...(ready && o.optionsData ? optionRows(o.optionsData) : []),
       ]),
       moneyGroup(o, ctx, ready),
       el('div', { className: 'opp-kv-group' }, [

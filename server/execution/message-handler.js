@@ -19,8 +19,9 @@ const { suggestLevels } = require('../risk/adoption-levels');
 const newsSentiment = require('../connectors/news-sentiment');
 
 // Execution venue per market: which mode setting governs it, and which broker
-// connector places LIVE orders. Options have no live path yet: their strikes and
-// debit are simulated, and a stock bracket on the underlying would buy SHARES.
+// connector places LIVE orders. Options have no live path yet: the contract and
+// premium are real (options-data.js), but no option order routing exists, and a
+// stock bracket on the underlying would buy SHARES.
 const VENUES = {
   stocks: { modeKey: 'stockMode', broker: 'Alpaca', api: alpacaApi },
   options: { modeKey: 'stockMode', broker: 'Alpaca', api: null },

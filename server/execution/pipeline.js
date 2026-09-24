@@ -18,6 +18,7 @@ const { recordRejection } = require('./rejection-stats');
 const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
+const optionsData = require('../connectors/options-data');
 
 const PIPELINE_INTERVAL_MS = 60000;
 
@@ -86,7 +87,7 @@ async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
+  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) against the capital of the venue it would execute
   // on: the paper bankroll, or the LIVE broker account (cached ~60 s).
@@ -139,6 +140,13 @@ async function pipelinePass() {
 
   let positionsChanged = false;
   let journalChanged = false;
+  // Held option contracts: one quote request per pass (only while any are open),
+  // so marks and paper exits use the real bid. Re-sent every pass while held.
+  const held = ledger.getActivePositions().filter((p) => p.market === 'options' && p.optionsData && p.optionsData.contract);
+  if (held.length) {
+    await optionsData.refreshQuotes(held.map((p) => p.optionsData.contract));
+    positionsChanged = true;
+  }
   const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `
     + `net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)${t.exitLeg ? ` via ${t.exitLeg}` : ''}`);
   try {

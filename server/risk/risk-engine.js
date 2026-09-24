@@ -3,13 +3,18 @@
 // Approved results are frozen and registered, so the ledger can refuse anything
 // that did not come through here.
 //   stocks/crypto: size = risk budget / (entry - stop), capped by bankroll notional
-//   options:       size = floor(risk budget / (debit x multiplier)) contracts;
-//                  max loss is the debit paid, so dollarRisk = contracts x debit x multiplier
+//   options:       real contracts carry riskPerShare = ask paid - the bid the
+//                  option is modelled to fetch at the underlying stop, so
+//                  size = floor(risk budget / (riskPerShare x multiplier)) contracts,
+//                  also capped so the WHOLE premium (the loss if the stop is gapped
+//                  or the option decays to zero) is at most MAX_PREMIUM_R x budget.
+//                  Without riskPerShare, the whole debit is the risk (old setups).
 const { evaluateCosts } = require('./cost-authority');
 
 const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
 const MARKETS = ['crypto', 'stocks', 'options'];
+const MAX_PREMIUM_R = 3; // full-premium loss capped at 3x the per-trade risk budget
 const approvedOrders = new WeakSet();
 
 function reject(candidate, reason, extra = {}) {
@@ -27,6 +32,7 @@ function validate(c) {
   if (c.market === 'options') {
     const o = c.optionsData;
     if (!o || !(o.debit > 0) || !(o.multiplier > 0)) return 'Options candidate needs optionsData.debit and multiplier';
+    if (o.riskPerShare !== undefined && !(o.riskPerShare > 0 && o.riskPerShare <= o.debit)) return 'Options riskPerShare must be > 0 and at most the debit';
   }
   return null;
 }
@@ -56,16 +62,21 @@ function sizeLinear(candidate, bankroll, riskBudget, maxLeverage, entryPrice, st
   };
 }
 
-// Options (long premium): the most that can be lost is the debit paid.
-function sizeOptions(candidate, riskBudget) {
-  const { debit, multiplier } = candidate.optionsData;
-  const costPerContract = debit * multiplier;
-  const positionSize = Math.floor(riskBudget / costPerContract);
+// Options (long premium), sized on the real premium: risk to the stop per
+// contract, and the whole premium capped at MAX_PREMIUM_R budgets and the bankroll.
+function sizeOptions(candidate, riskBudget, bankroll, maxLeverage) {
+  const { debit, multiplier, riskPerShare } = candidate.optionsData;
+  const premiumPerContract = debit * multiplier;
+  const riskPerContract = (riskPerShare || debit) * multiplier;
+  const byRisk = Math.floor(riskBudget / riskPerContract);
+  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * maxLeverage) / premiumPerContract);
+  const positionSize = Math.min(byRisk, byPremium);
   if (positionSize < 1) {
-    return { error: `Bankroll too small: one contract risks $${costPerContract.toFixed(2)}, budget is $${riskBudget.toFixed(2)}` };
+    return { error: byRisk < 1
+      ? `Bankroll too small: one contract risks $${riskPerContract.toFixed(2)} to the stop, budget is $${riskBudget.toFixed(2)}`
+      : `Bankroll too small: one contract's premium $${premiumPerContract.toFixed(2)} exceeds ${MAX_PREMIUM_R}x the $${riskBudget.toFixed(2)} risk budget` };
   }
-  const premium = positionSize * costPerContract;
-  return { positionSize, dollarRisk: premium, notional: premium, cappedByNotional: false };
+  return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk };
 }
 
 function processCandidate(candidate, configuredBankroll, options = {}) {
@@ -84,7 +95,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   const riskBudget = configuredBankroll * riskPct;
   const sizing = candidate.market === 'options'
-    ? sizeOptions(candidate, riskBudget)
+    ? sizeOptions(candidate, riskBudget, configuredBankroll, maxLeverage)
     : sizeLinear(candidate, configuredBankroll, riskBudget, maxLeverage, entryPrice, stopDistance);
   if (sizing.error) return reject(candidate, sizing.error);
 
@@ -117,4 +128,4 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT };
+module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R };

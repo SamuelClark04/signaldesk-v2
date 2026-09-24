@@ -29,8 +29,12 @@ const ROUND_TRIP_COST_RATE = {
   stocks: 0.0010, // slippage, both legs
 };
 
-// Options are costed per contract, not per notional: flat fees + slippage, both legs.
-const OPTIONS_ROUND_TRIP_PER_CONTRACT = 3.00;
+// Options are costed per contract. Alpaca charges no options commission; this
+// covers the pass-through regulatory/clearing fees, both legs (conservative).
+// The bid/ask spread is NOT in here: real-contract setups are bought at the ask
+// and valued at the bid (option-pricing.js), so the spread is already in P/L.
+// The cost gate adds it on top (see evaluateCosts) to screen out wide markets.
+const OPTIONS_ROUND_TRIP_PER_CONTRACT = 0.20;
 
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
 
@@ -58,7 +62,11 @@ function evaluateCosts(candidate, dollarRisk) {
     return { approved: false, reason: `Unknown market: ${candidate.market}`, feeDrag: null };
   }
 
-  const estimatedFees = estimateRoundTripFees(candidate.market, candidate.positionSize, candidate.entryPrice);
+  // Options with a real quote: the round-trip spread cost (buy at the ask, sell
+  // at the bid) counts as a cost against 1R too, like slippage for crypto.
+  const od = candidate.market === 'options' ? candidate.optionsData : null;
+  const spreadCost = od && od.ask > od.bid && od.bid > 0 ? (od.ask - od.bid) * od.multiplier * candidate.positionSize : 0;
+  const estimatedFees = estimateRoundTripFees(candidate.market, candidate.positionSize, candidate.entryPrice) + spreadCost;
   const feeDrag = estimatedFees / dollarRisk;
 
   if (feeDrag > MAX_FEE_DRAG) {
