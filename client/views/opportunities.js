@@ -92,10 +92,46 @@
     return btn;
   }
 
+  // ---------- Filters (one shared state drives the rail toggle and the top tabs) ----------
+  let assetFilter = 'all'; // 'all' | 'stocks' | 'crypto' | 'options'
+  let search = ''; // lower-cased, for matching
+  let searchRaw = ''; // exactly as typed, for the input box
+  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto']];
+  const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options (Lab)']];
+
+  const matchesAsset = (market) => assetFilter === 'all' || market === assetFilter;
+  // Options trade on stock underlyings, so the Options filter watches stocks.
+  const watchMarketOk = (market) => assetFilter === 'all' || market === (assetFilter === 'options' ? 'stocks' : assetFilter);
+  const matchesSearch = (...fields) => !search || fields.some((f) => String(f || '').toLowerCase().includes(search));
+
+  function setFilter(value) {
+    assetFilter = value;
+    rerender();
+  }
+
+  function segmented(options, current, className, onPick) {
+    const group = el('div', { className }, options.map(([value, label]) => {
+      const b = el('button', { type: 'button', className: `opp-seg${value === current ? ' is-active' : ''}`, textContent: label });
+      b.setAttribute('aria-pressed', String(value === current));
+      b.onclick = () => onPick(value);
+      return b;
+    }));
+    group.setAttribute('role', 'group');
+    return group;
+  }
+
+  function searchBox() {
+    const input = el('input', { type: 'search', className: 'opp-search', placeholder: 'Search setups...', value: searchRaw, id: 'opp-search' });
+    input.setAttribute('aria-label', 'Search setups and symbols');
+    input.addEventListener('input', () => { search = input.value.trim().toLowerCase(); searchRaw = input.value; rerender(); });
+    return el('label', { className: 'opp-search-wrap' }, input);
+  }
+
   // Every symbol with a live source: the default, the watchlist, then any streamed price.
   function watchSymbols(state) {
     const fromWatchlist = (state.watchlist || []).map((w) => w.symbol);
-    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {})])];
+    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {})])]
+      .filter((s) => watchMarketOk(marketOf(s)) && matchesSearch(s, s.replace('-', '/')));
   }
 
   function watchButton(symbol, state, active) {
@@ -114,16 +150,30 @@
   function setups(state) {
     const real = [...state.pending].sort((a, b) => b.stagedAt - a.stagedAt);
     for (const id of inFlight) if (!real.some((o) => o.id === id)) inFlight.delete(id);
-    if (!real.some((o) => o.id === activeId)) activeId = !manualWatch && real.length ? real[0].id : null;
-    const active = real.find((o) => o.id === activeId) || marketWatch(watchSymbol);
+    const visible = real.filter((o) => matchesAsset(o.market)
+      && matchesSearch(o.asset, SD.oppDetail.displaySymbol(o), o.setupType, o.strategyId, o.timeframe, o.thesis));
+    const watchable = watchSymbols(state);
 
+    // Selection follows the filters: never keep something the filters hide.
+    if (!visible.some((o) => o.id === activeId)) activeId = !manualWatch && visible.length ? visible[0].id : null;
+    if (!activeId && !watchable.includes(watchSymbol) && watchable.length) watchSymbol = watchable[0];
+    const active = visible.find((o) => o.id === activeId) || marketWatch(watchSymbol);
+
+    const filtered = assetFilter !== 'all' || search;
+    const emptyText = real.length
+      ? 'No setups match these filters.'
+      : 'No setups pending. Watching the market until a strategy proposes one.';
     const rail = el('aside', { className: 'opp-rail' }, [
+      searchBox(),
+      segmented(RAIL_TOGGLE, assetFilter === 'options' ? null : assetFilter, 'opp-segmented', setFilter),
       el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Queue' }),
-        el('span', { className: 'count', textContent: String(real.length) })]),
-      ...(real.length ? real.map((o) => railCard(o, o.id === activeId))
-        : [el('p', { className: 'opp-muted', textContent: 'No setups pending. Watching the market until a strategy proposes one.' })]),
+        el('span', { className: 'count', textContent: filtered ? `${visible.length} / ${real.length}` : String(real.length) })]),
+      ...(visible.length ? visible.map((o) => railCard(o, o.id === activeId))
+        : [el('p', { className: 'opp-muted', textContent: emptyText })]),
       el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch' }),
-      el('div', { className: 'opp-watchlist' }, watchSymbols(state).map((s) => watchButton(s, state, active.isWatch && s === watchSymbol))),
+      el('div', { className: 'opp-watchlist' }, watchable.length
+        ? watchable.map((s) => watchButton(s, state, active.isWatch && s === watchSymbol))
+        : [el('p', { className: 'opp-muted', textContent: 'No symbols match.' })]),
     ]);
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
@@ -143,17 +193,30 @@
 
   function render(container, state) {
     mounted = { container, state };
+    // Re-renders replace the DOM (every keystroke, every price tick): keep the
+    // search box focused with the caret where it was.
+    const focused = document.activeElement && document.activeElement.id === 'opp-search';
+    const caret = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+
     const tabs = el('div', { className: 'opp-subnav' }, ['setups', 'scanner', 'saved'].map((t) => {
       const b = el('button', { type: 'button', className: `opp-subtab${t === subTab ? ' is-active' : ''}`, textContent: t[0].toUpperCase() + t.slice(1) });
       b.setAttribute('aria-pressed', String(t === subTab));
       b.onclick = () => { subTab = t; rerender(); };
       return b;
     }));
+    // Top-right asset tabs: clicking the active tab again clears the filter.
+    const assetTabs = segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
     container.replaceChildren(
-      tabs,
+      el('div', { className: 'opp-toolbar' }, [tabs, assetTabs]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
       subTab === 'setups' ? setups(state) : el('div', { className: 'placeholder', textContent: PLACEHOLDER[subTab] }),
     );
+
+    const input = container.querySelector('#opp-search');
+    if (input && focused) {
+      input.focus();
+      input.setSelectionRange(caret[0], caret[1]);
+    }
   }
 
   // Keep "staged N ago" fresh while the tab is on screen.
