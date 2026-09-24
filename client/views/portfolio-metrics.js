@@ -24,8 +24,10 @@
     if (p.execution === 'BROKER') return markBroker(p, livePrice);
     const cost = costBasis(p);
     const fm = p.feeModel || {};
+    // Entry leg at its own rate (maker for a paper limit entry), exit at market (taker).
     const exitFees = (x) => (fm.perContractRoundTrip ? fm.perContractRoundTrip * p.positionSize
-      : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
+      : fm.exitRate ? p.positionSize * ((fm.entryRate ?? fm.exitRate) * p.fillPrice + fm.exitRate * x)
+        : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
     if (p.market === 'options' && p.optionsData && p.optionsData.contract) return markOption(p, livePrice, cost, exitFees);
     if (!(livePrice > 0)) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
     if (p.market === 'options') { // older setups (no real contract): only the underlying's move is known

@@ -47,7 +47,7 @@
       pnl,
     ]);
     btn.title = m.optionBasis
-      ? `${venue} ${p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : 'modelled'}) vs ${p.optionsData.debit} paid · P/L before fees`
+      ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : 'modelled'}) vs ${p.optionsData.debit} paid · P/L before fees`
       : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));
     btn.onclick = () => view.onOpenPosition(p);

@@ -7,10 +7,14 @@
 //            high in the ~100 days of history the strategies load
 //   moderate crypto swing targets 2R; resistance only from the last 30 days,
 //            so older tops no longer veto a setup
+// Resistance under the target (risk/target-plan.js): the setup is kept when the
+// level is at least snapMinR above entry (strict 1.75R, moderate 1.35R): T1
+// (half the position) snaps just under it, T2 (the runner) keeps the full
+// target, and the blended NET reward must still reach minNetR.
 // No saved choice, or an unknown one, is strict: fail safe, never looser.
 const LEVELS = Object.freeze({
-  strict: Object.freeze({ level: 'strict', label: 'Strict (Institutional)', targetR: 3, resistanceLookbackDays: null }),
-  moderate: Object.freeze({ level: 'moderate', label: 'Moderate (Active Trader)', targetR: 2, resistanceLookbackDays: 30 }),
+  strict: Object.freeze({ level: 'strict', label: 'Strict (Institutional)', targetR: 3, resistanceLookbackDays: null, snapMinR: 1.75, minNetR: 1.75 }),
+  moderate: Object.freeze({ level: 'moderate', label: 'Moderate (Active Trader)', targetR: 2, resistanceLookbackDays: 30, snapMinR: 1.35, minNetR: 1.25 }),
 });
 const DEFAULT_LEVEL = 'strict';
 

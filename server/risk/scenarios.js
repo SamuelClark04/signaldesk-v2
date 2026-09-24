@@ -1,7 +1,7 @@
 // P/L maths shared by the ledger (bookings) and the Setups view (previews), so a
 // scenario shown before approval is computed exactly like the trade would be
 // booked. Pure functions: no state, no I/O.
-const { estimateRoundTripFees, getRoundTripRate } = require('./cost-authority');
+const { estimateRoundTripFees, legRate } = require('./cost-authority');
 const { exitValue, modelled } = require('./option-pricing');
 
 // Options value per share of underlying: each leg's intrinsic value at the
@@ -33,29 +33,46 @@ function grossPnl(pos, entryPrice, exitPrice, at = Date.now()) {
   return (optionsSaleValue(pos.optionsData, exitPrice, at) - debit) * multiplier * pos.positionSize;
 }
 
-// Price scenarios for a sized order at its worst-case entry: stop, T1, T2.
-// Each: { price, gross, fees, net, r }. Missing levels are omitted.
+// Fee legs of an exit: a target is a resting limit (maker), anything else
+// (stop, manual close) crosses the spread (taker). Entry: as the order was sized.
+const feeLegs = (order, exitKind) => ({ entry: order.entryLiquidity, exit: exitKind === 'target' ? 'maker' : 'taker',
+  optionLegs: order.optionsData && order.optionsData.legs ? order.optionsData.legs.length : 1 });
+
+// Price scenarios for a sized order at its worst-case entry: stop, T1, T2, and
+// `plan`: the blended result of the target plan (T1's allocation exits at T1,
+// the rest at T2). Each: { price, gross, fees, net, r }. Missing levels are omitted.
 function priceScenarios(order) {
   const entry = order.entryPrice;
+  const targets = order.targets || [];
   const levels = [
-    ['stop', order.invalidation],
-    ['t1', order.targets && order.targets[0] && order.targets[0].price],
-    ['t2', order.targets && order.targets[1] && order.targets[1].price],
+    ['stop', order.invalidation, 'stop'],
+    ['t1', targets[0] && targets[0].price, 'target'],
+    ['t2', targets[1] && targets[1].price, 'target'],
   ];
   const out = {};
-  for (const [name, price] of levels) {
+  // Options that exit on their own value (optionsData.exitRule, System 5): the
+  // planned stop / T1 values ARE the exits, whatever the underlying does meanwhile.
+  const od = order.market === 'options' ? order.optionsData : null;
+  const rule = od && od.exitRule;
+  const ruleValue = rule ? { stop: rule.stopValue, t1: rule.targetValue } : {};
+  for (const [name, price, kind] of levels) {
     if (!(price > 0) || !(entry > 0) || !(order.positionSize > 0)) continue;
-    const gross = grossPnl(order, entry, price);
-    const fees = estimateRoundTripFees(order.market, order.positionSize, entry, price);
+    const gross = ruleValue[name] > 0 ? (ruleValue[name] - od.debit) * od.multiplier * order.positionSize : grossPnl(order, entry, price);
+    const fees = estimateRoundTripFees(order.market, order.positionSize, entry, price, feeLegs(order, kind));
     const net = gross - fees;
     out[name] = { price, gross, fees, net, r: order.dollarRisk > 0 ? net / order.dollarRisk : null };
+  }
+  const a1 = targets[0] && targets[0].allocation;
+  if (out.t1 && out.t2 && a1 > 0 && a1 < 1) {
+    const mix = (k) => a1 * out.t1[k] + (1 - a1) * out.t2[k];
+    out.plan = { allocation: a1, gross: mix('gross'), fees: mix('fees'), net: mix('net'), r: order.dollarRisk > 0 ? mix('net') / order.dollarRisk : null };
   }
   return out;
 }
 
 // Cost breakdown for the Setups panel, from the same fee model as the ledger:
-// { entry, exitT1, breakEvenPct }. The round-trip rate is split evenly across
-// the two legs (k per leg), so a long breaks even at entry*(1+k)/(1-k).
+// { entry, exitT1, breakEvenPct }. A long exiting at a target (maker) breaks
+// even at entry*(1+kIn)/(1-kOut).
 // Options are costed per contract; their break-even depends on the legs: null.
 function costBreakdown(order) {
   const q = order.positionSize;
@@ -63,19 +80,22 @@ function costBreakdown(order) {
   const t1 = order.targets && order.targets[0] && order.targets[0].price;
   if (!(q > 0) || !(e > 0)) return null;
   if (order.market === 'options') {
-    const perLeg = estimateRoundTripFees('options', q) / 2;
+    const perLeg = estimateRoundTripFees('options', q, 0, 0, feeLegs(order, 'target')) / 2;
     return { entry: perLeg, exitT1: t1 > 0 ? perLeg : null, breakEvenPct: null };
   }
-  const k = getRoundTripRate(order.market) / 2;
-  const breakEvenPct = order.direction === 'short' ? 1 - (1 - k) / (1 + k) : (1 + k) / (1 - k) - 1;
-  return { entry: k * q * e, exitT1: t1 > 0 ? k * q * t1 : null, breakEvenPct };
+  const kIn = legRate(order.market, order.entryLiquidity);
+  const kOut = legRate(order.market, 'maker');
+  const breakEvenPct = order.direction === 'short' ? 1 - (1 - kOut) / (1 + kIn) : (1 + kIn) / (1 - kOut) - 1;
+  return { entry: kIn * q * e, exitT1: t1 > 0 ? kOut * q * t1 : null, breakEvenPct };
 }
 
 // The fee model behind estimateRoundTripFees, for client-side marks: fees at an
-// exit price x are legRate * size * (fill + x); options pay a flat round trip.
-function feeModel(market) {
-  if (market === 'options') return { perContractRoundTrip: estimateRoundTripFees('options', 1) };
-  return { legRate: getRoundTripRate(market) / 2 };
+// exit price x are entryRate * size * fill + exitRate * size * x, where the exit
+// is a market close (taker). legRate: the all-taker per-leg rate (older clients).
+// Options pay a flat round trip per contract and leg.
+function feeModel(market, entryLiquidity, optionLegs = 1) {
+  if (market === 'options') return { perContractRoundTrip: estimateRoundTripFees('options', 1, 0, 0, { optionLegs }) };
+  return { entryRate: legRate(market, entryLiquidity), exitRate: legRate(market, 'taker'), legRate: legRate(market, 'taker') };
 }
 
-module.exports = { optionsValueAt, optionsSaleValue, grossPnl, priceScenarios, costBreakdown, feeModel };
+module.exports = { optionsValueAt, optionsSaleValue, grossPnl, priceScenarios, costBreakdown, feeModel, feeLegs };

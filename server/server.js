@@ -33,6 +33,7 @@ const { buildIntelligence } = require('./intelligence/dashboard-intel');
 // LAN_ACCESS=true opens it to the Wi-Fi. See security/access-policy.js.
 const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = require('./security/access-policy');
 const authGate = require('./security/auth-gate');
+const tunnel = require('./security/tunnel'); // Cloudflare quick tunnel (TUNNEL=off disables)
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -147,6 +148,7 @@ function start() {
 }
 
 function shutdown() {
+  tunnel.stop();
   stopPipeline();
   referencePrices.stop();
   clearInterval(heartbeat);
@@ -174,6 +176,7 @@ function banner() {
 server.listen(PORT, HOST, () => {
   console.log(`SignalDesk-V2 listening on http://${HOST}:${PORT}`);
   banner();
+  tunnel.start(PORT);
   if (LAN_ACCESS) {
     const urls = lanUrls(PORT);
     console.warn('[security] LAN ACCESS ON: devices on your network can reach this terminal with the access token.');

@@ -22,7 +22,7 @@
   function contractName(p) {
     const od = p.optionsData;
     const exp = new Date(`${od.expiration}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-    return `${od.underlying || p.asset} ${od.strike}${od.type === 'put' ? 'P' : 'C'} · ${exp}`;
+    return `${od.underlying || p.asset} ${od.strike}${od.shortStrike ? `/${od.shortStrike}` : ''}${od.type === 'put' ? 'P' : 'C'} · ${exp}`;
   }
 
   // Premium + P&L block for a real option contract (m from portfolioMetrics.mark).

@@ -178,7 +178,18 @@
     return card('Portfolio attention', updatedAt(intel), body);
   }
 
-  // Real: server watchlist (WATCHLIST_UPDATED); last price refreshed each pipeline pass.
+  // Real: server watchlist (WATCHLIST_UPDATED). Each symbol's trigger is LIVE: the
+  // nearest real level to its price (20-day high, 20-day SMA, VWAP, 1h mean,
+  // strategy triggers), recomputed every pipeline pass (watch-triggers.js).
+  function triggerCell(w) {
+    const t = w.trigger;
+    if (!t) return el('td', { className: 'today-muted', textContent: w.lastPrice > 0 ? 'Computing from live bars…' : 'Waiting for a price' });
+    const cell = el('td', {}, [el('span', { textContent: t.label }),
+      ...(w.triggerCondition ? [el('span', { className: 'today-note', textContent: ` · ${w.triggerCondition}` })] : [])]);
+    cell.title = `${t.source} · level ${t.level} vs ${t.live ? 'live' : 'last'} price ${t.price} · computed ${new Date(t.at).toLocaleTimeString()}`;
+    return cell;
+  }
+
   function watching(state) {
     const items = state.watchlist || [];
     const body = !state.watchlist
@@ -186,10 +197,12 @@
       : !items.length
         ? el('p', { className: 'today-empty', textContent: 'No tickers actively watched' })
         : el('table', { className: 'data-table today-mini' }, [
-          el('thead', {}, el('tr', {}, ['Symbol', 'Trigger', 'Last'].map((h, i) => el('th', { textContent: h, className: i === 2 ? 'num' : '' })))),
+          el('thead', {}, el('tr', {}, ['Symbol', 'Live trigger', 'Distance', 'Last'].map((h, i) => el('th', { textContent: h, className: i >= 2 ? 'num' : '' })))),
           el('tbody', {}, items.map((w) => el('tr', {}, [
             el('td', { className: 'asset', textContent: w.symbol }),
-            el('td', { textContent: w.triggerCondition }),
+            triggerCell(w),
+            el('td', { className: `num ${w.trigger ? (Math.abs(w.trigger.distancePct) <= 0.015 ? 'text-long' : '') : ''}`, textContent: w.trigger ? pct(w.trigger.distancePct) : '—',
+              title: w.trigger ? `${w.trigger.distancePct >= 0 ? 'above' : 'below'} the current price` : '' }),
             el('td', {
               className: 'num',
               textContent: w.lastPrice > 0 ? price(w.lastPrice, { market: w.market, entryPrice: w.lastPrice }) : '—',

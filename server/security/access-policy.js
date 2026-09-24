@@ -54,6 +54,10 @@ const isLoopbackHost = (host) => host === 'localhost' || host === '127.0.0.1';
 const EXTRA_ORIGINS = new Set([process.env.APP_PUBLIC_URL, ...String(process.env.ALLOWED_ORIGINS || '').split(',')]
   .map((u) => { try { return new URL(String(u).trim()).origin; } catch { return null; } }).filter(Boolean));
 
+// Runtime additions: the Cloudflare quick tunnel's address, learned at startup (tunnel.js).
+function addAllowedOrigin(url) { try { EXTRA_ORIGINS.add(new URL(url).origin); } catch { /* not a URL */ } }
+function removeAllowedOrigin(url) { try { EXTRA_ORIGINS.delete(new URL(url).origin); } catch { /* not a URL */ } }
+
 // The page's origin: exactly http://<local or LAN host>:<port>, or a configured public origin.
 function isAllowedOrigin(origin, port) {
   if (!origin) return false;
@@ -112,4 +116,4 @@ function lanUrls(port) {
 }
 
 module.exports = { HOST, LAN_ACCESS, COOKIE, SESSION, TOKEN_GENERATED, checkUpgrade, checkHttp, hasSession, tokenMatches,
-  isAllowedOrigin, isPrivateIPv4, lanUrls, generatedToken: () => (TOKEN_GENERATED ? TOKEN : null) };
+  isAllowedOrigin, addAllowedOrigin, removeAllowedOrigin, isPrivateIPv4, lanUrls, generatedToken: () => (TOKEN_GENERATED ? TOKEN : null) };

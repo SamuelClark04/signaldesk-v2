@@ -36,10 +36,11 @@ const yearsLeft = (od, at) => (od && od.expiration ? Math.max(0, (expiryMs(od.ex
 const modelled = (od) => !!(od && od.expiration && od.iv > 0);
 
 // Raw model value per share of the whole position (all legs) at underlying S.
+// Each leg at its own IV when it has one (vertical spreads), else the position's.
 function rawModel(od, S, at) {
   const T = yearsLeft(od, at);
   return (od.legs || []).reduce((sum, leg) => {
-    const v = modelled(od) ? blackScholes(leg.type, S, leg.strike, T, od.iv) : (leg.type === 'put' ? Math.max(0, leg.strike - S) : Math.max(0, S - leg.strike));
+    const v = modelled(od) ? blackScholes(leg.type, S, leg.strike, T, leg.iv > 0 ? leg.iv : od.iv) : (leg.type === 'put' ? Math.max(0, leg.strike - S) : Math.max(0, S - leg.strike));
     return sum + (leg.side === 'sell' ? -1 : 1) * (leg.ratio || 1) * v;
   }, 0);
 }
@@ -52,7 +53,8 @@ function modelMid(od, S, at = Date.now()) {
 }
 
 // What selling the position would fetch per share at underlying S: the mid
-// less half the entry spread (the bid side), never below zero.
+// less half the entry spread (the bid side; for a spread, half the net
+// bid/ask), never below zero.
 function exitValue(od, S, at = Date.now()) {
   const half = modelled(od) && od.spread > 0 ? od.spread / 2 : 0;
   return Math.max(0, modelMid(od, S, at) - half);

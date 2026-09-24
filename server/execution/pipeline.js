@@ -13,6 +13,7 @@ const { processCandidate } = require('../risk/risk-engine');
 const strictness = require('../risk/strictness');
 const { sizingBankroll } = require('../risk/venue-capital');
 const { computeProximity } = require('../intelligence/trigger-proximity');
+const { computeTriggers } = require('../intelligence/watch-triggers');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
@@ -22,6 +23,7 @@ const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
 const optionsData = require('../connectors/options-data');
+const { legSymbols } = require('./option-marks');
 const macro = require('../connectors/macro-events');
 const { reviewHoldings } = require('./pilot-handler');
 
@@ -162,13 +164,20 @@ async function pipelinePass() {
     console.error('[pipeline] price sync failed:', err.message);
   }
 
+  // "Watching": each symbol's nearest live trigger level, from real bars.
+  try {
+    watchlist.setTriggers(await computeTriggers(watchlist.getWatchlist(), prices.getLatestPrices(), alpacaStocks.getLatestBars()));
+  } catch (err) {
+    console.error('[pipeline] watch triggers failed:', err.message);
+  }
+
   let positionsChanged = false;
   let journalChanged = false;
   // Held option contracts: one quote request per pass (only while any are open),
   // so marks and paper exits use the real bid. Re-sent every pass while held.
   const held = ledger.getActivePositions().filter((p) => p.market === 'options' && p.optionsData && p.optionsData.contract);
   if (held.length) {
-    await optionsData.refreshQuotes(held.map((p) => p.optionsData.contract));
+    await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean))); // every leg of a spread
     positionsChanged = true;
   }
   const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `

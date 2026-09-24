@@ -82,6 +82,7 @@
 .today-support { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .today-mini th, .today-mini td { padding: 6px 8px; }
 .today-mini td { white-space: normal; font-size: 13px; }
+.today-mini .today-muted, .today-note { color: var(--text-faint); }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {

@@ -8,10 +8,10 @@
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
-const { grossPnl, optionsSaleValue, priceScenarios, costBreakdown, feeModel } = require('../risk/scenarios');
-const { freshQuote } = require('../connectors/options-data');
-const { optionMark } = require('./option-marks');
+const { grossPnl, priceScenarios, costBreakdown, feeModel, feeLegs } = require('../risk/scenarios');
+const { optionMark, saleValue } = require('./option-marks');
 const extras = require('./ledger-extras');
+const exits = require('./exit-monitor');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -82,15 +82,13 @@ function discardOrder(candidateId) {
 
 // Gross P/L before fees, plus the per-share option value at exit (options only).
 // The maths lives in risk/scenarios.js, shared with the Setups view's previews.
-// A real contract with a fresh quote (options-data.js, refreshed by the pipeline
-// while it is held) is valued at its real BID; otherwise at the model's bid side.
+// Options (option-marks.js): every leg at its fresh real quote (long legs at the
+// BID, short legs bought back at the ASK), else the model's bid side.
 function grossPnlAt(pos, exitPrice) {
-  const od = pos.market === 'options' ? pos.optionsData : null;
-  const q = od && od.contract ? freshQuote(od.contract) : null;
-  if (q) return { grossPnl: (q.bid - od.debit) * od.multiplier * pos.positionSize, optionsExitValue: q.bid, optionsExitBasis: 'bid' };
-  const result = { grossPnl: grossPnl(pos, pos.fillPrice, exitPrice) };
-  if (od) Object.assign(result, { optionsExitValue: optionsSaleValue(od, exitPrice, Date.now()), optionsExitBasis: od.contract ? 'model' : 'intrinsic' });
-  return result;
+  if (pos.market !== 'options') return { grossPnl: grossPnl(pos, pos.fillPrice, exitPrice) };
+  const od = pos.optionsData;
+  const m = saleValue(pos, exitPrice);
+  return { grossPnl: (m.value - od.debit) * od.multiplier * pos.positionSize, optionsExitValue: m.value, optionsExitBasis: m.basis };
 }
 
 // exitPrice is always the UNDERLYING price (options are valued from their legs).
@@ -107,7 +105,7 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
   // include slippage, so the estimate would double-count it.
   const fees = Number.isFinite(extra.actualFees)
     ? extra.actualFees
-    : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice);
+    : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice, feeLegs(pos, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop'));
   const netPnl = grossPnl - fees;
 
   const entry = {
@@ -148,43 +146,8 @@ function reducePosition(candidateId, fraction, exitPrice, exitReason) {
   return closePosition(part.id, exitPrice, exitReason);
 }
 
-// Nearest target in the trade's favor (T1). For now T1 closes the whole position.
-// Portfolio Pilot core holdings never exit at a target (even older ones staged
-// with one): only their stop, or an approved Pilot SELL / TRIM, closes them.
-function firstTarget(pos) {
-  if (pos.strategyId === 'portfolio-pilot') return null;
-  const prices = (pos.targets || []).map((t) => t.price).filter((p) => p > 0);
-  if (!prices.length) return null;
-  return pos.direction === 'short' ? Math.max(...prices) : Math.min(...prices);
-}
-
-// Exit check on the latest prices (Map or object of asset -> price). The stop
-// is checked first, so a price that somehow satisfies both is treated as a loss.
-// Returns the journal entries for any positions closed on this pass.
-function monitorPositions(latestPricesMap) {
-  const priceOf = (asset) => (latestPricesMap instanceof Map
-    ? latestPricesMap.get(asset)
-    : latestPricesMap && latestPricesMap[asset]);
-  const closed = [];
-
-  // Iterate over a snapshot: closePosition removes from activePositions.
-  for (const pos of [...activePositions]) {
-    // LIVE positions exit at the broker (bracket orders); the reconciler records
-    // those real fills. Closing them here on a local price would be a fiction.
-    if (pos.execution === 'LIVE') continue;
-    const price = priceOf(pos.asset);
-    if (!(price > 0)) continue;
-
-    const isLong = pos.direction !== 'short';
-    const target = firstTarget(pos);
-    const hitStop = isLong ? price <= pos.invalidation : price >= pos.invalidation;
-    const hitTarget = target !== null && (isLong ? price >= target : price <= target);
-
-    if (hitStop) closed.push(closePosition(pos.id, price, 'STOP_LOSS'));
-    else if (hitTarget) closed.push(closePosition(pos.id, price, 'TAKE_PROFIT'));
-  }
-  return closed;
-}
+// Exit checks (stop, T1 partial, T2 runner, option values): exit-monitor.js.
+const monitorPositions = (latestPricesMap) => exits.monitorPositions(latestPricesMap);
 
 // ---------- Broker reconciliation (LIVE positions only) ----------
 function findLive(candidateId) {
@@ -253,12 +216,13 @@ function releaseAdopted(candidateId) {
 const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
 // and real option contracts their current value (optionMark, option-marks.js).
-const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market), optionMark: optionMark(p) }));
+const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
 // Hand the lists to the store once: it restores them from disk, then saves on every change.
 store.attach(LISTS);
 extras.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions, save: store.save, backup: store.backup });
+exits.bind({ activePositions, closePosition, reducePosition, save: store.save });
 
 module.exports = {
   stageOrder,

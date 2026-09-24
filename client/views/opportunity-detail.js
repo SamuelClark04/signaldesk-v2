@@ -140,11 +140,16 @@
   function optionRows(od) {
     if (!od.contract) return [kv('Structure', `${(od.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${od.debit} debit`)];
     const exp = new Date(`${od.expiration}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const em = od.expectedMove ? [kv('Expected Move', `±${od.expectedMove.value} (${(od.expectedMove.pct * 100).toFixed(1)}%) · T1 at ${od.expectedMove.t1Share.toFixed(2)} x EM${od.ivPercentile ? ` · IVP ${od.ivPercentile.pct} (proxy)` : ''}`)] : [];
+    if (od.structure === 'vertical') {
+      return [kv('Spread', `${od.label} · buy ${od.contract} / sell ${od.shortContract}`), kv('Net debit · max profit', `${od.debit} ($${(od.debit * od.multiplier).toFixed(0)}) · ${od.maxProfit} of ${od.width}`),
+        kv('Exit on spread value', `stop ${od.exitRule.stopValue} (-50%) · T1 ${od.exitRule.targetValue} (80% of max)`), ...em, kv('Why a spread', od.spreadReason)];
+    }
     return [
       kv('Contract', `${od.contract} (${exp} ${od.strike}C)`),
       kv('Premium (ask / bid)', `${od.ask} / ${od.bid} · $${(od.ask * od.multiplier).toFixed(0)} per contract`),
-      kv('DTE · delta · IV', `${od.dte} days · ${Number(od.delta).toFixed(2)} · ${(od.iv * 100).toFixed(1)}%`),
-      kv('Option at stop / T1 (bid)', `${od.valueAtStop} / ${od.valueAtTarget} (modelled)`),
+      kv('DTE · delta · IV', `${od.dte} days · ${Number(od.delta).toFixed(2)} · ${(od.iv * 100).toFixed(1)}%${od.greeksSource === 'model' ? ' (modelled)' : ''}`),
+      kv('Option at stop / T1 (bid)', `${od.valueAtStop} / ${od.valueAtTarget}${od.stopLossPct ? ` · stop -${Math.round(od.stopLossPct * 100)}% of premium` : ' (modelled)'}`), ...em,
     ];
   }
 
@@ -241,7 +246,8 @@
     const c = o.costs || {};
     const lv = (fn) => (ready ? fn() : '—');
     const cost = (x) => (Number.isFinite(x) ? money(x) : '—');
-    const rr = ready && s.t1 && s.stop && s.stop.net < 0 ? `${(s.t1.net / -s.stop.net).toFixed(2)} : 1` : '—';
+    const win = s.plan || s.t1; // a T1/T2 plan: the blended result (T1's share at T1, the runner at T2)
+    const rr = ready && win && s.stop && s.stop.net < 0 ? `${(win.net / -s.stop.net).toFixed(2)} : 1` : '—';
     // Sizing basis: what the SERVER sized this order against (o.sizingBasis +
     // o.sizingBankroll, set by venue-capital at staging). If the venue's mode has
     // changed since, a LIVE approval is refused server-side; say so up front.
@@ -280,7 +286,7 @@
         kv('Estimated entry cost', lv(() => cost(c.entry))),
         kv('Estimated exit cost (T1)', lv(() => cost(c.exitT1))),
         kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),
-        kv('Net reward / risk (T1)', rr),
+        kv(s.plan ? 'Net reward / risk (T1 + T2 plan)' : 'Net reward / risk (T1)', rr),
         kv('Fee drag', ready && Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—'),
       ]),
       el('h3', { className: 'opp-section opp-scen-title', textContent: ready ? `Price scenario (per ${size(o)})` : 'Price scenario' }),

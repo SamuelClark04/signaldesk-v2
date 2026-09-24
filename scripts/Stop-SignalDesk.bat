@@ -36,3 +36,9 @@ foreach ($procId in ($listeners.OwningProcess | Sort-Object -Unique)) {
     Write-Host "Port $port is used by $name (PID $procId), which is not the SignalDesk server. Left it running."
   }
 }
+
+# The Cloudflare quick tunnel SignalDesk started for this port (only that one).
+Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | Where-Object { $_.CommandLine -match ('--url http://127\.0\.0\.1:' + $port + '(\s|$)') } | ForEach-Object {
+  Stop-Process -Id $_.ProcessId -Force
+  Write-Host "Stopped SignalDesk's Cloudflare tunnel (PID $($_.ProcessId))."
+}

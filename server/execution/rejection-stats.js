@@ -28,8 +28,9 @@ const BUCKETS = [
   [/^SIZED_FOR_OTHER_VENUE/, 'Sized for another venue (mode changed)'],
   [/^OPTIONS_EARNINGS_IN_HOLD/, 'Options: earnings inside the hold (IV crush)'],
   [/^OPTIONS_CHAIN_UNAVAILABLE/, 'Options: chain data unavailable'],
-  [/^OPTIONS_NO_CONTRACT/, 'Options: no liquid 30-45 DTE contract near 0.35 delta'],
-  [/^OPTIONS_REWARD_TOO_LOW/, 'Options: contract reward too low vs risk'],
+  [/^OPTIONS_NO_CONTRACT/, 'Options: no tradeable 30-45 DTE contract at the target delta'],
+  [/^OPTIONS_NO_EXPECTED_MOVE/, 'Options: no ATM straddle for the Expected Move'],
+  [/^OPTIONS_REWARD_TOO_LOW/, 'Options: reward too low inside the Expected Move'],
   [/^SPECULATIVE_SENTIMENT_WEAK/, 'Moonshot: spike without strong news sentiment'],
 ];
 

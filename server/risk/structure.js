@@ -3,8 +3,8 @@
 // side (a 7-day local top); the last PIVOT_K days' top counts too (a fresh high).
 // The nearest resistance is the LOWEST such level above the price, within the
 // bars given (the swing strategies pass ~100 days).
-// Used to reject setups whose target sits beyond resistance the price must
-// first break through (strategies: equity-swing, crypto-swing, options-system).
+// Used by risk/target-plan.js (snap T1 under resistance, or reject when it is
+// too close) and the Portfolio Pilot.
 // Lookback: the strictness dial (strictness.js, a live setting read per call).
 // Strict uses every bar given; moderate only the last resistanceLookbackDays.
 const { getStrictness } = require('./strictness');
@@ -24,21 +24,23 @@ function pivotHighs(bars, k = PIVOT_K) {
   return out;
 }
 
-// { price, time, kind } of the nearest resistance strictly above `price`, or null
-// (price is above every recent top). Candidates: confirmed pivot highs, plus the
-// highest high of the last k bars: a fresh top whose pivot cannot be confirmed
-// yet is still resistance the price has to get through.
-function nearestResistance(bars, price, k = PIVOT_K) {
+// Every resistance level strictly above `price`, nearest first: [{ price, time, kind }].
+// Candidates: confirmed pivot highs, plus the highest high of the last k bars: a
+// fresh top whose pivot cannot be confirmed yet is still resistance the price
+// has to get through.
+function resistanceLevels(bars, price, k = PIVOT_K) {
   const levels = pivotHighs(bars, k).map((p) => ({ ...p, kind: 'swing high' }));
   const recent = bars.slice(-k);
   if (recent.length) {
     const top = recent.reduce((hi, b) => (b.high > hi.high ? b : hi), recent[0]);
     levels.push({ price: top.high, time: top.time, kind: 'recent high' });
   }
-  const above = levels.filter((p) => p.price > price);
-  if (!above.length) return null;
-  return above.reduce((lo, p) => (p.price < lo.price ? p : lo), above[0]);
+  return levels.filter((p) => p.price > price).sort((a, b) => a.price - b.price);
 }
+
+// { price, time, kind } of the nearest resistance strictly above `price`, or null
+// (price is above every recent top).
+const nearestResistance = (bars, price, k = PIVOT_K) => resistanceLevels(bars, price, k)[0] || null;
 
 // Target viability for a proposal. { ok, resistance, text } where text is the
 // sentence the thesis uses; ok is false when resistance sits below the target.
@@ -53,4 +55,4 @@ function checkTarget(allBars, entry, target, fmt = (x) => x, lookbackDays = getS
   return { ok: true, resistance: r, text: `The target ${fmt(target)} sits below the major daily resistance ${fmt(r.price)} (${r.kind} ${day}, last ${bars.length} days).` };
 }
 
-module.exports = { pivotHighs, nearestResistance, checkTarget, PIVOT_K };
+module.exports = { pivotHighs, resistanceLevels, nearestResistance, checkTarget, PIVOT_K };

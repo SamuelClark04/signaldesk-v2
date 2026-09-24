@@ -27,7 +27,8 @@
     const busy = ctx.inFlight.has(o.id);
     const t1 = o.targets && o.targets[0] ? o.targets[0].price : null;
     const s = o.scenarios || {};
-    const rr = s.t1 && s.stop && s.stop.net < 0 ? `${(s.t1.net / -s.stop.net).toFixed(2)} : 1` : '—';
+    const best = s.plan || s.t1; // a T1/T2 plan: the blended result
+    const rr = best && s.stop && s.stop.net < 0 ? `${(best.net / -s.stop.net).toFixed(2)} : 1${s.plan ? ' blended' : ''}` : '—';
     const left = Math.max(0, EXPIRY_MS - (Date.now() - (o.stagedAt || 0)));
     const blocked = live && o.market === 'options';
     const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked,
@@ -47,10 +48,10 @@
         el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` }),
       ]),
       el('div', { className: 'apv-grid' }, [
-        kv('Size', `${size(o)}${od && od.contract ? ` · ${od.contract}` : ''}`),
+        kv('Size', `${size(o)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
         kv('Entry', `${price(o.entryZone.min, o)} – ${price(o.entryZone.max, o)}`),
         kv('Stop', price(o.invalidation, o), 'text-short'),
-        kv('Target 1', t1 ? price(t1, o) : '—', 'text-long'),
+        kv(o.targets && o.targets[1] ? 'T1 (50%) / T2' : 'Target 1', t1 ? `${price(t1, o)}${o.targets[1] ? ` / ${price(o.targets[1].price, o)}` : ''}` : '—', 'text-long'),
         kv('Risk', `${money(o.dollarRisk)} (${o.sizingBankroll > 0 ? ((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2) : '—'}%)`),
         kv('Reward : risk', rr),
       ]),

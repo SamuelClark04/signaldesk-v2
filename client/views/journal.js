@@ -4,7 +4,7 @@
   const SD = window.SignalDesk;
   const { $, el, td, price, money, signed, pnlClass, clock, dirCell, assetCell, setTable } = SD.ui;
 
-  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit (T1)', BROKER_EXIT: 'Broker exit' };
+  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit', TAKE_PROFIT_T1: 'T1 partial (runner open)', BROKER_EXIT: 'Broker exit' };
   const LEG_LABELS = { take_profit: 'Broker take profit', stop_loss: 'Broker stop loss' };
 
   function render(trades) {

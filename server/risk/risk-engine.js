@@ -122,7 +122,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
   if (sizing.error) return reject(candidate, sizing.error);
 
   const { positionSize, dollarRisk } = sizing;
-  const sized = { ...candidate, entryPrice, positionSize, dollarRisk };
+  // Entry leg liquidity (cost-authority.js): a strategy's resting limit inside
+  // its zone is maker, but only on PAPER; live Coinbase entries are market orders.
+  const entryLiquidity = candidate.entryLiquidity === 'maker' && (options.sizingBasis || 'paper') === 'paper' ? 'maker' : 'taker';
+  const sized = { ...candidate, entryPrice, positionSize, dollarRisk, entryLiquidity };
 
   const cost = evaluateCosts(sized, dollarRisk);
   if (!cost.approved) return reject(candidate, cost.reason, { feeDrag: cost.feeDrag });

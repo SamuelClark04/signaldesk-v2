@@ -15,7 +15,7 @@
 //   at support   live price within NEAR_SMA_PCT of SMA20, and above SMA50
 const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const { getDailyBars } = require('../connectors/daily-bars');
-const { checkTarget } = require('../risk/structure');
+const { planTargets } = require('../risk/target-plan');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
@@ -95,12 +95,13 @@ async function evaluate(symbol, livePrice, now) {
   const risk = entryMax - invalidation;
   const t1 = cents(Math.max(recentHigh, entryMax + risk)); // prior high, but at least 1R
   const t2 = cents(entryMax + 2 * risk);
-  // The final target must sit at or below the nearest major daily resistance.
-  const tgt = checkTarget(bars, entryMax, t2, cents);
+  // Overhead daily resistance under T2: snap T1 below it (risk/target-plan.js), or reject when too close.
+  const tgt = planTargets({ bars, entry: entryMax, stop: invalidation, market: 'stocks', fmt: cents,
+    targets: [{ level: 1, price: t1, allocation: 0.5 }, { level: 2, price: t2, allocation: 0.5 }] });
   if (!tgt.ok) {
-    blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: `RESISTANCE_BLOCKS_TARGET: ${tgt.text}`,
+    blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: tgt.reason,
       candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
-    return tally.skip(symbol, 'Rejected: resistance below the target');
+    return tally.skip(symbol, 'Rejected: resistance too close to snap T1');
   }
   const news = await sentiment.getSentiment(symbol, now);
 
@@ -118,10 +119,7 @@ async function evaluate(symbol, livePrice, now) {
     newsSentiment: news.ok ? { score: news.score, label: news.label, source: news.source } : null,
     entryZone: { min: cents(livePrice), max: entryMax },
     invalidation,
-    targets: [
-      { level: 1, price: t1, allocation: 0.5 },
-      { level: 2, price: t2, allocation: 0.5 },
-    ],
+    targets: tgt.targets,
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} is in an uptrend (SMA${CONFIG.fast} ${cents(fast)} > SMA${CONFIG.slow} ${cents(slow)}) and has `
       + `pulled back ${(((recentHigh - livePrice) / recentHigh) * 100).toFixed(1)}% from its ${CONFIG.highLookback}-day high `

@@ -17,9 +17,11 @@
 const nodemailer = require('nodemailer');
 const { MAX_CANDIDATE_AGE_MS } = require('./order-guard');
 
-const BASE_URL = (process.env.APP_PUBLIC_URL || (process.env.TERMINAL_URL || '').split('#')[0]
+// The Cloudflare quick tunnel's address (TUNNEL_PUBLIC_URL, set at runtime by
+// security/tunnel.js) wins, so emailed links work away from this PC.
+const baseUrl = () => (process.env.TUNNEL_PUBLIC_URL || process.env.APP_PUBLIC_URL || (process.env.TERMINAL_URL || '').split('#')[0]
   || `http://127.0.0.1:${Number(process.env.PORT) || 3000}/`).replace(/\/*$/, '/');
-const TERMINAL_URL = `${BASE_URL}#opportunities?tab=approvals`;
+const approvalsUrl = () => `${baseUrl()}#opportunities?tab=approvals`;
 
 const usd = (x) => (Number.isFinite(x)
   ? `${x < 0 ? '-' : ''}$${Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -83,7 +85,7 @@ function buildAlert(o) {
     `Thesis: ${o.thesis || 'n/a'}`,
     '',
     expiry,
-    `Open the Approvals queue: ${TERMINAL_URL}`,
+    `Open the Approvals queue: ${approvalsUrl()}`,
   ].join('\n');
 
   const long = o.direction !== 'short';
@@ -99,7 +101,7 @@ function buildAlert(o) {
     '</table>',
     `<p style="margin:14px 0;font-size:13px;line-height:1.5;color:#cbd5e1"><em>${escapeHtml(o.thesis || '')}</em></p>`,
     `<p style="margin:0 0 18px;font-size:13px;color:#fbbf24">${escapeHtml(expiry)}</p>`,
-    `<a href="${escapeHtml(TERMINAL_URL)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#2f81f7;color:#ffffff;font-weight:700;text-decoration:none">Open Approvals &rarr;</a>`,
+    `<a href="${escapeHtml(approvalsUrl())}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#2f81f7;color:#ffffff;font-weight:700;text-decoration:none">Open Approvals &rarr;</a>`,
     '<p style="margin:16px 0 0;font-size:11px;color:#64748b">Informational alert: nothing has been executed. Approving re-checks price and staleness first.</p>',
     '</div></div>',
   ].join('\n');
@@ -156,4 +158,4 @@ async function sendApprovalAlert(candidate) {
   return { ...message, result };
 }
 
-module.exports = { sendApprovalAlert, buildAlert, TERMINAL_URL };
+module.exports = { sendApprovalAlert, buildAlert, approvalsUrl };

@@ -38,6 +38,18 @@ REM access token once; the sign-in lasts 30 days. The server keeps running in
 REM this window so its logs stay visible.
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "$u='http://127.0.0.1:%SD_PORT%/'; for ($i = 0; $i -lt 120; $i++) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 ($u + 'login') | Out-Null; Start-Process $u; break } catch { Start-Sleep -Milliseconds 500 } }"
 
+REM Cloudflare quick tunnel: the SERVER starts cloudflared (so it can read the
+REM random trycloudflare.com address, allow it and print it); this only finds the
+REM executable: project root, scripts\, then PATH. TUNNEL=off in .env skips it.
+set "CLOUDFLARED_EXE="
+if exist "%~dp0..\cloudflared.exe" set "CLOUDFLARED_EXE=%~dp0..\cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%~dp0cloudflared.exe" set "CLOUDFLARED_EXE=%~dp0cloudflared.exe"
+if not defined CLOUDFLARED_EXE for /f "delims=" %%c in ('where cloudflared 2^>nul') do if not defined CLOUDFLARED_EXE set "CLOUDFLARED_EXE=%%c"
+REM (single-line IFs: a path like "Program Files (x86)" breaks a parenthesised block)
+if defined CLOUDFLARED_EXE echo Cloudflare tunnel: "%CLOUDFLARED_EXE%"
+if defined CLOUDFLARED_EXE echo Your public https://....trycloudflare.com link appears below in a box once it is ready.
+if not defined CLOUDFLARED_EXE echo Cloudflare tunnel: cloudflared.exe not found ^(project folder, scripts\ or PATH^): local access only.
+
 echo Starting SignalDesk on http://127.0.0.1:%SD_PORT%  ^(Ctrl+C to stop^)
 echo The browser opens automatically once the server is up.
 echo.

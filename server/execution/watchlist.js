@@ -3,8 +3,11 @@
 // ledger) so edits survive restarts; the defaults below apply only when no file
 // exists yet. The 60s pipeline refreshes `lastPrice` from the live streams.
 //
-// Item: { symbol, triggerCondition, lastPrice, lastPriceAt, market }
-//   triggerCondition is descriptive text: nothing evaluates it yet.
+// Item: { symbol, triggerCondition, lastPrice, lastPriceAt, market, trigger }
+//   trigger is LIVE: the nearest real trigger level to the current price,
+//   recomputed every pipeline pass from real bars (intelligence/watch-triggers.js)
+//   and never written to disk. triggerCondition is an optional note of the
+//   user's own (empty by default; there are no hard-coded trigger prices).
 //   lastPrice keeps the last known value when a feed goes quiet (e.g. overnight),
 //   with lastPriceAt showing how old it is. Prices exist only for symbols the
 //   connectors stream (server/market/universe.js); after a restart with the market
@@ -17,18 +20,15 @@ const FILE = process.env.WATCHLIST_PATH || path.join(__dirname, '..', 'data', 'w
 const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
 const MAX_TRIGGER_LENGTH = 80;
 
-// First-run defaults: the core list (not all 80 monitored symbols). Descriptive triggers where one exists.
-const DEFAULT_TRIGGERS = {
-  AAPL: 'Breakout above 231.10',
-  NVDA: 'Pullback to SMA20 after earnings',
-  SPY: 'Reclaim of 512.40',
-  'BTC-USD': 'Reclaim of rolling mean after a 0.4% flush',
-};
-const DEFAULTS = CORE_WATCHLIST.map((symbol) => ({ symbol, triggerCondition: DEFAULT_TRIGGERS[symbol] || 'Price watch: no trigger set' }));
+// First-run defaults: the core list (not all 80 monitored symbols), no notes.
+const DEFAULTS = CORE_WATCHLIST.map((symbol) => ({ symbol, triggerCondition: '' }));
+// Static placeholder texts older versions wrote as "triggers" (stale prices): dropped on load.
+const LEGACY_TEXT = new Set(['Breakout above 231.10', 'Pullback to SMA20 after earnings', 'Reclaim of 512.40',
+  'Reclaim of rolling mean after a 0.4% flush', 'Price watch: no trigger set']);
 
 const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
 const makeItem = ({ symbol, triggerCondition }) => ({
-  symbol, triggerCondition, lastPrice: null, lastPriceAt: null, market: marketOf(symbol),
+  symbol, triggerCondition: LEGACY_TEXT.has(triggerCondition) ? '' : String(triggerCondition || ''), lastPrice: null, lastPriceAt: null, market: marketOf(symbol), trigger: null,
 });
 
 let items = [];
@@ -39,7 +39,7 @@ function save() {
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     const tmp = `${FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, items }, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, items: items.map(({ trigger, ...rest }) => rest) }, null, 2)); // live triggers are not stored
     fs.renameSync(tmp, FILE);
   } catch (err) {
     console.error(`[watchlist] FAILED to save ${FILE}: ${err.message}`);
@@ -54,7 +54,7 @@ function load() {
   try {
     const data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     if (!Array.isArray(data.items)) throw new Error('"items" is missing or not an array');
-    items = data.items.filter((i) => i && SYMBOL_RE.test(i.symbol)).map((i) => ({ ...makeItem(i), ...i, market: marketOf(i.symbol) }));
+    items = data.items.filter((i) => i && SYMBOL_RE.test(i.symbol)).map((i) => ({ ...i, ...makeItem(i), lastPrice: i.lastPrice ?? null, lastPriceAt: i.lastPriceAt ?? null }));
   } catch (err) {
     const aside = `${FILE}.corrupt-${Date.now()}`;
     try { fs.renameSync(FILE, aside); } catch { /* leave it */ }
@@ -76,8 +76,8 @@ function addWatchlist(item) {
   const symbol = String((item && item.symbol) || '').trim().toUpperCase();
   const triggerCondition = String((item && item.triggerCondition) || '').trim();
   if (!SYMBOL_RE.test(symbol)) throw new Error(`invalid symbol "${symbol}"`);
-  if (!triggerCondition || triggerCondition.length > MAX_TRIGGER_LENGTH) {
-    throw new Error(`triggerCondition must be 1-${MAX_TRIGGER_LENGTH} characters`);
+  if (triggerCondition.length > MAX_TRIGGER_LENGTH) {
+    throw new Error(`triggerCondition (an optional note) must be at most ${MAX_TRIGGER_LENGTH} characters`);
   }
   const existing = items.find((i) => i.symbol === symbol);
   if (existing) existing.triggerCondition = triggerCondition;
@@ -130,6 +130,18 @@ function seedPrices(closes) {
   return dirty;
 }
 
+// Live triggers from watch-triggers.js ({ SYMBOL: trigger }); notifies only on a change.
+function setTriggers(map) {
+  let dirty = false;
+  for (const item of items) {
+    const next = (map && map[item.symbol]) || null;
+    const key = (t) => (t ? `${t.label}|${t.level}|${t.distancePct.toFixed(4)}` : '');
+    if (key(next) !== key(item.trigger)) { item.trigger = next; dirty = true; }
+  }
+  if (dirty) changed();
+  return dirty;
+}
+
 // server.js registers a broadcaster here, so producers never touch sockets.
 function onChange(fn) {
   listener = fn;
@@ -137,4 +149,4 @@ function onChange(fn) {
 
 load();
 
-module.exports = { getWatchlist, addWatchlist, removeWatchlist, syncPrices, seedPrices, onChange };
+module.exports = { getWatchlist, addWatchlist, removeWatchlist, syncPrices, seedPrices, setTriggers, onChange };
