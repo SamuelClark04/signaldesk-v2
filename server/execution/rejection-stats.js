@@ -22,6 +22,8 @@ const BUCKETS = [
   [/^INVALIDATED$/, 'Price through stop before entry'],
   [/^REJECTED_BY_USER$/, 'Rejected by you'],
   [/^LIVE_CAPITAL_UNAVAILABLE/, 'Rejected: Live account value unavailable for sizing'],
+  [/^EARNINGS_UNKNOWN/, 'Rejected: Earnings date unknown'],
+  [/^EARNINGS_SOON/, 'Earnings Shield: reports within 3 trading days'],
   [/^SIZED_FOR_OTHER_VENUE/, 'Sized for another venue (mode changed)'],
 ];
 

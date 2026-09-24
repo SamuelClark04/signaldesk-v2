@@ -2,14 +2,18 @@
 // PROPOSER ONLY: returns Canonical Candidates; never sizes, stages or executes.
 //
 // Earnings Shield: a swing trade held into an earnings report takes on a binary
-// gap the stop cannot protect against. If the next report is fewer than
-// MIN_DAYS_TO_EARNINGS days away, the setup is not proposed at all.
+// gap the stop cannot protect against. Real dates come from Finnhub
+// (connectors/corporate-calendar.js). A setup is blocked when the next report is
+// fewer than MIN_DAYS_TO_EARNINGS trading days away, AND when the date cannot be
+// known (no key, API error, timeout): the shield fails CLOSED, never open.
+// Blocked setups are reported through takeBlocks() so the pipeline can record
+// them in "Why we passed" (this module stays a read-only proposer).
 //
 // Trigger (daily bars + live price):
 //   uptrend      SMA20 > SMA50
 //   pullback     live price at least PULLBACK_PCT below the 10-day high
 //   at support   live price within NEAR_SMA_PCT of SMA20, and above SMA50
-const { getDaysToEarnings } = require('../connectors/corporate-calendar');
+const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const { getDailyBars } = require('../connectors/daily-bars');
 
 const STRATEGY_ID = 'equity-swing';
@@ -33,22 +37,25 @@ const lookup = (src, key) => (src instanceof Map ? src.get(key) : src && src[key
 const sma = (bars, n) => bars.slice(-n).reduce((s, b) => s + b.close, 0) / n;
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
 
-const shieldLogged = new Set(); // "SYMBOL:date": log each shield block once per day
+const shieldLogged = new Set(); // "SYMBOL:date:reason": log each shield block once per day
+let blocks = []; // setups the shield blocked on the last pass: { id, reason, candidate }
+
+// Earnings Shield for a setup that has formed. Returns null (allowed) or the
+// rejection reason. Unknown earnings = blocked.
+async function shield(symbol, now) {
+  const e = await getEarningsStatus(symbol, now);
+  if (!e.ok) return { reason: `EARNINGS_UNKNOWN: ${e.error}`, text: 'earnings date unknown' };
+  if (e.date && e.tradingDaysAway < MIN_DAYS_TO_EARNINGS) {
+    return { reason: `EARNINGS_SOON: reports ${e.date}${e.hour ? ` (${e.hour})` : ''}, ${e.tradingDaysAway} trading day(s) away`, text: `reports ${e.date}` };
+  }
+  return { allowed: true, earnings: e };
+}
 
 async function evaluate(symbol, livePrice, now) {
   const date = etDate.format(now);
 
-  // Earnings Shield first: no point analysing a setup we will not propose.
-  const daysToEarnings = await getDaysToEarnings(symbol);
-  if (daysToEarnings < MIN_DAYS_TO_EARNINGS) {
-    const key = `${symbol}:${date}`;
-    if (!shieldLogged.has(key)) {
-      shieldLogged.add(key);
-      console.log(`[equity-swing] Earnings Shield: ${symbol} reports in ${daysToEarnings} day(s); no swing proposals today`);
-    }
-    return null;
-  }
-
+  // Setup first (cached real bars), shield second: the calendar is only asked,
+  // and a block only recorded, when there is an actual setup to protect.
   const bars = await getDailyBars(symbol);
   if (bars.length < CONFIG.slow) return null;
   const fast = sma(bars, CONFIG.fast);
@@ -59,6 +66,19 @@ async function evaluate(symbol, livePrice, now) {
   const pulledBack = livePrice <= recentHigh * (1 - CONFIG.pullbackPct);
   const atSupport = Math.abs(livePrice - fast) / fast <= CONFIG.nearSmaPct && livePrice > slow;
   if (!uptrend || !pulledBack || !atSupport) return null;
+
+  const guard = await shield(symbol, now);
+  if (!guard.allowed) {
+    const id = `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`;
+    blocks.push({ id, reason: guard.reason, candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
+    const key = `${symbol}:${date}:${guard.text}`;
+    if (!shieldLogged.has(key)) {
+      shieldLogged.add(key);
+      console.log(`[equity-swing] Earnings Shield blocked ${symbol}: ${guard.reason}`);
+    }
+    return null;
+  }
+  const { earnings } = guard;
 
   const entryMax = cents(livePrice * (1 + CONFIG.entryBufferPct));
   const swingLow = Math.min(...bars.slice(-CONFIG.stopLookback).map((b) => b.low));
@@ -90,14 +110,15 @@ async function evaluate(symbol, livePrice, now) {
     confirmationCriteria: [
       `SMA${CONFIG.fast} above SMA${CONFIG.slow}`,
       `Price within ${(CONFIG.nearSmaPct * 100).toFixed(1)}% of SMA${CONFIG.fast} and above SMA${CONFIG.slow}`,
-      `Earnings in ${daysToEarnings} days (shield requires ≥ ${MIN_DAYS_TO_EARNINGS})`,
-      'Daily bars are simulated until the historical feed is wired',
+      earnings.date ? `Next earnings ${earnings.date}: ${earnings.tradingDaysAway} trading days away (shield requires ≥ ${MIN_DAYS_TO_EARNINGS})`
+        : 'No earnings reported in the next 60 days (Finnhub)',
     ],
     timestamp: new Date(now).toISOString(),
   };
 }
 
 async function generateCandidates(latestPricesMap, { symbols = CONFIG.symbols, now = Date.now() } = {}) {
+  blocks = [];
   const candidates = [];
   for (const symbol of symbols) {
     const livePrice = lookup(latestPricesMap, symbol);
@@ -112,4 +133,7 @@ async function generateCandidates(latestPricesMap, { symbols = CONFIG.symbols, n
   return candidates;
 }
 
-module.exports = { generateCandidates, STRATEGY_ID, MIN_DAYS_TO_EARNINGS, CONFIG };
+// The pipeline reads (and clears) the shield blocks after each pass.
+function takeBlocks() { const b = blocks; blocks = []; return b; }
+
+module.exports = { generateCandidates, takeBlocks, STRATEGY_ID, MIN_DAYS_TO_EARNINGS, CONFIG };
