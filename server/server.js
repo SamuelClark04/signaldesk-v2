@@ -17,6 +17,7 @@ const { createMessageHandler } = require('./execution/message-handler');
 const { startPipeline, stopPipeline, runPipeline } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
+const watchlist = require('./execution/watchlist');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
 const { HOST, LAN_ACCESS, checkUpgrade, lanUrls } = require('./security/access-policy');
@@ -64,6 +65,7 @@ function broadcast(type, payload) {
 
 const handleMessage = createMessageHandler({ send, broadcast });
 rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
+watchlist.onChange((items) => broadcast('WATCHLIST_UPDATED', items)); // "Watching"
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
@@ -75,6 +77,7 @@ wss.on('connection', (ws) => {
   send(ws, 'JOURNAL_UPDATED', ledger.getTradeJournal());
   send(ws, 'SETTINGS_UPDATED', ledger.getSettings());
   send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
+  send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());
   getBrokerState()
     .then((state) => send(ws, 'BROKER_STATE', state))
     .catch((err) => console.error('[broker] state for new client failed:', err.message));

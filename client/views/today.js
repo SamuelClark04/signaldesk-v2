@@ -1,10 +1,10 @@
 // Today tab: the command-center dashboard. Pure render from the shared client
 // state (settings, broker, positions, journal, pending); app.js calls
 // renderToday() whenever that state changes while the tab is visible.
-// Real data: metric banner, briefing count, Ready-for-review (live queue),
-// Why we passed (server rejection tally).
-// SAMPLE data (tagged, never actionable): attention, watching, market context,
-// and the review cards when the queue is empty.
+// Real data: metric banner, briefing counts, Ready-for-review (live queue),
+// Watching (server watchlist), Why we passed (server rejection tally).
+// SAMPLE data (tagged, never actionable): attention, market context, and the
+// review cards when the queue is empty.
 // Exposes window.SignalDesk.today.
 (() => {
   const SD = window.SignalDesk;
@@ -69,7 +69,7 @@
         el('h2', { className: 'today-briefing-title', textContent: n ? `${n} setup${n === 1 ? '' : 's'} worth reviewing` : 'No setups waiting for review' }),
         el('div', { className: 'today-pills' }, [
           el('span', { className: `today-pill${n ? ' is-hot' : ''}`, textContent: `${n} to review` }),
-          el('span', { className: 'today-pill', textContent: `${SAMPLE.watching.length} watching`, title: 'Sample watchlist' }),
+          el('span', { className: 'today-pill', textContent: `${(state.watchlist || []).length} watching` }),
         ]),
       ]),
       el('div', { className: 'today-actions' }, [
@@ -140,13 +140,27 @@
       el('div', { className: 'today-alert-detail', textContent: a.detail }),
     ]))));
 
-  const watching = () => card('Watching', '', true, el('table', { className: 'data-table today-mini' }, [
-    el('thead', {}, el('tr', {}, ['Symbol', 'Trigger', 'Last'].map((h, i) => el('th', { textContent: h, className: i === 2 ? 'num' : '' })))),
-    el('tbody', {}, SAMPLE.watching.map((w) => el('tr', {}, [
-      el('td', { className: 'asset', textContent: w.symbol }), el('td', { textContent: w.trigger }),
-      el('td', { className: 'num', textContent: w.last.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }),
-    ]))),
-  ]));
+  // Real: server watchlist (WATCHLIST_UPDATED); last price refreshed each pipeline pass.
+  function watching(state) {
+    const items = state.watchlist || [];
+    const body = !state.watchlist
+      ? el('p', { className: 'today-empty', textContent: 'Waiting for the server…' })
+      : !items.length
+        ? el('p', { className: 'today-empty', textContent: 'No tickers actively watched' })
+        : el('table', { className: 'data-table today-mini' }, [
+          el('thead', {}, el('tr', {}, ['Symbol', 'Trigger', 'Last'].map((h, i) => el('th', { textContent: h, className: i === 2 ? 'num' : '' })))),
+          el('tbody', {}, items.map((w) => el('tr', {}, [
+            el('td', { className: 'asset', textContent: w.symbol }),
+            el('td', { textContent: w.triggerCondition }),
+            el('td', {
+              className: 'num',
+              textContent: w.lastPrice > 0 ? price(w.lastPrice, { market: w.market, entryPrice: w.lastPrice }) : '—',
+              title: w.lastPriceAt ? `as of ${new Date(w.lastPriceAt).toLocaleTimeString()}` : 'No price from the live streams yet',
+            }),
+          ]))),
+        ]);
+    return card('Watching', items.length ? `${items.length} symbol${items.length === 1 ? '' : 's'}` : '', false, body);
+  }
 
   // Real: today's REJECTION_STATS from the server (one count per setup per reason).
   function passed(state) {
@@ -172,7 +186,7 @@
       ...metricBanner(state),
       briefing(state),
       el('div', { className: 'today-split' }, [readyForReview(state), attention()]),
-      el('div', { className: 'today-support' }, [watching(), passed(state), context()]),
+      el('div', { className: 'today-support' }, [watching(state), passed(state), context()]),
     );
   }
 

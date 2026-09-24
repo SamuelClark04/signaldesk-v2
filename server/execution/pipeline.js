@@ -13,6 +13,7 @@ const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { reconcileLivePositions } = require('./reconciler');
 const { recordRejection } = require('./rejection-stats');
+const watchlist = require('./watchlist');
 const prices = require('../market/latest-prices');
 
 const PIPELINE_INTERVAL_MS = 60000;
@@ -90,6 +91,13 @@ async function pipelinePass() {
 
   // Exit management. LIVE positions first, from broker truth (real fills);
   // then PAPER positions from local prices (monitorPositions skips LIVE ones).
+  // Watchlist last prices (broadcast via watchlist.onChange only when a price moved).
+  try {
+    watchlist.syncPrices(prices.getLatestPrices());
+  } catch (err) {
+    console.error('[pipeline] watchlist price sync failed:', err.message);
+  }
+
   let positionsChanged = false;
   let journalChanged = false;
   const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `

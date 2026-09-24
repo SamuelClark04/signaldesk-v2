@@ -1,6 +1,7 @@
 // Alpaca IEX market-data stream (free tier). WebSocket only, no REST polling.
 // Protocol: connect -> auth -> subscribe to minute bars. Auto-reconnects with
-// exponential backoff. Free tier allows ONE concurrent stream connection.
+// exponential backoff. The free tier allows one connection PER ENDPOINT, so this
+// stream (v2/iex) and the news stream (v1beta1/news) don't compete.
 const WebSocket = require('ws');
 
 const DEFAULT_URL = 'wss://stream.data.alpaca.markets/v2/iex';
@@ -10,8 +11,21 @@ const BACKOFF_MAX_MS = 60000;
 const PING_INTERVAL_MS = 30000;
 const MAX_BARS_PER_SYMBOL = 400; // one regular session is 390 one-minute bars
 
-// Alpaca error codes that won't fix themselves by reconnecting.
-const FATAL_CODES = new Set([401, 402, 404]); // not authenticated, auth failed, auth timeout
+// Alpaca error codes that won't fix themselves by reconnecting (bad credentials).
+const FATAL_CODES = new Set([401, 402]); // not authenticated, auth failed
+
+// Codes that DO clear up on their own, retried quietly with a longer backoff:
+//   406 connection limit exceeded: another session already holds this endpoint
+//       (a second SignalDesk, another app on the same keys, or Alpaca still
+//       counting the previous session for a while after a disconnect/restart);
+//   404 auth timeout: authentication didn't complete in time (slow network).
+// While this stream is down, prices go stale: after 5 minutes latest-prices
+// treats them as missing, so approvals get NO_LIVE_PRICE and the paper exit
+// monitor waits. Nothing trades on stale data.
+const RETRY_QUIETLY = new Set([404, 406]);
+const LIMIT_BACKOFF_MIN_MS = 5000;
+
+let quietRetry = null; // { code, attempts, since } while retrying 404/406 without log spam
 
 let ws = null;
 let symbols = DEFAULT_SYMBOLS;
@@ -50,7 +64,7 @@ function connect() {
   ws.isAlive = true;
 
   ws.on('open', () => {
-    console.log('[alpaca] connected, authenticating');
+    if (!quietRetry) console.log('[alpaca] connected, authenticating');
     ws.send(JSON.stringify({ action: 'auth', key, secret }));
   });
 
@@ -62,11 +76,11 @@ function connect() {
     for (const m of Array.isArray(msgs) ? msgs : [msgs]) handleMessage(m);
   });
 
-  ws.on('error', (err) => console.error('[alpaca] socket error:', err.message));
+  ws.on('error', (err) => { if (!quietRetry) console.error('[alpaca] socket error:', err.message); });
 
   ws.on('close', (code) => {
     clearInterval(pingTimer);
-    console.warn(`[alpaca] closed (${code})`);
+    if (!quietRetry) console.warn(`[alpaca] closed (${code})`);
     scheduleReconnect();
   });
 
@@ -83,6 +97,11 @@ function handleMessage(m) {
   switch (m.T) {
     case 'success':
       if (m.msg === 'authenticated') {
+        if (quietRetry) {
+          const secs = Math.round((Date.now() - quietRetry.since) / 1000);
+          console.log(`[alpaca] recovered: connected after ${quietRetry.attempts} quiet retr${quietRetry.attempts === 1 ? 'y' : 'ies'} (${secs}s)`);
+          quietRetry = null;
+        }
         console.log(`[alpaca] authenticated, subscribing to bars: ${symbols.join(', ')}`);
         ws.send(JSON.stringify({ action: 'subscribe', bars: symbols }));
         backoff = BACKOFF_MIN_MS;
@@ -98,6 +117,10 @@ function handleMessage(m) {
       break;
     }
     case 'error':
+      if (RETRY_QUIETLY.has(m.code)) {
+        startQuietRetry(m);
+        break;
+      }
       console.error(`[alpaca] error ${m.code}: ${m.msg}`);
       if (FATAL_CODES.has(m.code)) {
         console.error('[alpaca] fatal auth error; not reconnecting. Check your API keys.');
@@ -109,11 +132,28 @@ function handleMessage(m) {
   }
 }
 
+// 404/406: warn once per streak, then retry silently (5s, 10s, 20s, 40s, 60s, 60s...)
+// until a session authenticates. Our side closes the socket so a half-open
+// session can never keep holding the endpoint.
+function startQuietRetry(m) {
+  if (!quietRetry) {
+    quietRetry = { code: m.code, attempts: 0, since: Date.now() };
+    const why = m.code === 406
+      ? 'another session already holds the stock-bar stream (a second SignalDesk, another app on these keys, or the previous session still closing)'
+      : 'authentication did not complete in time';
+    console.warn(`[alpaca] ${m.code} ${m.msg}: ${why}. Retrying quietly in the background (5s up to every 60s); `
+      + 'prices go stale meanwhile, so approvals and paper exits wait.');
+  }
+  quietRetry.attempts += 1;
+  backoff = Math.max(backoff, LIMIT_BACKOFF_MIN_MS);
+  if (ws && ws.readyState !== WebSocket.CLOSED) ws.close();
+}
+
 function scheduleReconnect() {
   if (stopped || reconnectTimer) return;
   const delay = backoff;
   backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
-  console.log(`[alpaca] reconnecting in ${delay / 1000}s`);
+  if (!quietRetry) console.log(`[alpaca] reconnecting in ${delay / 1000}s`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
@@ -126,6 +166,7 @@ function init(options = {}) {
   onBar = options.onBar || logBar;
   stopped = false;
   backoff = BACKOFF_MIN_MS;
+  quietRetry = null;
   connect();
   return { stop, getLatestBars };
 }

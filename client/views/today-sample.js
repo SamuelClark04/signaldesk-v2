@@ -1,8 +1,8 @@
 // SAMPLE data for the Today dashboard sections that have no live source yet.
 // Everything here is illustrative: it is always rendered with a SAMPLE tag and
 // its buttons never lead to an order. Replace section by section as real
-// feeds arrive (watchlist triggers, market breadth). "Why we passed" is real
-// (server REJECTION_STATS) since Phase 18.
+// feeds arrive (portfolio attention, market breadth). Real since: "Why we
+// passed" (Phase 18, REJECTION_STATS), "Watching" (Phase 19, WATCHLIST_UPDATED).
 // Exposes window.SignalDesk.todaySample.
 (() => {
   const SD = window.SignalDesk;
@@ -17,12 +17,6 @@
       { asset: 'NVDA', action: 'Review 25% reduction', detail: 'Earnings in 2 days; position above target weight', tone: 'warn' },
       { asset: 'BTC', action: 'Hold', detail: 'Trend intact above the 20-day average', tone: 'ok' },
       { asset: 'SPY', action: 'Add on pullback', detail: 'Below target weight in the model', tone: 'info' },
-    ],
-    watching: [
-      { symbol: 'AAPL', trigger: 'ORB above 231.10', last: 229.84 },
-      { symbol: 'SPY', trigger: 'Reclaim 512.40', last: 511.02 },
-      { symbol: 'BTC-USD', trigger: 'Hold above 83,500', last: 84120.5 },
-      { symbol: 'NVDA', trigger: 'Pullback to SMA20', last: 118.35 },
     ],
     context: [
       { asset: 'US equities', trend: 'up', breadth: '62% above SMA50' },
