@@ -9,12 +9,18 @@
 //                  also capped so the WHOLE premium (the loss if the stop is gapped
 //                  or the option decays to zero) is at most MAX_PREMIUM_R x budget.
 //                  Without riskPerShare, the whole debit is the risk (old setups).
+//                  1-Contract Small-Account Cap: contracts are whole, so when the
+//                  budget rounds to 0 contracts, ONE is allowed if its risk to the
+//                  stop is at most SMALL_ACCOUNT.maxRiskPct (5.5%) of the bankroll
+//                  and its whole debit at most SMALL_ACCOUNT.maxDebitPct (12%);
+//                  tagged smallAccountCap so the user sees the real dollar risk.
 const { evaluateCosts } = require('./cost-authority');
 
 const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
 const MARKETS = ['crypto', 'stocks', 'options'];
 const MAX_PREMIUM_R = 3; // full-premium loss capped at 3x the per-trade risk budget
+const SMALL_ACCOUNT = Object.freeze({ maxRiskPct: 0.055, maxDebitPct: 0.12, label: '1-Contract Small-Account Cap' });
 // Capital cap: no single position may tie up more than this share of the
 // bankroll (notional for stocks/crypto, premium for options), however tight the
 // stop. Risk-based size first, then min(risk size, cap size); when the cap
@@ -92,9 +98,13 @@ function sizeOptions(candidate, riskBudget, bankroll, maxLeverage) {
   const byRisk = Math.floor(riskBudget / riskPerContract);
   const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * Math.min(maxLeverage, MAX_CAPITAL_ALLOCATION)) / premiumPerContract);
   const positionSize = Math.min(byRisk, byPremium);
+  if (positionSize < 1 && riskPerContract <= SMALL_ACCOUNT.maxRiskPct * bankroll && premiumPerContract <= SMALL_ACCOUNT.maxDebitPct * bankroll) {
+    return { positionSize: 1, dollarRisk: riskPerContract, notional: premiumPerContract, cappedByNotional: false, smallAccountCap: true };
+  }
   if (positionSize < 1) {
     return { error: byRisk < 1
-      ? `Bankroll too small: one contract risks $${riskPerContract.toFixed(2)} to the stop, budget is $${riskBudget.toFixed(2)}`
+      ? `Bankroll too small: one contract risks $${riskPerContract.toFixed(2)} to the stop, budget is $${riskBudget.toFixed(2)} `
+        + `(1-contract cap: risk <= ${SMALL_ACCOUNT.maxRiskPct * 100}% and debit <= ${SMALL_ACCOUNT.maxDebitPct * 100}% of the bankroll)`
       : `Bankroll too small: one contract's premium $${premiumPerContract.toFixed(2)} exceeds ${MAX_PREMIUM_R}x the $${riskBudget.toFixed(2)} risk budget or ${MAX_CAPITAL_ALLOCATION * 100}% of the bankroll` };
   }
   return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk };
@@ -123,8 +133,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   const { positionSize, dollarRisk } = sizing;
   // Entry leg liquidity (cost-authority.js): a strategy's resting limit inside
-  // its zone is maker, but only on PAPER; live Coinbase entries are market orders.
-  const entryLiquidity = candidate.entryLiquidity === 'maker' && (options.sizingBasis || 'paper') === 'paper' ? 'maker' : 'taker';
+  // its zone is maker on PAPER and on live Coinbase (a post-only limit entry,
+  // coinbase-api.js); anything else (e.g. live Alpaca market entries) is taker.
+  const basis = options.sizingBasis || 'paper';
+  const entryLiquidity = candidate.entryLiquidity === 'maker' && (basis === 'paper' || basis === 'coinbase-live') ? 'maker' : 'taker';
   const sized = { ...candidate, entryPrice, positionSize, dollarRisk, entryLiquidity };
 
   const cost = evaluateCosts(sized, dollarRisk);
@@ -137,6 +149,8 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     notional: sizing.notional,
     riskPct,
     ...(candidate.speculative ? { speculativeScale: scale, speculativeRiskPct: riskPct * scale } : {}),
+    // One contract above the profile budget (options on a small account): shown to the user as such.
+    ...(sizing.smallAccountCap ? { smallAccountCap: true, smallAccountLabel: SMALL_ACCOUNT.label, budgetRisk: riskBudget } : {}),
     // What it was sized against: the approval step refuses a LIVE execution of
     // an order that was not sized from that live account (venue-capital.js).
     sizingBankroll: configuredBankroll,
@@ -159,4 +173,4 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R, MAX_CAPITAL_ALLOCATION, SPECULATIVE_SCALE };
+module.exports = { processCandidate, isApproved, DEFAULT_RISK_PCT, MAX_PREMIUM_R, MAX_CAPITAL_ALLOCATION, SPECULATIVE_SCALE, SMALL_ACCOUNT };

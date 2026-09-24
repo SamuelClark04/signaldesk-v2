@@ -38,7 +38,8 @@ function blendedR({ market, entry, stop, t1, t2, share = T1_SHARE, entryLiquidit
 
 // input: { bars (daily, oldest first), entry, stop, targets: [{ level, price,
 //   allocation }] (the strategy's plan; the last one is the full target), market,
-//   entryLiquidity, fmt, breakout?: { atr }, lookbackDays?, checkNetR? (default true) }
+//   entryLiquidity, fmt, breakout?: { atr }, lookbackDays? (bars), checkNetR? (default true),
+//   unit? ({ bar: 'hourly', span: 'hours' } for intraday bars; default daily / days) }
 // -> { ok, targets, resistance, snapped, blended, text } or { ok:false, reason, text }.
 function planTargets(input) {
   const s = getStrictness();
@@ -58,21 +59,22 @@ function planTargets(input) {
     levels = levels.filter((l) => !inBase(l));
   }
   const r = levels[0] || null;
-  const span = `last ${bars.length} days`;
+  const unit = input.unit || { bar: 'daily', span: 'days' };
+  const span = `last ${bars.length} ${unit.span}`;
   const exempt = skipped ? ` Breakout: the base top ${fmt(skipped.price)} (${skipped.kind} ${day(skipped.time)}) is the level being broken, not a block.` : '';
-  if (!r) return { ok: true, targets: input.targets, resistance: null, snapped: false, text: `No major daily resistance between entry and the target ${fmt(full)} (${span}).${exempt}` };
+  if (!r) return { ok: true, targets: input.targets, resistance: null, snapped: false, text: `No major ${unit.bar} resistance between entry and the target ${fmt(full)} (${span}).${exempt}` };
   const where = `${fmt(r.price)} (${r.kind} ${day(r.time)}, ${span})`;
-  if (full <= r.price) return { ok: true, targets: input.targets, resistance: r, snapped: false, text: `The target ${fmt(full)} sits below the major daily resistance ${where}.${exempt}` };
+  if (full <= r.price) return { ok: true, targets: input.targets, resistance: r, snapped: false, text: `The target ${fmt(full)} sits below the major ${unit.bar} resistance ${where}.${exempt}` };
 
   const distR = (r.price - entry) / risk;
   if (distR < s.snapMinR) {
-    const text = `Major daily resistance ${where} is only ${distR.toFixed(2)}R above entry, under the target ${fmt(full)}; `
+    const text = `Major ${unit.bar} resistance ${where} is only ${distR.toFixed(2)}R above entry, under the target ${fmt(full)}; `
       + `${s.level} needs at least ${s.snapMinR}R of room to snap T1 below it.`;
     return { ok: false, reason: `RESISTANCE_BLOCKS_TARGET: ${text}`, resistance: r, text };
   }
   const t1 = fmt(r.price * SNAP_BELOW);
   const blended = blendedR({ market, entry, stop, t1, t2: full, entryLiquidity });
-  const text = `Major daily resistance ${where} sits ${distR.toFixed(2)}R above entry, under the ${fmt(full)} target: `
+  const text = `Major ${unit.bar} resistance ${where} sits ${distR.toFixed(2)}R above entry, under the ${fmt(full)} target: `
     + `T1 (${T1_SHARE * 100}%) snaps to ${t1} just below it and T2 (${(1 - T1_SHARE) * 100}% runner) stays at ${fmt(full)}; `
     + `blended ${blended.netR.toFixed(2)}R net of fees (${s.level} needs ${s.minNetR}R).${exempt}`;
   if (input.checkNetR !== false && blended.netR < s.minNetR) {

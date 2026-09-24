@@ -6,12 +6,15 @@
 //   1. Entry never filled (canceled/rejected/expired/failed, 0 filled) -> void it
 //   2. Entry filled                -> sync the real average fill price + filled qty
 //   3. Exit order FULLY filled     -> close at the exit's real average fill (BROKER_EXIT)
-//   4. Anything else (working, partially filled, broker unreachable) -> wait
+//   4. A post-only LIMIT entry (brokerEntryType 'limit') still unfilled after
+//      ENTRY_TTL_MS -> cancel it at the broker; the next pass voids it
+//   5. Anything else (working, partially filled, broker unreachable) -> wait
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 
 const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi };
 const QTY_EPSILON = 1e-9;
+const ENTRY_TTL_MS = 30 * 60 * 1000; // same window as the order guard
 
 // One warning per position/condition, not one per 60s tick.
 const warned = new Set();
@@ -42,6 +45,13 @@ async function reconcileOne(pos, ledger) {
   if (s.terminal && !(s.filledQty > 0)) {
     ledger.voidLivePosition(pos.id, `ENTRY_${String(s.status).toUpperCase()}`);
     return { id: pos.id, action: 'voided', detail: `entry ${s.status} with nothing filled` };
+  }
+
+  // Unfilled resting limit entry past its window: cancel (voided once Coinbase confirms).
+  if (!s.terminal && !(s.filledQty > 0) && pos.brokerEntryType === 'limit' && Date.now() - pos.openedAt > ENTRY_TTL_MS && api.cancelOrder) {
+    const c = await api.cancelOrder(pos.brokerId);
+    if (!c.ok) warnOnce(`${pos.id}:cancel`, `[reconcile] ${pos.id}: could not cancel the unfilled limit entry (${c.error})`);
+    return { id: pos.id, action: 'waiting', detail: c.ok ? 'unfilled limit entry canceled after 30 minutes' : c.error };
   }
 
   // 2. Record the real entry fill once it is known (or if it changed).

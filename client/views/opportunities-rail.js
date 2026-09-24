@@ -75,6 +75,7 @@
       el('div', { className: 'opp-card-body' }, [
         el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(o) }),
         el('span', { className: 'opp-card-meta', textContent: `${dir} — ${o.setupType || 'Setup'}` }),
+        ...(o.smallAccountCap ? [el('span', { className: 'opp-moon is-small-cap', textContent: '1-Contract Cap', title: `${o.smallAccountLabel}: risks $${Number(o.dollarRisk).toFixed(0)} to the stop` })] : []),
         ...(o.speculative ? [el('span', { className: 'opp-moon', textContent: 'Speculative Moonshot', title: `Micro-sized: ${Math.round((o.speculativeScale || 0) * 100)}% of normal risk` })] : []),
         el('span', { className: 'opp-card-sub' }, [`${String(o.timeframe || '—').toUpperCase()} `,
           el('span', { className: 'scan-state is-ready', textContent: view.inFlight.has(o.id) ? 'Sending…' : 'Ready' }),

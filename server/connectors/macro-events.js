@@ -27,7 +27,7 @@ const FILE = process.env.CATALYSTS_PATH || path.join(__dirname, '..', 'data', 'c
 const REFRESH_MS = 6 * 60 * 60 * 1000;
 const LOOKAHEAD_DAYS = 60;
 // How far ahead an event matters, by how long the setup is expected to be held.
-const HORIZON_DAYS = { 'equity-day': 1, 'crypto-swing': 7, 'equity-swing': 10, 'options-system': 21, 'portfolio-pilot': 30, 'speculative-crypto': 1 };
+const HORIZON_DAYS = { 'equity-day': 1, 'crypto-swing': 7, 'crypto-intraday': 1, 'equity-swing': 10, 'options-system': 21, 'portfolio-pilot': 30, 'speculative-crypto': 1 };
 const DEFAULT_HORIZON = 10;
 const HEALTHCARE = ['UNH', 'PFE']; // healthcare / pharma names in market/universe.js
 

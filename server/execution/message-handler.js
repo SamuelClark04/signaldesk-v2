@@ -13,6 +13,7 @@ const { runPipeline, getScanStatus } = require('./pipeline');
 const { requiredBasis } = require('../risk/venue-capital');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
+const coinbaseSocket = require('../connectors/coinbase-socket');
 const brokerSync = require('../connectors/broker-sync');
 const adoption = require('./adoption');
 const { suggestLevels } = require('../risk/adoption-levels');
@@ -45,7 +46,8 @@ async function routeApproved(order, livePrice) {
   if (order.sizingBasis !== needed) throw new Error(`SIZED_FOR_OTHER_VENUE: sized from ${order.sizingBasis || 'the paper bankroll'}, venue needs ${needed}`);
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
-  const result = await venue.api.submitOrder(order, order.positionSize, livePrice);
+  const tick = order.market === 'crypto' ? coinbaseSocket.getLatest()[order.asset] : null; // best bid for a post-only limit entry
+  const result = await venue.api.submitOrder(order, order.positionSize, livePrice, { bid: tick && tick.bid });
   if (!result.ok) {
     console.error(`[LIVE] ${venue.broker} order FAILED for ${order.id}: ${result.error}`);
     throw new Error(`LIVE_ORDER_FAILED: ${result.error}`);
@@ -58,7 +60,8 @@ async function routeApproved(order, livePrice) {
       brokerId: result.brokerId,
       broker: venue.broker,
       brokerEnvironment: result.environment,
-      fillEstimated: true, // market order: the broker's actual fill price is not fetched yet
+      fillEstimated: true, // the broker's actual fill price is not fetched yet
+      ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}),
     });
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.

@@ -6,6 +6,7 @@ const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const alpacaNews = require('../connectors/alpaca-news-socket');
 const equityDay = require('../strategies/1-equity-day');
 const cryptoSwing = require('../strategies/2-crypto-swing');
+const cryptoIntraday = require('../strategies/2-crypto-intraday'); // 15m / 1h day trades
 const equitySwing = require('../strategies/3-equity-swing');
 const optionsSystem = require('../strategies/5-options-system');
 const speculativeCrypto = require('../strategies/6-speculative-crypto'); // System 6, additive
@@ -46,6 +47,7 @@ function recordRejection(id, reason, candidate) {
 const STRATEGIES = [
   ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
   ['crypto-swing', () => cryptoSwing.generateCandidates(prices.getLatestPrices())],
+  ['crypto-intraday', () => cryptoIntraday.generateCandidates(prices.getLatestPrices())],
   ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
   ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
   ['speculative-crypto', () => speculativeCrypto.generateCandidates(prices.getLatestPrices())],
@@ -105,9 +107,9 @@ async function pipelinePass() {
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...optionsSystem.takeBlocks(), ...speculativeCrypto.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
+  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...cryptoIntraday.takeBlocks(), ...optionsSystem.takeBlocks(), ...speculativeCrypto.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
   // Scanner log: what each strategy concluded per symbol on this pass.
-  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
+  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['crypto-intraday', cryptoIntraday], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
     scanLog.scanned(id, mod.takeScan());
   }
   // Read once per pass: every candidate is sized with the same risk profile

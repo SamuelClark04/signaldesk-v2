@@ -12,6 +12,7 @@ const TIMEOUT_MS = 8000;
 // Coinbase has no 4-hour candles: 4h is built from 1-hour candles (`group`).
 const TIMEFRAMES = Object.freeze({
   '1m': { alpaca: '1Min', coinbase: 'ONE_MINUTE', sec: 60, lookbackDays: 7 },
+  '5m': { alpaca: '5Min', coinbase: 'FIVE_MINUTE', sec: 300, lookbackDays: 7 },
   '15m': { alpaca: '15Min', coinbase: 'FIFTEEN_MINUTE', sec: 900, lookbackDays: 14 },
   '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30 },
   '4h': { alpaca: '4Hour', coinbase: 'ONE_HOUR', sec: 14400, lookbackDays: 180, group: 4 },

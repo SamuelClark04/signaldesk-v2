@@ -1,10 +1,11 @@
-// The symbols SignalDesk monitors: 40 stocks + 40 crypto, with display names.
+// The symbols SignalDesk monitors: 40 stocks + 42 crypto, with display names.
 //   Stocks: liquid US stocks/ETFs. Alpaca's free (Basic) data plan allows 30
 //           WebSocket symbol subscriptions, so the first ALPACA_WS_SYMBOL_LIMIT
 //           (default 30) stream live 1m bars; the rest get display-only last
 //           closes (reference-prices.js). Raise the limit on a paid plan.
 //   Crypto: the 40 highest 24h-volume Coinbase USD pairs (stablecoins and
-//           wrapped coins excluded), snapshot of 2026-09-24. Coinbase ticker stream.
+//           wrapped coins excluded), snapshot of 2026-09-24, plus APT and RENDER
+//           (the intraday day-trading list, 2-crypto-intraday.js). Coinbase ticker stream.
 // CORE_WATCHLIST is the smaller first-run default for the Today "Watching" list.
 const STOCK_LIST = [
   ['SPY', 'SPDR S&P 500 ETF'], ['QQQ', 'Invesco QQQ Trust'], ['IWM', 'iShares Russell 2000 ETF'], ['AAPL', 'Apple'],
@@ -27,6 +28,7 @@ const CRYPTO_LIST = [
   ['AERO-USD', 'Aerodrome Finance'], ['AAVE-USD', 'Aave'], ['ARB-USD', 'Arbitrum'], ['PUMP-USD', 'Pump.fun'], ['INJ-USD', 'Injective'],
   ['XCN-USD', 'Onyxcoin'], ['BONK-USD', 'Bonk'], ['PEPE-USD', 'Pepe'], ['ALEO-USD', 'Aleo'], ['ICP-USD', 'Internet Computer'],
   ['DASH-USD', 'Dash'], ['DRV-USD', 'Derive'], ['ZRO-USD', 'LayerZero'], ['RAY-USD', 'Raydium'], ['FET-USD', 'Artificial Superintelligence Alliance'],
+  ['APT-USD', 'Aptos'], ['RENDER-USD', 'Render'],
 ];
 
 const STOCKS = Object.freeze(STOCK_LIST.map(([s]) => s));

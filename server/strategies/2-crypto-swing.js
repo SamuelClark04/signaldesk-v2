@@ -11,11 +11,11 @@
 //              read on every pass
 // Why: the risk engine rejects fee drag above 0.35R, and fee drag = blended
 // round-trip cost / stop %. Execution is modelled leg by leg (cost-authority.js):
-// the entry is a resting limit inside the zone (maker, on PAPER; live Coinbase
-// entries are market orders, taker), a target exit is a resting limit (maker),
+// the entry is a resting limit inside the zone (maker: paper, and live Coinbase
+// as a post-only limit at the bid), a target exit is a resting limit (maker),
 // a stop is taker + spread. US entry tier (0.50% maker / 0.90% taker + 0.10%
 // spread): 0.50% + (0.50% + 1.00%) / 2 = 1.25% blended round trip / 0.34R =
-// 3.7% stop on paper (5.2% live), instead of the old all-taker 6%.
+// 3.7% stop, instead of the old all-taker 6%.
 // Resistance (risk/target-plan.js): a major DAILY top under the target no longer
 // vetoes the setup when it is far enough away: T1 (50%) snaps just under it and
 // T2 (50% runner) keeps the full target, if the blended net reward still meets
@@ -36,9 +36,9 @@ const { createTally } = require('./scan-tally');
 const STRATEGY_ID = 'crypto-swing';
 
 const FEE_DRAG_BUDGET = 0.34; // under the gate's 0.35R, with a little room
-// Maker entry only while crypto executes on PAPER (Settings); unknown = taker (wider stop, safe).
-const entryLiquidity = () => { try { return require('../execution/ledger-store').getSettings().cryptoMode === 'paper' ? 'maker' : 'taker'; } catch { return 'taker'; } };
-const stopPct = () => minStopPct('crypto', entryLiquidity(), FEE_DRAG_BUDGET);
+// Maker entry: a limit inside the zone (post-only when live, coinbase-api.js).
+const entryLiquidity = () => 'maker';
+const stopPct = () => minStopPct('crypto', 'maker', FEE_DRAG_BUDGET);
 
 const CONFIG = {
   symbols: [...CRYPTO], // the monitored crypto universe (server/market/universe.js)
@@ -105,7 +105,7 @@ function candidate(symbol, live, s, now, ctx) {
     tradeType: CONFIG.tradeType,
     expectedDuration: CONFIG.expectedDuration,
     resistance: plan.resistance,
-    entryLiquidity: 'maker', // a resting limit inside the entry zone (the risk engine keeps it maker on paper only)
+    entryLiquidity: 'maker', // a resting limit inside the entry zone (post-only when live)
     newsSentiment: ctx.news && ctx.news.ok ? { score: ctx.news.score, label: ctx.news.label, source: ctx.news.source } : null,
     entryZone: { min: px(s.mean), max: entryMax },
     invalidation,

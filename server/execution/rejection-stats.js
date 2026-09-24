@@ -32,6 +32,7 @@ const BUCKETS = [
   [/^OPTIONS_NO_EXPECTED_MOVE/, 'Options: no ATM straddle for the Expected Move'],
   [/^OPTIONS_REWARD_TOO_LOW/, 'Options: reward too low inside the Expected Move'],
   [/^SPECULATIVE_SENTIMENT_WEAK/, 'Moonshot: spike without strong news sentiment'],
+  [/^SPECULATIVE_SCORE_LOW/, 'Moonshot: conviction score under 60/100'],
 ];
 
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD

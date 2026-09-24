@@ -56,6 +56,8 @@
         kv('Reward : risk', rr),
       ]),
       ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Speculative micro-size: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
+      ...(o.smallAccountCap ? [el('p', { className: 'apv-note is-small-cap', textContent: `${o.smallAccountLabel}: 1 contract risks ${money(o.dollarRisk)} `
+        + `(${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(1)}% of the bankroll) to its stop, above the ${money(o.budgetRisk)} profile budget; debit ${money(o.notional)}.` })] : []),
       ...(o.capitalCapped ? [el('p', { className: 'apv-note', textContent: `Capital cap: risking ${(o.actualRiskPct * 100).toFixed(2)}% instead of ${(o.riskPct * 100).toFixed(2)}%.` })] : []),
       ...(o.cappedByAmount ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
       ...catalystChips(o.catalysts),

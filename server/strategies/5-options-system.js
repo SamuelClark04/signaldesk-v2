@@ -16,6 +16,9 @@
 //                      the structural level by Delta-Gamma, clamped to a 30-38%
 //                      premium loss; T1 at 0.75-0.85 x EM where the call reaches
 //                      2.0-2.5R
+//   narrow spread      bankroll under $10,000 (Settings): always a $1-$2.50 wide
+//                      call debit spread costing $0.40-$1.10 (options-plan.js
+//                      planNarrow), so one spread risks $20-$55 at its 50% stop
 //   vertical spread    when the IV percentile (proxy, see expected-move.js) is
 //                      above 80 or an earnings / macro catalyst falls inside the
 //                      hold: long ~0.55 delta + short ~0.30 delta near the EM
@@ -35,7 +38,7 @@ const options = require('../connectors/options-data');
 const { expectedMove, ivPercentile } = require('../risk/expected-move');
 const { planTargets } = require('../risk/target-plan');
 const { deltaGamma } = require('../risk/option-greeks');
-const { planSingle, planVertical, SINGLE, VERTICAL } = require('./options-plan');
+const { planSingle, planVertical, planNarrow, SINGLE, VERTICAL, NARROW } = require('./options-plan');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
@@ -120,18 +123,32 @@ function singlePlan(calls, puts, live, structuralStop, now) {
   return plan.ok ? { ok: true, k: pick.contract, em, plan } : { ok: false, reason: `OPTIONS_REWARD_TOO_LOW: ${plan.error}` };
 }
 
+// The paper bankroll when it is a small account (narrow spreads), else null.
+const smallAccount = () => {
+  try { const b = require('../execution/ledger-store').getSettings().bankroll; return b > 0 && b < NARROW.maxBankroll ? b : null; } catch { return null; }
+};
+
 // Vertical: each expiration in the window (nearest mid-window first) until one
-// has a ~0.55 delta long, a short leg near the EM edge and a valid plan.
-function verticalPlan(calls, puts, live, now) {
+// has a ~0.55 delta long, a short leg near the EM edge (or, narrow, 1-2 strikes
+// up) and a valid plan.
+function verticalPlan(calls, puts, live, now, narrow = false) {
   const c = CONFIG.contract;
   const mid = (c.minDte + c.maxDte) / 2;
   const exps = [...new Map(calls.map((x) => [x.expiration, x.dte])).entries()].sort((a, b) => Math.abs(a[1] - mid) - Math.abs(b[1] - mid)).map(([e]) => e);
   let why = `no calls expiring in ${c.minDte}-${c.maxDte} days`;
+  const whys = [];
   for (const expiration of exps) {
-    const pick = options.selectContract(calls, { ...c, expiration, minDelta: VERTICAL.longDelta[0], maxDelta: VERTICAL.longDelta[1], targetDelta: VERTICAL.longDelta[2] }, now, live);
-    if (!pick.ok) { why = `OPTIONS_NO_CONTRACT: ${expiration}: ${pick.error}`; continue; }
     const em = expectedMove(calls, puts, live, expiration);
     if (!em.ok) { why = `OPTIONS_NO_EXPECTED_MOVE: ${em.error}`; continue; }
+    if (narrow) {
+      const plan = planNarrow({ chain: calls, expiration, spot: live, c, now, bankroll: narrow });
+      if (plan.ok) return { ok: true, k: plan.long, em, plan };
+      whys.push(plan.error.replace('small account, ', ''));
+      why = `OPTIONS_NO_CONTRACT: small account: ${whys.join(' | ')}`;
+      continue;
+    }
+    const pick = options.selectContract(calls, { ...c, expiration, minDelta: VERTICAL.longDelta[0], maxDelta: VERTICAL.longDelta[1], targetDelta: VERTICAL.longDelta[2] }, now, live);
+    if (!pick.ok) { why = `OPTIONS_NO_CONTRACT: ${expiration}: ${pick.error}`; continue; }
     const plan = planVertical({ long: pick.contract, chain: calls, spot: live, em: em.em, c, now });
     if (plan.ok) return { ok: true, k: pick.contract, em, plan };
     why = `OPTIONS_REWARD_TOO_LOW: ${plan.error}`;
@@ -172,9 +189,11 @@ async function propose(symbol, live, now, bars, s) {
   const hist = await getHistory(symbol, '1d-long', now);
   const ivp = ivPercentile(atm.iv, hist.ok ? hist.bars : []);
   const spreadWhy = [...(ivp.ok && ivp.pct > CONFIG.ivpSpread ? [`IV percentile ${ivp.pct.toFixed(1)} > ${CONFIG.ivpSpread}`] : []), ...cat.list.map((x) => `${x} inside the hold`)];
+  const small = smallAccount();
+  if (small) spreadWhy.unshift(`small account ($${small} bankroll, under $${NARROW.maxBankroll}): narrow spread`);
   const vertical = spreadWhy.length > 0;
 
-  const found = vertical ? verticalPlan(chain.contracts, puts.contracts, live, now) : singlePlan(chain.contracts, puts.contracts, live, structuralStop, now);
+  const found = vertical ? verticalPlan(chain.contracts, puts.contracts, live, now, small) : singlePlan(chain.contracts, puts.contracts, live, structuralStop, now);
   if (!found.ok) return block(symbol, date, found.reason);
   const { k, em, plan } = found;
   const t1Raw = plan.t1;
@@ -186,7 +205,7 @@ async function propose(symbol, live, now, bars, s) {
   let { targetValue, optionR } = plan;
   const t1 = tgt.snapped ? tgt.targets[0].price : t1Raw;
   if (tgt.snapped) {
-    targetValue = cents(vertical ? Math.min(plan.width, t1 - k.strike) : k.mid + deltaGamma(k.delta, k.gamma, t1 - live) - (k.ask - k.bid) / 2);
+    targetValue = cents(vertical ? Math.max(0, Math.min(plan.width, t1 - k.strike)) : k.mid + deltaGamma(k.delta, k.gamma, t1 - live) - (k.ask - k.bid) / 2);
     optionR = (targetValue - (vertical ? plan.debit : k.ask)) / plan.riskPerShare;
     const minR = vertical ? VERTICAL.minR : SINGLE.minR;
     if (optionR < minR) return block(symbol, date, `RESISTANCE_BLOCKS_TARGET: ${tgt.text} The option then reaches only ${optionR.toFixed(2)}R (needs ${minR}R).`);
@@ -208,7 +227,7 @@ async function propose(symbol, live, now, bars, s) {
   const emText = `Expected Move to ${fmtExp(k.expiration)}: ±${cents(em.em)} (${(em.pct * 100).toFixed(1)}%, ATM ${em.strike} straddle x 0.85); T1 ${t1} is ${(common.expectedMove.t1Share).toFixed(2)} x EM.`;
   const ivText = ivp.ok ? `IV percentile ${ivp.pct.toFixed(0)} (proxy: ATM IV ${(atm.iv * 100).toFixed(1)}% vs a year of realized vol).` : `IV percentile unavailable (${ivp.error}).`;
   const planText = vertical
-    ? `Vertical debit spread because ${optionsData.spreadReason}: buy ${k.symbol} (delta ${k.delta.toFixed(2)}) at ${k.ask}, sell ${plan.short.symbol} (delta ${plan.short.delta.toFixed(2)}, near the EM edge) at ${plan.short.bid}. `
+    ? `Vertical debit spread because ${optionsData.spreadReason}: buy ${k.symbol} (delta ${k.delta.toFixed(2)}) at ${k.ask}, sell ${plan.short.symbol} (delta ${plan.short.delta.toFixed(2)}, ${plan.narrow ? `${plan.width} wide: a narrow spread` : 'near the EM edge'}) at ${plan.short.bid}. `
       + `Net debit ${plan.debit} (${perContract(plan.debit)}), max profit ${plan.maxProfit} of the ${plan.width} width. Stop: spread worth ${plan.stopValue} (-50%, ${symbol} near ${plan.invalidation}); `
       + `T1: worth ${targetValue} (80% of max profit${tgt.snapped ? ', trimmed under resistance' : ''}; ${symbol} ${t1} at expiry), ${optionR.toFixed(2)}R. It exits on the spread's value, not a date.`
     : `Contract ${k.symbol} (${label}, ${k.dte} DTE): ask ${k.ask} / bid ${k.bid}, delta ${k.delta.toFixed(2)}, gamma ${k.gamma.toFixed(4)}, IV ${(k.iv * 100).toFixed(1)}%`

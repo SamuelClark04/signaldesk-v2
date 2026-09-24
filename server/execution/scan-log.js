@@ -12,7 +12,7 @@ const { bucket } = require('./rejection-stats');
 
 const MAX_ENTRIES = 20;
 const SYMBOLS_SHOWN = 8;
-const NAMES = { 'equity-day': 'Equity day (ORB)', 'crypto-swing': 'Crypto swing', 'equity-swing': 'Equity swing', 'options-system': 'Options swing', 'portfolio-pilot': 'Portfolio Pilot', 'speculative-crypto': 'Speculative Moonshots' };
+const NAMES = { 'equity-day': 'Equity day (ORB)', 'crypto-swing': 'Crypto swing', 'crypto-intraday': 'Crypto intraday (15m / 1h)', 'equity-swing': 'Equity swing', 'options-system': 'Options swing', 'portfolio-pilot': 'Portfolio Pilot', 'speculative-crypto': 'Speculative Moonshots' };
 
 let entries = []; // newest first
 let listener = null;

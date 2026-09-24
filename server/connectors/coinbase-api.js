@@ -140,21 +140,58 @@ async function getPortfolioBreakdown() {
 const ORDERS_PATH = '/api/v3/brokerage/orders';
 const base8 = (x) => (Math.floor(x * 1e8) / 1e8).toFixed(8).replace(/\.?0+$/, '');
 const quotePx = (p) => (p >= 1 ? p.toFixed(2) : p.toFixed(6));
+const INCREMENT_TTL_MS = 6 * 60 * 60 * 1000;
+const increments = new Map(); // product -> { at, quote, base } (public product details)
 
-// Market BUY for the risk-engine size, with an ATTACHED take-profit/stop-loss
-// bracket (trigger_bracket_gtc): the exits live at Coinbase and inherit the entry
-// size, so the position is protected even if SignalDesk is offline. Spot only:
-// shorts are refused. client_order_id = candidate id guards against duplicates.
-async function submitOrder(candidate, size, entryPrice) {
+// Price / size steps of a product (public endpoint, cached): orders off the
+// step are refused by Coinbase. null when unavailable (then the old rounding).
+async function productIncrements(product) {
+  const hit = increments.get(product);
+  if (hit && Date.now() - hit.at < INCREMENT_TTL_MS) return hit;
+  try {
+    const base = (process.env.COINBASE_API_BASE_URL || `https://${HOST}`).replace(/\/+$/, '');
+    const res = await fetch(`${base}/api/v3/brokerage/market/products/${encodeURIComponent(product)}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const j = res.ok ? await res.json() : null;
+    const quote = Number(j && j.quote_increment);
+    const size = Number(j && j.base_increment);
+    if (!(quote > 0 && size > 0)) return null;
+    const entry = { at: Date.now(), quote, base: size };
+    increments.set(product, entry);
+    return entry;
+  } catch { return null; }
+}
+// Decimals of a step (1e-8 prints in exponent form, so go through toFixed).
+const decimalsOf = (inc) => { const t = inc.toFixed(12).replace(/0+$/, ''); const i = t.indexOf('.'); return i < 0 ? 0 : t.length - i - 1; };
+// x on the step `inc`: 'down' floors (sizes, buy limits), else nearest.
+const onStep = (x, inc, mode) => (mode === 'down' ? Math.floor(x / inc + 1e-9) : Math.round(x / inc)) * inc;
+const fmtStep = (x, inc, mode) => onStep(x, inc, mode).toFixed(decimalsOf(inc));
+
+// BUY for the risk-engine size, with an ATTACHED take-profit/stop-loss bracket
+// (trigger_bracket_gtc): the exits live at Coinbase and inherit the entry size,
+// so the position is protected even if SignalDesk is offline. Spot only: shorts
+// are refused. client_order_id = candidate id guards against duplicates.
+// Entry: candidate.entryLiquidity 'maker' (a strategy's limit inside its entry
+// zone) is a POST-ONLY limit (limit_limit_gtc, post_only) at the best bid, never
+// above the zone: it rests on the book (maker fee) and Coinbase refuses it
+// rather than let it cross the spread. The reconciler cancels it if it is still
+// unfilled after 30 minutes. Otherwise a market IOC order (taker).
+// opts: { bid } the live best bid (coinbase-socket).
+async function submitOrder(candidate, size, entryPrice, opts = {}) {
   const c = candidate;
   const tp = c.targets && c.targets[0] && c.targets[0].price;
+  const maker = c.entryLiquidity === 'maker';
+  const inc = c.market === 'crypto' ? await productIncrements(c.asset) : null;
+  const px = (x, mode) => (inc ? fmtStep(x, inc.quote, mode) : quotePx(x));
+  const qty = inc ? fmtStep(size, inc.base, 'down') : base8(size);
+  const limit = maker ? Math.min(c.entryZone.max, opts.bid > 0 ? opts.bid : entryPrice) : null;
+  const buyAt = maker ? Number(px(limit, 'down')) : entryPrice;
   let problem = null;
   if (c.market !== 'crypto') problem = `Coinbase live routing supports crypto only (got "${c.market}")`;
   else if (c.direction !== 'long') problem = 'spot accounts cannot open shorts';
-  else if (!(size > 0) || base8(size) === '0') problem = `invalid size ${size}`;
+  else if (!(size > 0) || !(Number(qty) > 0)) problem = `invalid size ${size}`;
   else if (!(tp > 0)) problem = 'no take-profit: live bracket orders need one (Portfolio Pilot core holdings have none, by design); nothing was sent. Buy it on paper, or at the broker';
-  else if (!(tp > 0) || !(c.invalidation > 0) || !(c.invalidation < entryPrice && entryPrice < tp)) {
-    problem = `levels out of order: stop ${c.invalidation}, entry ${entryPrice}, target ${tp}`;
+  else if (!(c.invalidation > 0) || !(c.invalidation < buyAt && buyAt < tp)) {
+    problem = `levels out of order: stop ${c.invalidation}, entry ${buyAt}, target ${tp}`;
   }
   if (problem) return { ok: false, error: `Coinbase order not sent: ${problem}` };
 
@@ -168,9 +205,11 @@ async function submitOrder(candidate, size, entryPrice) {
         client_order_id: String(c.id),
         product_id: c.asset,
         side: 'BUY',
-        order_configuration: { market_market_ioc: { base_size: base8(size) } },
+        order_configuration: maker
+          ? { limit_limit_gtc: { base_size: qty, limit_price: px(limit, 'down'), post_only: true } }
+          : { market_market_ioc: { base_size: qty } },
         attached_order_configuration: {
-          trigger_bracket_gtc: { limit_price: quotePx(tp), stop_trigger_price: quotePx(c.invalidation) },
+          trigger_bracket_gtc: { limit_price: px(tp), stop_trigger_price: px(c.invalidation) },
         },
       },
     });
@@ -180,11 +219,24 @@ async function submitOrder(candidate, size, entryPrice) {
   // Coinbase reports rejections with HTTP 200 and success: false.
   if (!body || body.success !== true) {
     const e = (body && body.error_response) || {};
-    return { ok: false, error: `Coinbase rejected order: ${e.error_details || e.message || e.new_order_failure_reason || e.error || 'unknown reason'}` };
+    return { ok: false, error: `Coinbase rejected order: ${e.error_details || e.message || e.new_order_failure_reason || e.preview_failure_reason || e.error || 'unknown reason'}` };
   }
   const orderId = body.success_response && body.success_response.order_id;
   if (!orderId) return { ok: false, error: 'Coinbase: order response had no order_id' };
-  return { ok: true, brokerId: orderId, environment: 'coinbase-live' };
+  return { ok: true, brokerId: orderId, environment: 'coinbase-live', entryType: maker ? 'limit' : 'market', limitPrice: maker ? buyAt : null };
+}
+
+// Cancel a working order (an unfilled post-only entry). { ok } or { ok:false, error }.
+async function cancelOrder(orderId) {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    const body = await cbFetch(auth, 'POST', `${ORDERS_PATH}/batch_cancel`, { body: { order_ids: [String(orderId)] } });
+    const r = body && body.results && body.results[0];
+    return r && r.success ? { ok: true } : { ok: false, error: `Coinbase did not cancel ${orderId}: ${(r && r.failure_reason) || 'unknown reason'}` };
+  } catch (err) {
+    return failure(err);
+  }
 }
 
 // ---------- Order status (reconciliation) ----------
@@ -240,4 +292,4 @@ async function getOrderStatus(brokerId) {
   }
 }
 
-module.exports = { getAccount, getPortfolioBreakdown, submitOrder, getOrderStatus, buildJwt, loadSigningKey };
+module.exports = { getAccount, getPortfolioBreakdown, submitOrder, cancelOrder, getOrderStatus, productIncrements, buildJwt, loadSigningKey };

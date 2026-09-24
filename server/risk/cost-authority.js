@@ -8,8 +8,9 @@
 //   COINBASE_SPREAD_BUFFER  spread/slippage allowance for a TAKER leg (default 0.001)
 // Legs are costed by how they really execute:
 //   entry   maker when the strategy rests a limit inside its entry zone
-//           (candidate.entryLiquidity = 'maker') AND the order is paper; LIVE
-//           Coinbase entries are market IOC orders (coinbase-api.js): taker
+//           (candidate.entryLiquidity = 'maker'), on paper AND live: live
+//           Coinbase sends it as a post-only limit at the bid (coinbase-api.js),
+//           which Coinbase refuses rather than fill as taker; otherwise taker
 //   target  a resting limit sell (the live bracket's take-profit leg): maker
 //   stop    a triggered stop crosses the spread: taker + spread buffer
 // The gate's exit leg is the average of the target (maker) and stop (taker)
@@ -64,7 +65,7 @@ const blendedRoundTripRate = (market, entryLiquidity = 'taker') =>
 
 // Tightest stop (fraction of entry) whose blended costs stay within `budget` R,
 // rounded UP to 0.1%. Paper crypto with a maker entry at the US entry tier:
-// 0.50% + (0.50% + 1.00%) / 2 = 1.25% round trip -> 3.7% stop.
+// 0.50% + (0.50% + 1.00%) / 2 = 1.25% round trip -> 3.7% stop (paper and live).
 const minStopPct = (market, entryLiquidity, budget = 0.34) =>
   Math.ceil((blendedRoundTripRate(market, entryLiquidity) / budget) * 1000 - 1e-9) / 1000;
 
