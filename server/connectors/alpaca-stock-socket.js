@@ -8,6 +8,7 @@ const DEFAULT_SYMBOLS = ['AAPL', 'NVDA', 'SPY'];
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 60000;
 const PING_INTERVAL_MS = 30000;
+const MAX_BARS_PER_SYMBOL = 400; // one regular session is 390 one-minute bars
 
 // Alpaca error codes that won't fix themselves by reconnecting.
 const FATAL_CODES = new Set([401, 402, 404]); // not authenticated, auth failed, auth timeout
@@ -19,6 +20,7 @@ let backoff = BACKOFF_MIN_MS;
 let reconnectTimer = null;
 let pingTimer = null;
 let stopped = false;
+const barsBySymbol = new Map(); // symbol -> 1m bars, oldest first
 
 function logBar(bar) {
   console.log(`[alpaca] ${bar.symbol} ${bar.time} O:${bar.open} H:${bar.high} L:${bar.low} C:${bar.close} V:${bar.volume}`);
@@ -26,6 +28,14 @@ function logBar(bar) {
 
 function normalizeBar(m) {
   return { symbol: m.S, open: m.o, high: m.h, low: m.l, close: m.c, volume: m.v, vwap: m.vw, time: m.t };
+}
+
+// Buffer bars for strategies. There is no REST backfill, so after a restart the
+// buffer only holds bars received since reconnecting.
+function remember(bar) {
+  const list = (barsBySymbol.get(bar.symbol) || []).filter((b) => b.time !== bar.time);
+  list.push(bar);
+  barsBySymbol.set(bar.symbol, list.slice(-MAX_BARS_PER_SYMBOL));
 }
 
 function connect() {
@@ -81,9 +91,12 @@ function handleMessage(m) {
     case 'subscription':
       console.log(`[alpaca] subscribed bars=${JSON.stringify(m.bars)}`);
       break;
-    case 'b':
-      onBar(normalizeBar(m));
+    case 'b': {
+      const bar = normalizeBar(m);
+      remember(bar);
+      onBar(bar);
       break;
+    }
     case 'error':
       console.error(`[alpaca] error ${m.code}: ${m.msg}`);
       if (FATAL_CODES.has(m.code)) {
@@ -108,13 +121,18 @@ function scheduleReconnect() {
 }
 
 function init(options = {}) {
-  if (ws && !stopped) return { stop };
+  if (ws && !stopped) return { stop, getLatestBars };
   symbols = options.symbols || DEFAULT_SYMBOLS;
   onBar = options.onBar || logBar;
   stopped = false;
   backoff = BACKOFF_MIN_MS;
   connect();
-  return { stop };
+  return { stop, getLatestBars };
+}
+
+// Shaped for strategies' marketDataMap input: Map of symbol -> [1m bars].
+function getLatestBars() {
+  return new Map([...barsBySymbol].map(([s, list]) => [s, list.map((b) => ({ ...b }))]));
 }
 
 function stop() {
@@ -126,4 +144,4 @@ function stop() {
   ws = null;
 }
 
-module.exports = { init, stop };
+module.exports = { init, stop, getLatestBars };
