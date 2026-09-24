@@ -19,6 +19,7 @@ const optionsSystem = require('./strategies/5-options-system');
 const { processCandidate } = require('./risk/risk-engine');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
+const { sendApprovalAlert } = require('./execution/notifier');
 const prices = require('./market/latest-prices');
 
 const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
@@ -103,6 +104,14 @@ async function runPipeline() {
   }
 }
 
+// Fire-and-forget alert for a freshly staged order. Not awaited, so a slow
+// notifier can never stall the loop; sync throws and rejections are both caught.
+function notify(order) {
+  Promise.resolve()
+    .then(() => sendApprovalAlert(order))
+    .catch((err) => console.error(`[notifier] alert for ${order.id} failed: ${err.message}`));
+}
+
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
@@ -122,6 +131,7 @@ async function pipelinePass() {
       counts.staged += 1;
       broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
+      notify(staged);
     } catch (err) {
       // Expected when the same setup is re-proposed on the next tick (duplicate id).
       console.log(`[pipeline] not staged ${result.id}: ${err.message}`);
