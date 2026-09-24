@@ -47,11 +47,13 @@
     return rerender();
   }
 
-  function actionFailed({ id, error }) {
+  function actionFailed({ type, id, error }) {
+    if (type === 'ADOPT_POSITION') { SD.portfolioAdopt.failed(error); return rerender(); }
+    if (type === 'RELEASE_POSITION') return showNotice(`Stop managing failed: ${error}.`);
     closing.delete(id);
     const pos = mounted && (mounted.state.positions || []).find((x) => x.id === id);
     const reason = Object.keys(REASONS).find((k) => String(error).startsWith(k));
-    showNotice(`Close failed for ${pos ? pos.asset : id}: ${reason ? REASONS[reason] : error}.`);
+    return showNotice(`Close failed for ${pos ? pos.asset : id}: ${reason ? REASONS[reason] : error}.`);
   }
 
   // ---------- Header + KPIs ----------
@@ -75,16 +77,18 @@
     const card = (label, value, sub, cls = '') => el('div', { className: 'pf-kpi' }, [el('span', { className: 'pf-kpi-label', textContent: label }),
       el('strong', { className: `pf-kpi-value ${cls}`, textContent: value }), el('span', { className: 'pf-kpi-sub', textContent: sub })]);
     const liveNote = t.live ? ` · ${t.live} LIVE position${t.live === 1 ? '' : 's'} not in totals (broker account not synced)` : '';
-    const parts = [...(t.usePaper ? [`paper ${money(t.bankroll)} bankroll ${t.realized >= 0 ? '+' : '−'} ${money(Math.abs(t.realized))} realized`] : []),
-      ...(t.useCb ? [`Coinbase holdings + ${money(t.cbCash)} cash (sync ${clock(t.syncedAt)})`] : [])];
+    const usd = (x) => `${x < 0 ? '−' : ''}${money(Math.abs(x))}`;
+    const n = T().metrics(mounted.state, venueOf()).rows.length;
     return el('div', { className: 'pf-kpis' }, [
-      card('Account value', money(t.accountValue), `${parts.join(' · ')}${liveNote}`),
-      card('Holdings value', money(t.holdingsValue), t.unmarked ? `${t.unmarked} position(s) without a P/L mark` : t.useCb ? 'Live prices; Coinbase coins without one at their sync value' : 'Open positions at live prices'),
-      // Each setup is sized on its own (up to the bankroll in notional), so open
-      // positions can commit more than the bankroll: say so instead of hiding it.
-      !t.usePaper ? card('Spendable cash', money(t.cash), 'Coinbase USD + USDC at the last sync (live cash only; no paper money)')
-        : t.cash >= 0 ? card('Spendable cash', money(t.cash), `Not committed to open positions${t.useCb ? ' (paper) + Coinbase cash' : ` (${money(t.committed)} committed)`}`)
-        : card('Spendable cash', `−${money(-t.cash)}`, `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll${t.useCb ? ' (Coinbase cash included)' : ''}`, 'pnl-neg'),
+      // Total = Managed (SignalDesk positions) + External (broker coins it doesn't manage) + Cash.
+      card('Account value', usd(t.accountValue), `Total = ${usd(t.managedValue)} managed + ${usd(t.externalValue)} external + ${usd(t.cash)} cash${liveNote}`),
+      card('Capital deployed', usd(t.holdingsValue), `${n} position${n === 1 ? '' : 's'} · ${t.deployedPct === null ? '—' : `${(t.deployedPct * 100).toFixed(0)}%`} of the account; `
+        + `${usd(t.cash)} in cash${t.unmarked ? ` · ${t.unmarked} without a live mark` : ''}`),
+      // Cash is isolated per venue: paper money never counts as live buying power.
+      card('Spendable cash', usd(t.cash), !t.usePaper ? `Live Coinbase USD + USDC balance (sync ${clock(t.syncedAt)})`
+        : t.useCb ? `Paper cash ${usd(t.paperCash)} + live Coinbase USD/USDC ${usd(t.cbCash)} (kept separate when trading)`
+          : t.cash >= 0 ? 'Paper cash available: bankroll + realized − open paper positions'
+            : `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll`, t.cash < 0 ? 'pnl-neg' : ''),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
     ]);
   }
@@ -114,11 +118,18 @@
   function render(container, state) {
     mounted = { container, state };
     for (const id of closing) if (!(state.positions || []).some((p) => p.id === id)) closing.delete(id); // closed
-    const focusId = document.activeElement && document.activeElement.id === SD.portfolioPilot.focusId ? SD.portfolioPilot.focusId : null;
+    // Re-renders replace the DOM on every price tick: keep focus (and caret) in
+    // whichever input the user is typing in (allocator, adoption form).
+    const act = document.activeElement;
+    const focusId = act && act.id && container.contains(act) ? act.id : null;
+    let caret = null;
+    try { caret = focusId && act.selectionStart !== null ? [act.selectionStart, act.selectionEnd] : null; } catch { /* number inputs have no caret API */ }
     const data = T().metrics(state, venueOf());
     if (!data.rows.some((r) => r.p.id === selectedId)) selectedId = data.rows.length ? data.rows[0].p.id : null;
     const online = transport.isOnline();
     const onSelect = (id) => { selectedId = id; rerender(); };
+    const send = (msg) => transport.send(msg);
+    const livePrice = (asset) => state.prices && state.prices[asset];
 
     const tabs = el('nav', { className: 'pf-subnav' }, [['holdings', 'Holdings'], ['pilot', 'Portfolio Pilot']].map(([key, label]) => {
       const b = el('button', { type: 'button', className: `pf-subtab${key === subTab ? ' is-active' : ''}`, textContent: label });
@@ -131,15 +142,18 @@
       : el('div', { className: 'pf-holdings-view' }, [
         kpis(data.totals),
         el('div', { className: 'pf-grid' }, [
-          T().holdingsTable(data, { selectedId, onSelect, onClose, closing, online }),
+          T().holdingsTable(data, { selectedId, onSelect, onClose, closing, online, rerender, send, livePrice }),
           el('div', { className: 'pf-side' }, [T().exposure(data), T().attention(data, { onSelect, onPilot: () => { subTab = 'pilot'; rerender(); } })]),
         ]),
-        T().details(data.rows.find((r) => r.p.id === selectedId), state),
+        T().details(data.rows.find((r) => r.p.id === selectedId), state, { online, send }),
         venues(state),
       ].filter(Boolean));
 
     container.replaceChildren(tabs, header(), ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []), body);
-    if (focusId) { const input = document.getElementById(focusId); if (input) input.focus(); }
+    if (focusId) {
+      const input = document.getElementById(focusId);
+      if (input) { input.focus(); try { if (caret) input.setSelectionRange(caret[0], caret[1]); } catch { /* not a text input */ } }
+    }
   }
 
   SD.portfolio = {
@@ -147,5 +161,6 @@
     render,
     actionFailed,
     renderAllocation: (proposal) => { SD.portfolioPilot.allocationResult(proposal); rerender(); },
+    positionsUpdated: () => SD.portfolioAdopt.positionsUpdated(),
   };
 })();

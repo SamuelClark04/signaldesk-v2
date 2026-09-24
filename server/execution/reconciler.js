@@ -81,7 +81,8 @@ async function reconcileOne(pos, ledger) {
 // Returns one result per LIVE position: { id, action: closed|voided|synced|unchanged|waiting|error, ... }.
 // Positions are checked concurrently so one slow broker call can't stall the loop.
 async function reconcileLivePositions(activePositions, ledger) {
-  const live = (activePositions || []).filter((p) => p.execution === 'LIVE');
+  // Adopted holdings have no broker order to poll (they are watched, not traded).
+  const live = (activePositions || []).filter((p) => p.execution === 'LIVE' && !p.adopted);
   return Promise.all(live.map((pos) => reconcileOne(pos, ledger).catch((err) => {
     console.error(`[reconcile] ${pos.id} failed: ${err.message}`);
     return { id: pos.id, action: 'error', detail: err.message };

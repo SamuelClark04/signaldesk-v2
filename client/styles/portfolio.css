@@ -153,3 +153,16 @@
   .pf-exposure { flex-direction: column; align-items: stretch; }
   .pf-donut { align-self: center; }
 }
+
+/* ---------- Adoption (Phase 28) ---------- */
+.pf-adopt-btn { padding: 5px 12px; font-size: 12px; white-space: nowrap; }
+.pf-adopt-row td { padding: 14px 16px !important; background: var(--bg); white-space: normal; }
+.pf-adopt-head { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin-bottom: 10px; font-size: 13px; }
+.pf-adopt-head span { color: var(--text-muted); font-size: 12px; }
+.pf-adopt-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+.pf-adopt-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.pf-adopt-preview { margin: 10px 0 0; font: 13px var(--font-mono); }
+.pf-adopt-note { margin: 8px 0 0; padding: 8px 10px; border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 6px; color: var(--warn); font-size: 12px; }
+.pf-adopted { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.pf-adopted .pf-kv { align-items: center; }
+@media (max-width: 900px) { .pf-adopt-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

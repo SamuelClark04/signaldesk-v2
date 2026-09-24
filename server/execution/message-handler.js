@@ -14,6 +14,7 @@ const { requiredBasis } = require('../risk/venue-capital');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const brokerSync = require('../connectors/broker-sync');
+const adoption = require('./adoption');
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: their strikes and
@@ -156,6 +157,21 @@ function createMessageHandler({ send, broadcast }) {
     return undefined;
   }
 
+  // Adopt an external holding / stop managing it. Ledger changes only: no order
+  // is placed at the broker either way (see execution/adoption.js).
+  function handleAdoption(ws, msg) {
+    const type = msg.type;
+    try {
+      const result = type === 'ADOPT_POSITION' ? adoption.adopt(msg.payload) : ledger.releaseAdopted(String(msg.id || ''));
+      console.log(`[ledger] ${type} ${result.id}: ${result.positionSize} ${result.asset}${type === 'ADOPT_POSITION' ? ` stop ${result.invalidation} T1 ${result.targets[0].price}` : ''}`);
+      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
+    } catch (err) {
+      console.warn(`[ledger] ${type} failed: ${err.message}`);
+      send(ws, 'ACTION_FAILED', { type, id: msg.id || (msg.payload && msg.payload.asset), error: err.message });
+    }
+  }
+
   // "Sync Broker": read-only fetch of real broker holdings; every client gets the
   // new snapshot (BROKER_HOLDINGS). A repeat within 10 s is answered, not re-fetched.
   async function handleSync(ws) {
@@ -212,6 +228,7 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
+    if (msg.type === 'ADOPT_POSITION' || msg.type === 'RELEASE_POSITION') return handleAdoption(ws, msg);
     if (msg.type === 'SYNC_PORTFOLIO') return handleSync(ws).catch((err) => console.error('[broker-sync] sync crashed:', err));
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };

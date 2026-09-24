@@ -28,17 +28,26 @@ function costBasis(p) {
 }
 
 function alertFor(p, livePrice, now) {
-  const where = p.execution === 'LIVE' ? `LIVE at ${p.broker}` : 'paper';
+  const where = p.adopted ? `adopted at ${p.broker} (alerts only)` : p.execution === 'LIVE' ? `LIVE at ${p.broker}` : 'paper';
   const base = { asset: p.asset, positionId: p.id, execution: p.execution || 'PAPER' };
 
   if (!(livePrice > 0)) {
     return { ...base, tone: 'warn', action: 'No live price',
-      detail: p.execution === 'LIVE' ? 'Feed is quiet; the broker bracket still protects it, but verify at the broker'
+      detail: p.adopted ? `Feed is quiet: SignalDesk cannot watch its levels, and no orders protect it at ${p.broker}`
+        : p.execution === 'LIVE' ? 'Feed is quiet; the broker bracket still protects it, but verify at the broker'
         : 'Feed is quiet; paper stop/target checks are paused until prices return' };
   }
 
   const long = p.direction !== 'short';
   const t1 = p.targets && p.targets[0] && p.targets[0].price;
+  // Adopted holdings have no orders at the broker: when a level is reached,
+  // the ONLY exit is the user selling there, so say so first.
+  if (p.adopted && (long ? livePrice <= p.invalidation : livePrice >= p.invalidation)) {
+    return { ...base, tone: 'warn', action: 'Stop level hit: sell at broker', detail: `${p.asset} ${livePrice} is through your stop ${p.invalidation}; nothing sells it automatically (no orders at ${p.broker})` };
+  }
+  if (p.adopted && t1 > 0 && (long ? livePrice >= t1 : livePrice <= t1)) {
+    return { ...base, tone: 'warn', action: 'Target reached: sell at broker', detail: `${p.asset} ${livePrice} reached your target ${t1}; nothing sells it automatically (no orders at ${p.broker})` };
+  }
   const toTarget = t1 > 0 ? (livePrice - p.fillPrice) / (t1 - p.fillPrice) : 0;
   let pct;
   let status;

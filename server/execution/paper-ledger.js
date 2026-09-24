@@ -185,6 +185,33 @@ function voidLivePosition(candidateId, reason) {
   return { ...voided };
 }
 
+// ---------- Adopted holdings (external LIVE positions) ----------
+// A holding bought outside SignalDesk, put under its watch with user-chosen
+// levels. Recorded as a LIVE position flagged `adopted`: no broker order exists,
+// so the reconciler skips it and monitorPositions (paper exits) skips it too;
+// SignalDesk ALERTS on it (attention engine) but never places or sends orders.
+// Not a risk-engine order: it records money already invested, so isApproved()
+// does not apply. The caller (execution/adoption.js) validates everything.
+function adoptPosition(position) {
+  if (!position || !position.id || isKnown(position.id)) throw new Error('paper-ledger: invalid or duplicate adoption id');
+  const pos = { ...position, execution: 'LIVE', adopted: true, status: 'open', openedAt: Date.now() };
+  activePositions.push(pos);
+  store.save();
+  return { ...pos };
+}
+
+// Stop managing an adopted holding (the coins stay at the broker). It leaves the
+// book without a journal entry: SignalDesk never traded it.
+function releaseAdopted(candidateId) {
+  const i = findIndex(activePositions, candidateId);
+  if (i === -1 || !activePositions[i].adopted) throw new Error(`paper-ledger: ${candidateId} is not an adopted position`);
+  const [pos] = activePositions.splice(i, 1);
+  const released = { ...pos, status: 'released', releasedAt: Date.now() };
+  discardedOrders.push(released);
+  store.save();
+  return { ...released };
+}
+
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
@@ -204,6 +231,8 @@ module.exports = {
   monitorPositions,
   syncLiveFill,
   voidLivePosition,
+  adoptPosition,
+  releaseAdopted,
   getPendingOrders,
   getActivePositions,
   getTradeJournal,

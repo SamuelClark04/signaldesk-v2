@@ -112,7 +112,9 @@
 
   const HANDLERS = {
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
-    ACTION_FAILED: (payload) => (payload && payload.type === 'CLOSE_POSITION' ? SD.portfolio.actionFailed(payload) : SD.opportunities.actionFailed(payload)),
+    ACTION_FAILED: (payload) => (payload && ['CLOSE_POSITION', 'ADOPT_POSITION', 'RELEASE_POSITION'].includes(payload.type)
+      ? SD.portfolio.actionFailed(payload) : SD.opportunities.actionFailed(payload)),
+    POSITIONS_UPDATED: () => SD.portfolio.positionsUpdated(), // closes a pending adoption form
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),

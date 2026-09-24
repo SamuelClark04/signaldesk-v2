@@ -55,16 +55,19 @@
     const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
     let items;
     if (!m) {
-      items = ['Account value', 'Open positions', 'Open risk', 'Unrealized P/L', "Today's change"].map((l) => metric(l, dash, 'Waiting for data'));
+      items = ['Account value', 'Capital deployed', 'Open risk', 'Unrealized P/L', "Today's change"].map((l) => metric(l, dash, 'Waiting for data'));
     } else if (m.unsynced) {
       items = [metric('Account value', dash, 'Coinbase not synced: press Sync Broker'),
-        metric('Open positions', String(m.count), 'LIVE trades SignalDesk opened (no account totals yet)'),
+        metric('Capital deployed', dash, `${plural(m.count, 'LIVE trade')} SignalDesk opened (no account totals until synced)`),
         ...['Open risk', 'Unrealized P/L', "Today's change"].map((l) => metric(l, dash, 'Needs a Coinbase sync'))];
     } else {
       const { t } = m;
+      const usd = (x) => `${x < 0 ? '−' : ''}${money(Math.abs(x))}`;
+      const cashSource = !t.usePaper ? 'live Coinbase USD + USDC' : t.useCb ? `paper ${usd(t.paperCash)} + Coinbase ${usd(t.cbCash)}` : 'paper cash';
       items = [
-        metric('Account value', money(t.accountValue), `${SD.venue.LABEL[m.venue]} · cash ${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`),
-        metric('Open positions', String(m.count), `${money(t.holdingsValue)} at live prices`),
+        // Total = Managed (SignalDesk positions) + External (broker coins it doesn't manage) + Cash.
+        metric('Account value', usd(t.accountValue), `Total = ${usd(t.managedValue)} managed + ${usd(t.externalValue)} external + ${usd(t.cash)} cash (${cashSource})`),
+        metric('Capital deployed', usd(t.holdingsValue), `${plural(m.count, 'position')} · ${t.deployedPct === null ? '—' : `${(t.deployedPct * 100).toFixed(0)}%`} of the account · ${usd(t.cash)} in cash`),
         metric('Open risk', money(m.risk), `${t.currentBankroll > 0 ? `${((m.risk / t.currentBankroll) * 100).toFixed(2)}% of ${t.bankrollLabel} · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
         metric('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No marked positions' : `${pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
         metric("Today's change", signed(m.todayPnl, money), `${pct(m.todayPct)} · realized today (SignalDesk trades)`, pnlClass(m.todayPnl)),

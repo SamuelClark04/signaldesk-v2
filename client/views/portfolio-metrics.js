@@ -1,0 +1,170 @@
+// Portfolio money maths shared by Portfolio, Pilot, Today and the Setups risk
+// panel: live P/L marks, per-venue totals, and the capital breakdown
+//   Total = Managed (SignalDesk positions) + External (broker coins SignalDesk
+//           does not manage) + Cash.
+// P/L uses the ledger's own maths: gross = (price − fill) × size (× −1 short);
+// estimated exit fees use the position's fee model (sent by the server), exactly
+// as the ledger books a close. Options have no live option prices, so no $ P/L.
+// Exposes window.SignalDesk.portfolioMetrics.
+(() => {
+  const SD = window.SignalDesk;
+  const { clock } = SD.ui;
+  const QTY_DUST = 1e-8;
+
+  const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`;
+  const display = (p) => (p.market === 'crypto' ? p.asset.replace('-', '/') : p.asset);
+  const costBasis = (p) => (p.market === 'options' && p.optionsData
+    ? p.positionSize * p.optionsData.debit * p.optionsData.multiplier : p.positionSize * p.fillPrice);
+
+  // One position marked at a live price (null when there is no fresh price).
+  // Broker holdings without a live price are marked at their value from the
+  // last sync (priceSource 'sync'); their cost is Coinbase's own cost basis.
+  function mark(p, livePrice) {
+    if (p.execution === 'BROKER') return markBroker(p, livePrice);
+    const cost = costBasis(p);
+    const fm = p.feeModel || {};
+    const exitFees = (x) => (fm.perContractRoundTrip ? fm.perContractRoundTrip * p.positionSize
+      : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
+    if (!(livePrice > 0)) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
+    if (p.market === 'options') {
+      return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null,
+        underlyingMove: livePrice / p.fillPrice - 1 };
+    }
+    const sign = p.direction === 'short' ? -1 : 1;
+    const gross = (livePrice - p.fillPrice) * p.positionSize * sign;
+    const fees = exitFees(livePrice);
+    return { live: true, price: livePrice, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
+      pctGross: cost > 0 ? gross / cost : null, r: p.dollarRisk > 0 ? gross / p.dollarRisk : null };
+  }
+
+  function markBroker(p, livePrice) {
+    const qty = p.positionSize;
+    const syncPx = p.brokerValue > 0 && qty > 0 ? p.brokerValue / qty : null;
+    const px = livePrice > 0 ? livePrice : syncPx;
+    const cost = Number.isFinite(p.costBasis) && p.costBasis > 0 ? p.costBasis : p.fillPrice > 0 ? qty * p.fillPrice : null;
+    const marketValue = px ? qty * px : 0;
+    const gross = px && cost !== null ? marketValue - cost : null;
+    const fees = px && p.feeModel && p.feeModel.legRate ? p.feeModel.legRate * qty * ((p.fillPrice || px) + px) : null;
+    return { live: livePrice > 0, priceSource: livePrice > 0 ? 'live' : syncPx ? 'sync' : null, price: px, cost: cost === null ? marketValue : cost, marketValue,
+      gross, fees, net: gross === null || fees === null ? null : gross - fees, pctGross: gross !== null && cost > 0 ? gross / cost : null, r: null, noBasis: cost === null };
+  }
+
+  // Which rows a venue filter shows. 'crypto' = the synced Coinbase account; until
+  // a sync succeeds it falls back to the ledger's LIVE Coinbase positions. The
+  // ledger's LIVE Coinbase trades are part of the synced balance, so they are
+  // never added on top of it (they annotate the matching holding instead).
+  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase'], combined: ['paper', 'coinbase', 'alpaca-live'] };
+
+  function ledgerVenue(p) {
+    if (p.execution !== 'LIVE') return 'paper';
+    return p.broker === 'Coinbase' ? 'coinbase-ledger' : 'alpaca-live';
+  }
+
+
+  // A synced Coinbase holding: which part SignalDesk manages (its LIVE trades +
+  // adopted positions of that coin) and which part is external. Its alert is the
+  // most urgent one of the managed positions inside it, else a plain info line.
+  function brokerRow(p, ledger, alerts) {
+    const tracked = ledger.filter((x) => x.key === 'coinbase-ledger' && x.p.asset === p.asset).map((x) => x.p);
+    const managedQty = Math.min(p.positionSize, tracked.reduce((s, t) => s + t.positionSize, 0));
+    const freeQty = Math.max(0, Math.round((p.positionSize - managedQty) * 1e8) / 1e8); // 8 dp: no float noise
+    const urgent = tracked.map((t) => alerts.get(t.id)).filter(Boolean).find((a) => a.tone === 'warn') || null;
+    const adoptedOnly = tracked.length > 0 && tracked.every((t) => t.adopted);
+    const info = !tracked.length
+      ? { action: 'External holding', detail: 'Held at Coinbase; not managed by SignalDesk. Adopt it to have SignalDesk watch a stop and target.' }
+      : adoptedOnly
+        ? { action: 'Adopted: watched by SignalDesk', detail: 'SignalDesk alerts at your stop and target; no orders are placed at Coinbase (you sell there)' }
+        : { action: 'SignalDesk bracket at Coinbase', detail: `${tracked.length} SignalDesk position(s) in this balance; SignalDesk's own trades have stop/target orders at Coinbase` };
+    return { p: { ...p, tracked, managedQty, freeQty: freeQty > QTY_DUST ? freeQty : 0 }, key: 'coinbase',
+      alert: urgent ? { ...urgent, asset: p.asset } : { asset: p.asset, tone: 'info', ...info } };
+  }
+
+  // Rows + totals for the active venue. Paper KPIs use the configured bankroll;
+  // Coinbase KPIs use the synced account (holdings + cash); Combined sums both.
+  // LIVE Alpaca positions are listed under Combined but not synced, so excluded from KPIs.
+  function metrics(state, venue = 'paper') {
+    const alerts = new Map(((state.intelligence && state.intelligence.attention) || []).filter((a) => a.positionId).map((a) => [a.positionId, a]));
+    const cb = state.holdings && state.holdings.coinbase;
+    const synced = !!(cb && cb.ok);
+    const ledger = (state.positions || []).map((p) => ({ p, key: ledgerVenue(p) }));
+    const broker = synced ? cb.positions.map((p) => brokerRow(p, ledger, alerts)) : [];
+    const keys = new Set(VENUE_KEYS[venue] || VENUE_KEYS.paper);
+    if (!synced && keys.has('coinbase')) keys.add('coinbase-ledger'); // no snapshot yet: show what the ledger knows
+    const rows = [...ledger, ...broker].filter((r) => keys.has(r.key))
+      .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
+      .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset]), alert: r.alert || alerts.get(r.p.id) || null }));
+
+    const paper = rows.filter((r) => r.key === 'paper');
+    const cbRows = rows.filter((r) => r.key === 'coinbase');
+    const counted = [...paper, ...cbRows];
+    const usePaper = keys.has('paper');
+    const useCb = keys.has('coinbase') && synced;
+    const bankroll = usePaper ? (state.settings && state.settings.bankroll) || 0 : 0;
+    const realized = usePaper ? (state.journal || []).filter((t) => t.execution !== 'LIVE').reduce((s, t) => s + (t.netPnl || 0), 0) : 0;
+    const cbCash = useCb ? cb.cash || 0 : 0;
+    const paperCost = paper.reduce((s, r) => s + r.m.cost, 0);
+    const paperValue = paper.reduce((s, r) => s + r.m.marketValue, 0);
+    const cbValue = cbRows.reduce((s, r) => s + r.m.marketValue, 0);
+    // Managed vs external split of the Coinbase holdings, by quantity.
+    const cbManaged = cbRows.reduce((s, r) => s + (r.p.positionSize > 0 ? (r.m.marketValue * r.p.managedQty) / r.p.positionSize : 0), 0);
+    const unrealized = counted.reduce((s, r) => s + (r.m.gross || 0), 0);
+    const committed = counted.reduce((s, r) => s + (r.m.noBasis ? 0 : r.m.cost), 0); // no cost basis: not in the P/L % base
+    const paperCash = usePaper ? bankroll + realized - paperCost : 0;
+    const totals = {
+      venue, bankroll, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
+      holdingsValue: paperValue + cbValue,
+      managedValue: paperValue + cbManaged,
+      externalValue: cbValue - cbManaged,
+      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0),
+      cash: paperCash + cbCash,
+      unrealizedPct: committed > 0 ? unrealized / committed : null,
+      exitFees: counted.reduce((s, r) => s + (r.m.fees || 0), 0),
+      fresh: rows.filter((r) => r.m.live).length,
+      unmarked: counted.filter((r) => r.m.gross === null).length,
+      live: rows.length - counted.length,
+      // Venue-isolated bankroll: paper = configured bankroll; Live Crypto = the
+      // Coinbase account's value (holdings + cash); Combined = both.
+      liveAccountValue: useCb ? cbValue + cbCash : 0,
+    };
+    totals.currentBankroll = (usePaper ? bankroll : 0) + totals.liveAccountValue;
+    totals.bankrollLabel = [usePaper ? 'paper bankroll' : '', useCb ? 'Coinbase account value' : ''].filter(Boolean).join(' + ');
+    totals.deployedPct = totals.accountValue > 0 ? totals.holdingsValue / totals.accountValue : null;
+    return { rows, totals };
+  }
+
+  // The bankroll a single order is measured against, by the venue it will use:
+  // 'paper' | 'coinbase' | 'alpaca'. { amount|null, label, note }. Live accounts
+  // are only known after a sync (Coinbase) or from BROKER_STATE (Alpaca equity).
+  function venueBankroll(state, key) {
+    if (key === 'coinbase') {
+      const cb = state.holdings && state.holdings.coinbase;
+      if (!cb || !cb.ok) return { amount: null, label: 'Live Coinbase account value', note: 'not synced: press Sync Broker' };
+      return { amount: metrics(state, 'crypto').totals.liveAccountValue, label: 'Live Coinbase account value', note: `synced ${clock(cb.syncedAt)}` };
+    }
+    if (key === 'alpaca') {
+      const v = state.broker && state.broker.venues && state.broker.venues.alpaca;
+      if (!v || !v.ok || !(v.equity > 0)) return { amount: null, label: 'Live Alpaca equity', note: v && v.error ? `unavailable: ${v.error}` : 'unavailable' };
+      return { amount: v.equity, label: 'Live Alpaca equity', note: `as of ${clock(v.fetchedAt)}` };
+    }
+    const b = state.settings && state.settings.bankroll;
+    return { amount: b > 0 ? b : null, label: 'Paper bankroll', note: 'configured in Settings' };
+  }
+
+  // The cash that would pay for a new buy on this venue: { amount|null, label, note }.
+  function fundingSource(state, key) {
+    if (key === 'coinbase') {
+      const v = state.broker && state.broker.venues && state.broker.venues.coinbase;
+      if (v && v.ok && Number.isFinite(v.buyingPower)) return { amount: v.buyingPower, label: 'Coinbase USD + USDC cash', note: `as of ${clock(v.fetchedAt)}` };
+      const cb = state.holdings && state.holdings.coinbase;
+      if (cb && cb.ok) return { amount: cb.cash, label: 'Coinbase USD + USDC cash', note: `last sync ${clock(cb.syncedAt)}` };
+      return { amount: null, label: 'Coinbase USD + USDC cash', note: 'unknown: sync the broker' };
+    }
+    if (key === 'alpaca') {
+      const v = state.broker && state.broker.venues && state.broker.venues.alpaca;
+      return v && v.ok ? { amount: v.buyingPower, label: 'Alpaca buying power', note: `as of ${clock(v.fetchedAt)}` } : { amount: null, label: 'Alpaca buying power', note: 'unavailable' };
+    }
+    return { amount: metrics(state, 'paper').totals.paperCash, label: 'Paper cash available', note: 'bankroll + realized − open paper positions' };
+  }
+
+  SD.portfolioMetrics = { mark, metrics, venueBankroll, fundingSource, pct, display };
+})();

@@ -117,7 +117,28 @@
     const [modeKey, broker] = VENUE[o.market] || [null, '?'];
     const liveVenue = !!(ctx.settings && modeKey && ctx.settings[modeKey] === 'live');
     const basis = o.sizingBasis || 'paper'; // setups staged before venue sizing were all sized from paper
-    return { broker, basis, mismatch: hasLevels(o) && liveVenue && basis !== `${broker.toLowerCase()}-live` };
+    const venueKey = liveVenue ? broker.toLowerCase() : 'paper'; // 'paper' | 'coinbase' | 'alpaca'
+    return { broker, basis, venueKey, mismatch: hasLevels(o) && liveVenue && basis !== `${broker.toLowerCase()}-live` };
+  }
+
+  // The money, plainly: where the cash comes from, what the buy costs in total,
+  // and what is lost if the stop is hit (before and after fees).
+  function moneyGroup(o, ctx, ready) {
+    const { venueKey } = sizing(o, ctx);
+    const f = SD.portfolioMetrics.fundingSource(ctx.state || {}, venueKey);
+    const entryFee = o.costs && Number.isFinite(o.costs.entry) ? o.costs.entry : 0;
+    const required = Number.isFinite(o.notional) ? o.notional + entryFee : null;
+    const lossWithFees = o.scenarios && o.scenarios.stop ? -o.scenarios.stop.net : null;
+    const short = ready && f.amount !== null && required !== null && f.amount < required;
+    const fund = f.amount === null ? `${f.label}: ${f.note}` : `${f.label}: ${f.amount < 0 ? '−' : ''}${money(Math.abs(f.amount))}`;
+    return el('div', { className: 'opp-kv-group opp-money' }, [
+      kv('Funding source', fund, short ? 'text-short' : ''),
+      kv('Total capital required to buy', ready && required !== null ? `${money(required)}${entryFee ? ` (incl. ${money(entryFee)} est. fee)` : ''}` : '—'),
+      kv('Quantity (est.)', ready ? size(o) : '—'),
+      kv('Capital at risk (stop hit)', ready ? `${money(o.dollarRisk)}${lossWithFees !== null ? ` · ${money(lossWithFees)} incl. fees` : ''}` : '—', ready ? 'text-short' : ''),
+      ...(short ? [el('p', { className: 'opp-size-warn', textContent: `Not enough cash: the buy needs ${money(required)} but ${f.label} is ${f.amount < 0 ? "−" : ""}${money(Math.abs(f.amount))}.`
+        + (venueKey === 'paper' ? ' Paper will still fill it (over-committing the bankroll).' : ' The broker will reject the order.') })] : []),
+    ]);
   }
 
   function scenarioTable(o) {
@@ -187,7 +208,6 @@
     const { broker, basis, mismatch } = sizing(o, ctx);
     const sizedFrom = o.sizingBankroll > 0 ? `${money(o.sizingBankroll)} · ${BASIS[basis] || basis}` : `${BASIS[basis] || basis}`;
     const riskShare = o.sizingBankroll > 0 && o.dollarRisk > 0 ? o.dollarRisk / o.sizingBankroll : null;
-    const riskPct = riskShare === null ? '' : ` (${(riskShare * 100).toFixed(2)}%)`;
     const summary = ready && o.thesis ? o.thesis.split(/(?<=\.)\s/)[0] : '';
     return el('aside', { className: 'opp-right' }, [
       el('header', { className: 'opp-right-head' }, [
@@ -204,13 +224,10 @@
         kv('Take profit 2 (T2)', lv(() => (t[1] ? px(t[1].price, o) : '—')), ready ? 'text-long' : ''),
         ...(ready && o.optionsData ? [kv('Structure', `${(o.optionsData.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${o.optionsData.debit} debit`)] : []),
       ]),
-      el('div', { className: 'opp-kv-group' }, [
-        kv('Planned size (USD)', lv(() => cost(o.notional))),
-        kv('Quantity (est.)', lv(() => size(o))),
-      ]),
+      moneyGroup(o, ctx, ready),
       el('div', { className: 'opp-kv-group' }, [
         kv('Sizing basis', lv(() => sizedFrom)),
-        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`), mismatch ? 'text-short' : ''),
+        kv('Risk vs sizing bankroll', lv(() => (riskShare === null ? '—' : `${(riskShare * 100).toFixed(2)}% (${money(o.dollarRisk)})`)), mismatch ? 'text-short' : ''),
         ...(mismatch ? [el('p', { className: 'opp-size-warn', textContent: `Sized from the ${BASIS[basis] || basis}, but ${broker} is now LIVE. `
           + 'LIVE approval is blocked for this setup: dismiss it and the next scan re-proposes it sized from the live account.' })] : []),
         kv('Estimated entry cost', lv(() => cost(c.entry))),
