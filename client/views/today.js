@@ -158,7 +158,7 @@
             el('td', {
               className: 'num',
               textContent: w.lastPrice > 0 ? price(w.lastPrice, { market: w.market, entryPrice: w.lastPrice }) : '—',
-              title: w.lastPriceAt ? `as of ${new Date(w.lastPriceAt).toLocaleTimeString()}` : 'No price from the live streams yet',
+              title: w.lastPriceAt ? `as of ${new Date(w.lastPriceAt)[new Date(w.lastPriceAt).toDateString() === new Date().toDateString() ? 'toLocaleTimeString' : 'toLocaleString']()}` : 'No price from the live streams yet',
             }),
           ]))),
         ]);

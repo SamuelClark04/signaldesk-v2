@@ -127,19 +127,23 @@
     return el('label', { className: 'opp-search-wrap' }, input);
   }
 
-  // Every symbol with a live source: the default, the watchlist, then any streamed price.
+  // Every symbol with a price source: the default, the watchlist, streamed prices, last closes.
   function watchSymbols(state) {
     const fromWatchlist = (state.watchlist || []).map((w) => w.symbol);
-    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {})])]
+    return [...new Set([DEFAULT_WATCH, ...fromWatchlist, ...Object.keys(state.prices || {}), ...Object.keys(state.refPrices || {})])]
       .filter((s) => watchMarketOk(marketOf(s)) && matchesSearch(s, s.replace('-', '/')));
   }
 
   function watchButton(symbol, state, active) {
     const p = state.prices && state.prices[symbol];
+    const ref = !(p > 0) && state.refPrices && state.refPrices[symbol]; // last close while the feed is quiet
+    const shown = p > 0 ? p : ref && ref.price;
     const market = marketOf(symbol);
+    const px = el('span', { className: `opp-watch-px${ref ? ' is-stale' : ''}`, textContent: shown > 0 ? price(shown, { market, entryPrice: shown }) : '—' });
+    if (ref) px.title = `Last close, ${new Date(ref.time).toLocaleString()} (no live price: market closed or feed quiet)`;
     const btn = el('button', { type: 'button', className: `opp-watch${active ? ' is-active' : ''}` }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: symbol, market }) }),
-      el('span', { className: 'opp-watch-px', textContent: p > 0 ? price(p, { market, entryPrice: p }) : '—' }),
+      px,
     ]);
     btn.setAttribute('aria-pressed', String(active));
     btn.onclick = () => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
@@ -168,7 +172,7 @@
       segmented(RAIL_TOGGLE, assetFilter === 'options' ? null : assetFilter, 'opp-segmented', setFilter),
       el('div', { className: 'opp-rail-head' }, [el('h3', { className: 'opp-section', textContent: 'Queue' }),
         el('span', { className: 'count', textContent: filtered ? `${visible.length} / ${real.length}` : String(real.length) })]),
-      ...(visible.length ? visible.map((o) => railCard(o, o.id === activeId))
+      el('div', { className: 'opp-queue' }, visible.length ? visible.map((o) => railCard(o, o.id === activeId))
         : [el('p', { className: 'opp-muted', textContent: emptyText })]),
       el('h3', { className: 'opp-section opp-watch-head', textContent: 'Market watch' }),
       el('div', { className: 'opp-watchlist' }, watchable.length
@@ -177,6 +181,7 @@
     ]);
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
+      refPrice: state.refPrices ? state.refPrices[active.asset] : null,
       settings: state.settings,
       online: transport.isOnline(),
       busy: !active.isWatch && inFlight.has(active.id),
@@ -197,6 +202,8 @@
     // search box focused with the caret where it was.
     const focused = document.activeElement && document.activeElement.id === 'opp-search';
     const caret = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    const SCROLLERS = ['.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
+    const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
     const tabs = el('div', { className: 'opp-subnav' }, ['setups', 'scanner', 'saved'].map((t) => {
       const b = el('button', { type: 'button', className: `opp-subtab${t === subTab ? ' is-active' : ''}`, textContent: t[0].toUpperCase() + t.slice(1) });
@@ -217,6 +224,7 @@
       input.focus();
       input.setSelectionRange(caret[0], caret[1]);
     }
+    SCROLLERS.forEach((sel, i) => { const n = container.querySelector(sel); if (n) n.scrollTop = scrolls[i]; });
   }
 
   // Keep "staged N ago" fresh while the tab is on screen.

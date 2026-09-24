@@ -75,6 +75,18 @@ function checkUpgrade(req, port) {
   return { ok: true };
 }
 
+// Decide one plain HTTP API request (read-only data such as /api/history). Same
+// rules as the socket: a browser always sends Origin on a cross-origin request, so
+// other websites are refused; other LAN devices must send the X-SignalDesk-Token header.
+function checkHttp(req, port) {
+  const origin = req.headers.origin;
+  if (origin && !isAllowedOrigin(origin, port)) return { ok: false, reason: `origin ${origin}` };
+  if (LAN_ACCESS && !isLoopbackSocket(req) && !tokenMatches(req.headers['x-signaldesk-token'])) {
+    return { ok: false, reason: `missing/invalid access token from ${req.socket.remoteAddress}` };
+  }
+  return { ok: true };
+}
+
 // URLs to open on a phone (one per private IPv4 interface), token included.
 function lanUrls(port) {
   if (!LAN_ACCESS) return [];
@@ -83,4 +95,4 @@ function lanUrls(port) {
     .map((i) => `http://${i.address}:${port}/?token=${TOKEN}`);
 }
 
-module.exports = { HOST, LAN_ACCESS, checkUpgrade, isAllowedOrigin, isPrivateIPv4, lanUrls };
+module.exports = { HOST, LAN_ACCESS, checkUpgrade, checkHttp, isAllowedOrigin, isPrivateIPv4, lanUrls };

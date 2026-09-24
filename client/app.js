@@ -23,6 +23,16 @@
   const isLocalPage = ['localhost', '127.0.0.1', ''].includes(location.hostname);
   const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || DEFAULT_HOST}/ws`
     + (accessToken ? `?token=${encodeURIComponent(accessToken)}` : '');
+  // Read-only HTTP API (chart history). LAN devices send the token as a header.
+  const API_BASE = location.protocol === 'file:' ? `http://${DEFAULT_HOST}` : '';
+  SD.api = {
+    async getJson(path) {
+      const res = await fetch(`${API_BASE}${path}`, { headers: accessToken ? { 'X-SignalDesk-Token': accessToken } : {} });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+      return body;
+    },
+  };
   const TABS = ['today', 'opportunities', 'portfolio', 'journal', 'settings'];
   const DEFAULT_TAB = 'opportunities';
 
@@ -30,7 +40,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null };
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -44,6 +54,7 @@
     WATCHLIST_UPDATED: (items) => { state.watchlist = items || []; },
     DASHBOARD_INTELLIGENCE: (intel) => { state.intelligence = intel; },
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
+    REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
   };
 
   // State-driven views: rendered on entering their tab and on every state change

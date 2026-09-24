@@ -19,14 +19,15 @@ const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
 const watchlist = require('./execution/watchlist');
 const prices = require('./market/latest-prices');
+const referencePrices = require('./market/reference-prices');
+const { STOCKS, CRYPTO } = require('./market/universe');
+const { getHistory } = require('./connectors/history-bars');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
-const { HOST, LAN_ACCESS, checkUpgrade, lanUrls } = require('./security/access-policy');
+const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls } = require('./security/access-policy');
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-const STOCK_WATCHLIST = ['AAPL', 'NVDA', 'SPY'];
-const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD'];
 
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
@@ -35,6 +36,21 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), clients: wss.clients.size });
+});
+
+// Chart history: last 100 bars (?tf=1m default, or 1h) from Alpaca (stocks) or
+// Coinbase (crypto, symbols with "-"). Read-only, but it spends broker API quota,
+// so it is guarded like the socket (origin + LAN token).
+app.get('/api/history/:symbol', async (req, res) => {
+  const verdict = checkHttp(req, PORT);
+  if (!verdict.ok) {
+    console.warn(`[security] rejected /api/history: ${verdict.reason}`);
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'));
+  res.set('Cache-Control', 'no-store');
+  if (result.ok) return res.json(result.bars);
+  return res.status(result.status || 502).json({ error: result.error });
 });
 
 const server = http.createServer(app);
@@ -81,6 +97,7 @@ wss.on('connection', (ws) => {
   send(ws, 'REJECTION_STATS', rejectionStats.snapshot());
   send(ws, 'WATCHLIST_UPDATED', watchlist.getWatchlist());
   send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
+  send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
   try {
     send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
   } catch (err) {
@@ -101,17 +118,20 @@ const heartbeat = setInterval(() => {
 }, 30000);
 
 function start() {
-  alpacaStocks.init({ symbols: STOCK_WATCHLIST });
+  alpacaStocks.init({ symbols: STOCKS });
   // News stream (Event Catalyst Engine). Alpaca's connection limit is per endpoint,
   // so it doesn't compete with the bar stream; a 406/404 is retried quietly with
   // backoff inside the connector (see alpaca-news-socket.js).
-  alpacaNews.init({ symbols: STOCK_WATCHLIST });
-  coinbase.init({ symbols: CRYPTO_WATCHLIST });
+  alpacaNews.init({ symbols: STOCKS });
+  coinbase.init({ symbols: CRYPTO });
+  // Last closes for quiet stocks (display only), so a closed market isn't all "—".
+  referencePrices.start({ symbols: STOCKS, onChange: (closes) => broadcast('REFERENCE_PRICES', closes) });
   startPipeline({ broadcast });
 }
 
 function shutdown() {
   stopPipeline();
+  referencePrices.stop();
   clearInterval(heartbeat);
   alpacaStocks.stop();
   alpacaNews.stop();

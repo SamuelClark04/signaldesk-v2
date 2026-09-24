@@ -67,7 +67,9 @@
     return chart;
   }
 
-  function center(o, { livePrice }) {
+  function center(o, { livePrice, refPrice }) {
+    // No live price: show the last close (display only) instead of a bare "—".
+    const ref = !(livePrice > 0) && refPrice && refPrice.price > 0 ? refPrice : null;
     const watch = !hasLevels(o);
     const dir = o.direction === 'short' ? 'short' : 'long';
     const change = !watch && livePrice > 0 && o.entryPrice > 0 ? livePrice / o.entryPrice - 1 : null;
@@ -77,10 +79,12 @@
         ...(watch ? [el('span', { className: 'opp-watch-tag', textContent: 'Market watch' })] : [el('span', { className: `badge-${dir}`, textContent: dir })]),
         el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}${o.strategyId ? ` · ${o.strategyId}` : ''}` }),
         el('span', { className: 'opp-last' }, [
-          el('span', { className: 'opp-k', textContent: 'Last ' }),
-          el('strong', { textContent: livePrice > 0 ? px(livePrice, o) : '—' }),
+          el('span', { className: 'opp-k', textContent: ref ? 'Last close ' : 'Last ' }),
+          el('strong', { textContent: livePrice > 0 ? px(livePrice, o) : ref ? px(ref.price, o) : '—' }),
           ...(change === null ? [] : [el('span', { className: pnlClass(change), textContent: ` ${change >= 0 ? '+' : '−'}${Math.abs(change * 100).toFixed(2)}% vs entry` })]),
-          ...(livePrice > 0 ? [] : [el('span', { className: 'opp-k', textContent: ' · no fresh price (market closed or feed quiet)' })]),
+          ...(livePrice > 0 ? [] : [el('span', { className: 'opp-k', textContent: ref
+            ? ` · ${new Date(ref.time).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, no live price (market closed or feed quiet)`
+            : ' · no fresh price (market closed or feed quiet)' })]),
         ]),
       ]),
       // Live candles when the chart library loaded; static level chart otherwise.

@@ -155,3 +155,14 @@
 .opp-lwc-canvas { position: absolute; inset: 0; }
 .opp-lwc .opp-watch-mode { top: 12px; transform: none; z-index: 2; }
 .opp-lwc .opp-chart-note { z-index: 2; left: 8px; bottom: 30px; padding: 1px 6px; border-radius: 4px; background: rgba(11, 17, 32, 0.8); }
+
+/* ---------- Scrollable rail lists (queue, market watch) ---------- */
+.opp-queue { display: flex; flex-direction: column; gap: 8px; max-height: 45vh; overflow-y: auto; }
+/* About ten rows, less on short screens; scrolls beyond that. */
+.opp-watchlist { max-height: clamp(180px, calc(100vh - 300px), 382px); overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.opp-queue, .opp-watchlist { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.opp-queue::-webkit-scrollbar, .opp-watchlist::-webkit-scrollbar { width: 6px; }
+.opp-queue::-webkit-scrollbar-track, .opp-watchlist::-webkit-scrollbar-track { background: transparent; }
+.opp-queue::-webkit-scrollbar-thumb, .opp-watchlist::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.opp-queue::-webkit-scrollbar-thumb:hover, .opp-watchlist::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+.opp-watch-px.is-stale { color: var(--text-faint); font-style: italic; }

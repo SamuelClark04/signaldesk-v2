@@ -7,20 +7,24 @@
 //   triggerCondition is descriptive text: nothing evaluates it yet.
 //   lastPrice keeps the last known value when a feed goes quiet (e.g. overnight),
 //   with lastPriceAt showing how old it is. Prices exist only for symbols the
-//   connectors stream (stocks: AAPL/NVDA/SPY bars; crypto: BTC-USD/ETH-USD ticks).
+//   connectors stream (server/market/universe.js); after a restart with the market
+//   closed, reference-prices.js seeds the last close.
 const fs = require('fs');
 const path = require('path');
+const { STOCKS, CRYPTO } = require('../market/universe');
 
 const FILE = process.env.WATCHLIST_PATH || path.join(__dirname, '..', 'data', 'watchlist.json');
 const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
 const MAX_TRIGGER_LENGTH = 80;
 
-const DEFAULTS = [
-  { symbol: 'AAPL', triggerCondition: 'Breakout above 231.10' },
-  { symbol: 'NVDA', triggerCondition: 'Pullback to SMA20 after earnings' },
-  { symbol: 'SPY', triggerCondition: 'Reclaim of 512.40' },
-  { symbol: 'BTC-USD', triggerCondition: 'Reclaim of rolling mean after a 0.4% flush' },
-];
+// First-run defaults: every streamed symbol. Descriptive triggers where one exists.
+const DEFAULT_TRIGGERS = {
+  AAPL: 'Breakout above 231.10',
+  NVDA: 'Pullback to SMA20 after earnings',
+  SPY: 'Reclaim of 512.40',
+  'BTC-USD': 'Reclaim of rolling mean after a 0.4% flush',
+};
+const DEFAULTS = [...STOCKS, ...CRYPTO].map((symbol) => ({ symbol, triggerCondition: DEFAULT_TRIGGERS[symbol] || 'Price watch: no trigger set' }));
 
 const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
 const makeItem = ({ symbol, triggerCondition }) => ({
@@ -110,6 +114,22 @@ function syncPrices(latestPricesMap, now = Date.now()) {
   return dirty;
 }
 
+// Last closes from reference-prices.js ({ SYM: { price, time } }): fills only
+// items with no price at all, with the close's real timestamp. Live prices win.
+function seedPrices(closes) {
+  let dirty = false;
+  for (const item of items) {
+    const c = closes && closes[item.symbol];
+    if (item.lastPrice == null && c && c.price > 0) {
+      item.lastPrice = c.price;
+      item.lastPriceAt = c.time;
+      dirty = true;
+    }
+  }
+  if (dirty) changed();
+  return dirty;
+}
+
 // server.js registers a broadcaster here, so producers never touch sockets.
 function onChange(fn) {
   listener = fn;
@@ -117,4 +137,4 @@ function onChange(fn) {
 
 load();
 
-module.exports = { getWatchlist, addWatchlist, removeWatchlist, syncPrices, onChange };
+module.exports = { getWatchlist, addWatchlist, removeWatchlist, syncPrices, seedPrices, onChange };

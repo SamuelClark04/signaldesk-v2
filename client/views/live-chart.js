@@ -1,9 +1,9 @@
 // Opportunities center chart: TradingView Lightweight Charts candlesticks.
-// There is no bars endpoint yet, so the history behind the live candles is
-// SYNTHETIC (a seeded random walk ending at the first real price) and the chart
-// says so. Candles from page load onward are built from real PRICES_UPDATED
-// ticks (1-minute buckets). One chart instance is reused across re-renders:
-// its host node is handed back to the view each time, so the canvas survives.
+// History: the last 100 real 1-minute bars from /api/history/:symbol (Alpaca IEX
+// for stocks, Coinbase for crypto), fetched when a symbol is first shown. The
+// forming candle is then updated from real PRICES_UPDATED ticks (1m buckets).
+// One chart instance is reused across re-renders: its host node is handed back
+// to the view each time, so the canvas survives.
 // Exposes window.SignalDesk.liveChart. mount() returns null if the library
 // failed to load (offline), and the view falls back to the static level chart.
 (() => {
@@ -11,16 +11,16 @@
   const { el, price } = SD.ui;
 
   const BAR_SEC = 60;
-  const HISTORY_BARS = 80;
   const MAX_LIVE_BARS = 600;
+  const REFETCH_MS = 5 * 60 * 1000; // history older than this is refetched when the symbol is shown again
   const UP = '#26a69a';
   const DOWN = '#ef5350';
 
   const live = new Map(); // symbol -> real 1m bars from ticks, oldest first
-  const synth = new Map(); // symbol -> { bars, anchoredLive }
-  let view = null; // { host, note, chart, series, symbol, synthRef, shownLive, levelsKey, lines, levels }
+  const history = new Map(); // symbol -> { status: 'loading'|'ok'|'error', bars, byTime, error, at }
+  let view = null; // chart instance + what it currently shows
 
-  // ---------- Real candles from ticks (called for every PRICES_UPDATED) ----------
+  // ---------- Live candles from ticks (called for every PRICES_UPDATED) ----------
   function record(prices) {
     const bucket = Math.floor(Date.now() / 1000 / BAR_SEC) * BAR_SEC;
     for (const [symbol, p] of Object.entries(prices || {})) {
@@ -37,56 +37,39 @@
     }
   }
 
-  // ---------- Synthetic history (placeholder until a bars endpoint exists) ----------
-  function seeded(symbol) {
-    let s = [...symbol].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0;
-    return () => { // mulberry32
-      s = (s + 0x6d2b79f5) >>> 0;
-      let t = s;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+  // ---------- Real history ----------
+  function loadHistory(symbol) {
+    const current = history.get(symbol);
+    const maxAge = current && current.status === 'error' ? 30000 : REFETCH_MS; // retry failures sooner
+    if (current && (current.status === 'loading' || Date.now() - current.at < maxAge)) return;
+    history.set(symbol, { ...(current || { bars: [], byTime: new Map() }), status: 'loading', at: Date.now() });
+    SD.api.getJson(`/api/history/${encodeURIComponent(symbol)}?tf=1m`)
+      .then((bars) => {
+        const clean = (Array.isArray(bars) ? bars : []).filter((b) => b && Number.isFinite(b.time) && b.close > 0);
+        history.set(symbol, { status: 'ok', bars: clean, byTime: new Map(clean.map((b) => [b.time, b])), at: Date.now() });
+      })
+      .catch((err) => history.set(symbol, { status: 'error', bars: [], byTime: new Map(), error: err.message, at: Date.now() }))
+      .finally(() => { if (view && view.o && view.o.asset === symbol) paint(); });
   }
 
-  // Walks backward from the anchor so the last synthetic close meets the first real price.
-  function makeHistory(symbol, market, endTime, endPrice) {
-    const rand = seeded(symbol);
-    const vol = market === 'crypto' ? 0.0012 : 0.0008;
-    const gauss = () => (rand() + rand() + rand() - 1.5) * 1.4;
-    const bars = [];
-    let close = endPrice;
-    for (let i = 1; i <= HISTORY_BARS; i += 1) {
-      const open = close * (1 + vol * gauss());
-      const wick = () => vol * Math.abs(gauss()) * 0.6;
-      bars.unshift({
-        time: endTime - i * BAR_SEC, open, close,
-        high: Math.max(open, close) * (1 + wick()), low: Math.min(open, close) * (1 - wick()),
-      });
-      close = open;
-    }
-    return bars;
+  // A live bar merged into the history bar of the same minute (history knows the true open/high/low).
+  function mergeBar(h, b) {
+    const hb = h && h.byTime.get(b.time);
+    return hb ? { time: b.time, open: hb.open, high: Math.max(hb.high, b.high), low: Math.min(hb.low, b.low), close: b.close } : { ...b };
   }
 
-  // History is regenerated once, when the first real price arrives, if it was
-  // first anchored on the setup's entry price (no feed yet).
-  function history(o, fallbackPrice) {
-    const bars = live.get(o.asset) || [];
-    const current = synth.get(o.asset);
-    if (current && (current.anchoredLive || !bars.length)) return current;
-    const first = bars[0];
-    const anchor = first ? first.open : fallbackPrice;
-    if (!(anchor > 0)) return null;
-    const end = first ? first.time : Math.floor(Date.now() / 1000 / BAR_SEC) * BAR_SEC + BAR_SEC;
-    const next = { bars: makeHistory(o.asset, o.market, end, anchor), anchoredLive: !!first };
-    synth.set(o.asset, next);
-    return next;
+  function mergedBars(symbol) {
+    const h = history.get(symbol);
+    const byTime = new Map(((h && h.bars) || []).map((b) => [b.time, { ...b }]));
+    for (const b of live.get(symbol) || []) byTime.set(b.time, mergeBar(h, b));
+    return [...byTime.values()].sort((a, b) => a.time - b.time);
   }
 
   // ---------- Chart instance ----------
   function css(name, fallback) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   }
+  const localTime = (t, opts) => new Date(t * 1000).toLocaleString([], opts);
 
   function create() {
     const LWC = window.LightweightCharts;
@@ -101,7 +84,12 @@
       layout: { background: { type: 'solid', color: css('--bg', '#0b1120') }, textColor: css('--text-muted', '#94a3b8'), fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderColor: css('--border', '#1f2a3c') },
-      timeScale: { borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      // Real bars carry real timestamps: show them in the viewer's local time, not UTC.
+      localization: { timeFormatter: (t) => localTime(t, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) },
+      timeScale: {
+        borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4,
+        tickMarkFormatter: (t, type) => (type < 3 ? localTime(t, { month: 'short', day: 'numeric' }) : localTime(t, { hour: '2-digit', minute: '2-digit' })),
+      },
       crosshair: { mode: LWC.CrosshairMode.Normal },
     });
     const series = chart.addSeries(LWC.CandlestickSeries, {
@@ -116,7 +104,7 @@
       },
     });
     new ResizeObserver(() => fit()).observe(canvas);
-    return { host, canvas, note, banner, chart, series, symbol: null, synthRef: null, shownLive: 0, levelsKey: '', lines: [], levels: [] };
+    return { host, canvas, note, banner, chart, series, o: null, opts: {}, symbol: null, histRef: null, shownLive: 0, lastTime: 0, levelsKey: '', lines: [], levels: [] };
   }
 
   // Matches the chart to its box. Re-renders detach and re-attach the host, and
@@ -152,47 +140,66 @@
     view.levels = specs.map((s) => s.price);
   }
 
-  // Pushes new or changed data: full reload on symbol/history change, else
-  // series.update() for the live candle(s) that moved since the last render.
-  function sync(o, anchorPrice) {
-    const hist = history(o, anchorPrice);
-    const bars = live.get(o.asset) || [];
-    const lastPrice = bars.length ? bars[bars.length - 1].close : anchorPrice;
-    if (view.symbol !== o.asset || view.synthRef !== hist) {
-      if (lastPrice > 0) view.series.applyOptions({ priceFormat: priceFormat(lastPrice) });
-      view.series.setData([...(hist ? hist.bars : []), ...bars].map((b) => ({ ...b })));
-      // Full reload: scroll to the newest bar once the host is on screen and sized.
-      requestAnimationFrame(() => requestAnimationFrame(() => view.chart.timeScale().scrollToRealTime()));
-      view.symbol = o.asset;
-      view.synthRef = hist;
-      view.shownLive = bars.length;
-      return;
+  // Full reload on symbol or history change, else series.update() for the live
+  // candle(s) that moved since the last paint.
+  function sync(symbol) {
+    const h = history.get(symbol);
+    const bars = live.get(symbol) || [];
+    let full = view.symbol !== symbol || view.histRef !== h;
+    if (!full) {
+      // A capped buffer drops old bars from the front; resume from the last one shown.
+      for (let i = Math.max(0, Math.min(view.shownLive, bars.length) - 1); i < bars.length; i += 1) {
+        const bar = mergeBar(h, bars[i]);
+        if (bar.time < view.lastTime) { full = true; break; } // update() can't go back in time
+        view.series.update(bar);
+        view.lastTime = bar.time;
+      }
     }
-    // A capped buffer drops old bars from the front; resume from the last one shown.
-    for (let i = Math.max(0, Math.min(view.shownLive, bars.length) - 1); i < bars.length; i += 1) view.series.update({ ...bars[i] });
+    if (full) {
+      const data = mergedBars(symbol);
+      const last = data[data.length - 1];
+      if (last) view.series.applyOptions({ priceFormat: priceFormat(last.close) });
+      view.series.setData(data);
+      // Scroll to the newest bar once the host is on screen and sized.
+      requestAnimationFrame(() => requestAnimationFrame(() => view.chart.timeScale().scrollToRealTime()));
+      view.lastTime = last ? last.time : 0;
+    }
+    view.symbol = symbol;
+    view.histRef = h;
     view.shownLive = bars.length;
+  }
+
+  function noteText(o) {
+    const h = history.get(o.asset);
+    const src = o.market === 'crypto' ? 'Coinbase' : 'Alpaca IEX';
+    const hasLive = (live.get(o.asset) || []).length > 0;
+    const tail = hasLive ? ' · live' : '';
+    if (!h || h.status === 'loading') return h && h.bars.length ? `1m candles · ${src} · refreshing…` : `Loading 1m history from ${src}…`;
+    if (h.status === 'error') return `History unavailable (${String(h.error).slice(0, 60)})${hasLive ? ' · live ticks only' : ''}`;
+    return h.bars.length ? `1m candles · ${src}${tail}` : `No recent history from ${src}${tail}`;
+  }
+
+  function paint() {
+    const { o, opts } = view;
+    setLevels(o, opts.withLevels); // price lines first: the autoscale provider reads view.levels
+    sync(o.asset);
+    view.note.textContent = noteText(o);
+    view.banner.textContent = opts.banner || '';
+    view.banner.hidden = !opts.banner;
+    const bars = live.get(o.asset) || [];
+    const last = bars.length ? bars[bars.length - 1].close : 0;
+    view.host.setAttribute('aria-label', `${o.asset} candlestick chart${last > 0 ? `, last ${price(last, o)}` : ''}`);
   }
 
   // o: pending order or Market Watch object; withLevels: draw its levels.
   function mount(o, { withLevels, banner = '' } = {}) {
     if (!window.LightweightCharts) return null;
-    if (!view) view = create();
-    const anchor = o.entryPrice || (o.entryZone && o.entryZone.max) || 0;
-    // Price lines first: the autoscale provider reads view.levels.
-    setLevels(o, withLevels);
-    sync(o, anchor);
-
-    const bars = live.get(o.asset) || [];
-    const since = bars.length ? new Date(bars[0].time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
-    view.note.textContent = since
-      ? `Placeholder history (synthetic) · live 1m candles since ${since}`
-      : view.synthRef ? 'Placeholder history (synthetic) · waiting for a live price' : 'No price yet for this symbol';
-    view.banner.textContent = banner;
-    view.banner.hidden = !banner;
+    if (!view) { view = create(); view.host.setAttribute('role', 'img'); }
+    view.o = o;
+    view.opts = { withLevels, banner };
+    if (view.symbol !== o.asset) loadHistory(o.asset);
+    paint();
     requestAnimationFrame(fit);
-    const last = bars.length ? bars[bars.length - 1].close : 0;
-    view.host.setAttribute('aria-label', `${o.asset} candlestick chart${last > 0 ? `, last ${price(last, o)}` : ''}`);
-    view.host.setAttribute('role', 'img');
     return view.host;
   }
 
