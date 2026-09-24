@@ -94,8 +94,9 @@
     return el('section', { className: 'opp-center' }, [
       el('header', { className: 'opp-head' }, [
         SD.scannerDetail.badge(o.asset, true),
-        el('div', { className: 'opp-title' }, [el('h2', { className: 'opp-symbol', textContent: displaySymbol(o) }),
-          el('span', { className: 'opp-name', textContent: SD.scannerData.nameOf(o.asset) })]),
+        // Symbol picker over the whole universe once it has arrived; plain title until then.
+        el('div', { className: 'opp-title' }, ctx.state && ctx.state.universe && ctx.onPickSymbol ? [SD.symbolPicker.build(o, ctx)]
+          : [el('h2', { className: 'opp-symbol', textContent: displaySymbol(o) }), el('span', { className: 'opp-name', textContent: SD.scannerData.nameOf(o.asset) })]),
         el('div', { className: 'opp-price' }, [
           el('strong', { className: 'opp-price-big', textContent: shown ? px(shown, { ...o, entryPrice: o.entryPrice || shown }) : '—' }),
           ...(change === null ? [] : [el('span', { className: `opp-price-chg ${pnlClass(change)}`, textContent: `${change >= 0 ? '+' : '−'}${Math.abs(change * 100).toFixed(2)}%` }),

@@ -118,3 +118,13 @@
 @media (max-width: 760px) { .trade-hud { position: static; width: auto; margin-top: 8px; } }
 /* Keep the Market Watch banner clear of the HUD. */
 .opp-chart-wrap:has(.trade-hud) .opp-watch-mode { right: 350px; text-align: left; padding-left: 16px; }
+
+/* ---------- Chart symbol picker (Phase 34) ---------- */
+.opp-symbol-select {
+  max-width: 340px; padding: 4px 30px 4px 10px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") right 8px center / 14px no-repeat;
+  color: var(--text); font: 600 18px var(--font-mono); cursor: pointer; appearance: none; -webkit-appearance: none;
+}
+.opp-symbol-select:hover { border-color: var(--text-faint); }
+.opp-symbol-select:focus { outline: none; border-color: var(--accent); }
+.opp-symbol-select option, .opp-symbol-select optgroup { background: var(--surface); color: var(--text); font: 13px var(--font-ui); }

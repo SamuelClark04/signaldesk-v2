@@ -217,6 +217,8 @@
       closing: inFlight,
       isSaved,
       onToggleSave,
+      onPickSymbol,
+      onPickerClosed: rerender, // catch up on updates held while the picker was open
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
     return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);
@@ -231,6 +233,14 @@
   };
   const isSaved = (id) => ((mounted && mounted.state.saved) || []).some((s) => s.id === id);
   const onToggleSave = (o) => nav.send({ type: isSaved(o.id) ? 'UNSAVE_SETUP' : 'SAVE_SETUP', id: o.id });
+  // Chart symbol picker: a queued setup for it opens as a setup, else Market Watch.
+  // Filters/search that would hide the pick are cleared, so it can't bounce back.
+  function onPickSymbol(symbol) {
+    if (!watchMarketOk(marketOf(symbol)) || !matchesSearch(symbol, symbol.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
+    const queued = mounted && mounted.state.pending.find((o) => o.asset === symbol && matchesAsset(o.market));
+    if (queued) { activeId = queued.id; manualWatch = false; } else { watchSymbol = symbol; activeId = null; manualWatch = true; }
+    rerender();
+  }
 
   function scanner(state) {
     const host = el('div', { className: 'opp-scanner' });
@@ -241,6 +251,8 @@
 
   function render(container, state) {
     mounted = { container, state };
+    // Briefly hold re-renders while the chart's symbol picker is in use (symbol-picker.js).
+    if (SD.symbolPicker.holding(container, rerender)) return;
     // Re-renders replace the DOM (every keystroke, every price tick): keep the
     // search box focused with the caret where it was.
     const focused = document.activeElement && document.activeElement.id === 'opp-search';
