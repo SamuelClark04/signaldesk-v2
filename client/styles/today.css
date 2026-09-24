@@ -15,7 +15,11 @@
 .today-card-hint { margin-left: auto; color: var(--text-faint); font-size: 12px; }
 
 /* ---------- Metric banner ---------- */
-.today-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.today-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+/* Venue bar: "Showing <venue>" + the shared toggle / Sync Broker (lib/venue.js, styled in portfolio.css). */
+.today-venue-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.today-venue-bar > div:first-child { display: flex; align-items: baseline; gap: 8px; }
+.today-venue-label { color: var(--text-faint); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
 .today-metric { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
 .today-metric-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 .today-metric-value { margin-top: 4px; font: 600 22px var(--font-mono); font-variant-numeric: tabular-nums; }

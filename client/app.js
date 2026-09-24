@@ -37,10 +37,13 @@
   const DEFAULT_TAB = 'opportunities';
 
   let socket = null;
+  const VENUE_KEY = 'signaldesk.venue';
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null };
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null,
+    // Venue filter shared by Today and Portfolio (lib/venue.js); remembered per device.
+    activeVenue: (() => { try { return localStorage.getItem(VENUE_KEY) || 'paper'; } catch { return 'paper'; } })() };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -56,7 +59,7 @@
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
-    BROKER_HOLDINGS: (h) => { state.holdings = h; }, // last Sync Broker snapshot (read-only)
+    BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)
   };
 
   // State-driven views: rendered on entering their tab and on every state change
@@ -92,6 +95,18 @@
   const isOnline = () => !!socket && socket.readyState === WebSocket.OPEN;
   const transport = { isOnline, send: (msg) => socket.send(JSON.stringify(msg)) };
   SD.opportunities.init(transport);
+  // Shared actions for lib/venue.js (the Today + Portfolio venue controls).
+  SD.app = {
+    isOnline,
+    send: (msg) => { if (isOnline()) transport.send(msg); },
+    refresh: () => refreshView(),
+    setVenue(v) {
+      if (!SD.venue.KEYS.has(v)) return;
+      state.activeVenue = v;
+      try { localStorage.setItem(VENUE_KEY, v); } catch { /* storage blocked: this session only */ }
+      refreshView();
+    },
+  };
   SD.portfolio.init(transport);
   SD.settings.init(transport);
 

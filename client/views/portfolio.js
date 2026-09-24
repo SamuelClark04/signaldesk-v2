@@ -12,11 +12,8 @@
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
   let mounted = null; // { container, state }
   let subTab = 'holdings';
-  // Venue filter. 'paper' is SignalDesk's own paper ledger (all markets);
-  // 'crypto' is the synced Coinbase account; 'combined' sums both.
-  let venue = 'paper';
-  const VENUES = [['combined', 'Combined'], ['crypto', 'Live Crypto'], ['paper', 'Paper']];
-  const VENUE_LABEL = { combined: 'Paper + Coinbase', crypto: 'Coinbase account', paper: 'Paper ledger' };
+  // Venue filter: global (state.activeVenue), shared with Today via lib/venue.js.
+  const venueOf = () => SD.venue.current(mounted.state);
   let selectedId = null;
   let notice = '';
   let noticeTimer = null;
@@ -61,45 +58,17 @@
   function header() {
     const [title, sub] = subTab === 'pilot'
       ? ['Portfolio Pilot', 'Review your holdings against the market. Change only when the evidence warrants it.']
-      : ['Portfolio', 'Open positions from the ledger, marked to live prices.'];
+      : ['Portfolio', 'Open positions for the selected venue, marked to live prices.'];
     const btn = el('button', { type: 'button', className: 'btn btn-solid pf-head-btn', textContent: subTab === 'pilot' ? 'View holdings' : 'Review with Pilot' });
     btn.onclick = () => { subTab = subTab === 'pilot' ? 'holdings' : 'pilot'; rerender(); };
-    const toggle = el('div', { className: 'pf-venues-toggle', role: 'group', ariaLabel: 'Venue' }, VENUES.map(([key, label]) => {
-      const b = el('button', { type: 'button', className: `pf-venue-seg${key === venue ? ' is-active' : ''}`, textContent: label });
-      b.setAttribute('aria-pressed', String(key === venue));
-      b.onclick = () => { venue = key; rerender(); };
-      return b;
-    }));
     return el('div', { className: 'pf-header' }, [
       el('div', {}, [el('h2', { className: 'pf-title', textContent: title }), el('p', { className: 'pf-subtitle', textContent: sub })]),
-      el('div', { className: 'pf-header-right' }, [
-        el('div', { className: 'pf-header-actions' }, [toggle, syncButton(), btn]),
-        el('span', { className: 'pf-sub', textContent: syncStatus() }),
-      ]),
+      SD.venue.controls(mounted.state, [btn]),
     ]);
   }
 
-  // ---------- Sync Broker (SYNC_PORTFOLIO -> BROKER_HOLDINGS) ----------
-  let syncRequested = false;
-  const holdings = () => (mounted.state.holdings || {});
-  function syncButton() {
-    const busy = syncRequested || holdings().syncing;
-    const b = el('button', { type: 'button', className: 'btn pf-sync', textContent: busy ? 'Syncing…' : '⟳ Sync Broker', disabled: busy || !transport.isOnline(),
-      title: transport.isOnline() ? 'Fetch your Coinbase holdings (read-only)' : 'Offline' });
-    b.onclick = () => { syncRequested = true; transport.send({ type: 'SYNC_PORTFOLIO' }); setTimeout(() => { syncRequested = false; rerender(); }, 15000); rerender(); };
-    return b;
-  }
-  function syncStatus() {
-    const h = holdings();
-    const cb = h.coinbase;
-    if (h.notice) return h.notice;
-    if (!cb || cb.status === 'never') return 'Coinbase not synced yet · paper prices are live';
-    if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}`;
-    return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash`;
-  }
-
   function kpis(t) {
-    if (venue === 'crypto' && !t.synced) {
+    if (venueOf() === 'crypto' && !t.synced) {
       return el('div', { className: 'pf-card pf-empty-venue' }, [el('strong', { textContent: 'Coinbase not synced' }),
         el('span', { className: 'pf-sub', textContent: 'Press Sync Broker to load your real Coinbase holdings (read-only). Until then this view lists only the LIVE trades SignalDesk opened itself, without account totals.' })]);
     }
@@ -146,8 +115,7 @@
     mounted = { container, state };
     for (const id of closing) if (!(state.positions || []).some((p) => p.id === id)) closing.delete(id); // closed
     const focusId = document.activeElement && document.activeElement.id === SD.portfolioPilot.focusId ? SD.portfolioPilot.focusId : null;
-    const data = T().metrics(state, venue);
-    if (state.holdings && !state.holdings.syncing) syncRequested = false;
+    const data = T().metrics(state, venueOf());
     if (!data.rows.some((r) => r.p.id === selectedId)) selectedId = data.rows.length ? data.rows[0].p.id : null;
     const online = transport.isOnline();
     const onSelect = (id) => { selectedId = id; rerender(); };
@@ -158,7 +126,7 @@
       return b;
     }));
     const body = subTab === 'pilot'
-      ? SD.portfolioPilot.pilotView(data, { state, venueLabel: VENUE_LABEL[venue], selectedId, onSelect, onClose, online, rerender,
+      ? SD.portfolioPilot.pilotView(data, { state, venueLabel: SD.venue.LABEL[venueOf()], selectedId, onSelect, onClose, online, rerender,
         onHoldings: (id) => { selectedId = id; subTab = 'holdings'; rerender(); }, send: (msg) => transport.send(msg) })
       : el('div', { className: 'pf-holdings-view' }, [
         kpis(data.totals),

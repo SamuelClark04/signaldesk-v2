@@ -14,21 +14,31 @@
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(2)}%`;
   const go = (tab) => () => { location.hash = tab; };
 
-  // ---------- Metrics (paper book only; live venues are shown separately) ----------
-  const costOf = (p) => (p.market === 'options' && p.optionsData
-    ? p.positionSize * p.optionsData.debit * p.optionsData.multiplier
-    : p.positionSize * p.fillPrice);
+  // ---------- Metrics (for the active venue: state.activeVenue) ----------
+  // Positions, marks and totals come from the same code as the Portfolio tab
+  // (portfolio-table.metrics), so the two pages always agree, including the
+  // rule that SignalDesk's live Coinbase trades are never counted twice.
+  // Which closed trades count as "today" for each venue.
+  const TRADE_VENUE = {
+    paper: (t) => t.execution !== 'LIVE',
+    crypto: (t) => t.execution === 'LIVE' && t.broker === 'Coinbase',
+    combined: () => true,
+  };
 
-  function paperMetrics(state) {
+  function venueMetrics(state) {
+    const venue = SD.venue.current(state);
     const bankroll = state.settings && state.settings.bankroll;
-    if (!(bankroll > 0)) return null;
-    const trades = state.journal.filter((t) => t.execution !== 'LIVE');
-    const open = state.positions.filter((p) => p.execution !== 'LIVE');
-    const accountValue = bankroll + sum(trades, (t) => t.netPnl);
-    const holdings = sum(open, costOf);
-    const todayPnl = sum(trades.filter((t) => isToday(t.closedAt)), (t) => t.netPnl);
-    const startOfDay = accountValue - todayPnl;
-    return { accountValue, holdings, cash: accountValue - holdings, todayPnl, todayPct: startOfDay > 0 ? todayPnl / startOfDay : 0, openCount: open.length };
+    if (venue !== 'crypto' && !(bankroll > 0)) return null; // settings not loaded yet
+    const data = SD.portfolioTable.metrics(state, venue);
+    const t = data.totals;
+    if (venue === 'crypto' && !t.synced) return { venue, unsynced: true, count: data.rows.length };
+    // Open risk: dollar risk to the stop. Synced broker holdings have no SignalDesk
+    // stop; only the SignalDesk trades inside them (p.tracked) carry a known risk.
+    const risks = data.rows.map((r) => (r.p.execution === 'BROKER' ? sum(r.p.tracked || [], (x) => x.dollarRisk) : r.p.dollarRisk));
+    const unstopped = data.rows.filter((r) => r.p.execution === 'BROKER' && !(r.p.tracked || []).length).length;
+    const todayPnl = sum(state.journal.filter((x) => TRADE_VENUE[venue](x) && isToday(x.closedAt)), (x) => x.netPnl);
+    const startOfDay = t.accountValue - todayPnl;
+    return { venue, t, count: data.rows.length, risk: sum(risks, (x) => x), unstopped, todayPnl, todayPct: startOfDay > 0 ? todayPnl / startOfDay : 0 };
   }
 
   function metric(label, value, sub, valueClass = '') {
@@ -40,14 +50,26 @@
   }
 
   function metricBanner(state) {
-    const m = paperMetrics(state);
+    const m = venueMetrics(state);
     const dash = '—';
-    const items = [
-      metric('Account value', m ? money(m.accountValue) : dash, 'Paper bankroll + realized P/L'),
-      metric('Holdings', m ? money(m.holdings) : dash, m ? `${m.openCount} open position${m.openCount === 1 ? '' : 's'} · at cost` : 'Waiting for data'),
-      metric('Spendable cash', m ? money(m.cash) : dash, 'Account value − holdings'),
-      metric("Today's change", m ? signed(m.todayPnl, money) : dash, m ? `${pct(m.todayPct)} · realized today` : '', m ? pnlClass(m.todayPnl) : ''),
-    ];
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    let items;
+    if (!m) {
+      items = ['Account value', 'Open positions', 'Open risk', 'Unrealized P/L', "Today's change"].map((l) => metric(l, dash, 'Waiting for data'));
+    } else if (m.unsynced) {
+      items = [metric('Account value', dash, 'Coinbase not synced: press Sync Broker'),
+        metric('Open positions', String(m.count), 'LIVE trades SignalDesk opened (no account totals yet)'),
+        ...['Open risk', 'Unrealized P/L', "Today's change"].map((l) => metric(l, dash, 'Needs a Coinbase sync'))];
+    } else {
+      const { t } = m;
+      items = [
+        metric('Account value', money(t.accountValue), `${SD.venue.LABEL[m.venue]} · cash ${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`),
+        metric('Open positions', String(m.count), `${money(t.holdingsValue)} at live prices`),
+        metric('Open risk', money(m.risk), `${t.accountValue > 0 ? `${((m.risk / t.accountValue) * 100).toFixed(2)}% of account · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
+        metric('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No marked positions' : `${pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
+        metric("Today's change", signed(m.todayPnl, money), `${pct(m.todayPct)} · realized today (SignalDesk trades)`, pnlClass(m.todayPnl)),
+      ];
+    }
     const live = Object.values((state.broker && state.broker.venues) || {}).filter((v) => v.mode === 'live');
     return [
       el('div', { className: 'today-metrics' }, items),
@@ -133,11 +155,21 @@
   const waiting = () => el('p', { className: 'today-empty', textContent: 'Waiting for the server…' });
   const updatedAt = (intel) => (intel ? `updated ${new Date(intel.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '');
 
-  // Real: DASHBOARD_INTELLIGENCE attention alerts (one per open position).
+  // Real: DASHBOARD_INTELLIGENCE attention alerts (one per open ledger position),
+  // limited to the active venue. Synced broker holdings have no SignalDesk rules.
+  const ALERT_VENUE = {
+    paper: (p) => p.execution !== 'LIVE',
+    crypto: (p) => p.execution === 'LIVE' && p.broker === 'Coinbase',
+    combined: () => true,
+  };
   function attention(state) {
     const intel = state.intelligence;
-    const body = !intel ? waiting() : el('ul', { className: 'today-list' }, intel.attention.map((a) => el('li', { className: `today-alert is-${a.tone}` }, [
-      el('div', {}, [el('span', { className: 'asset', textContent: a.asset }), el('span', { className: 'today-alert-action', textContent: a.action })]),
+    const venue = SD.venue.current(state);
+    const byId = new Map((state.positions || []).map((p) => [p.id, p]));
+    const alerts = !intel ? [] : intel.attention.filter((a) => (a.positionId ? byId.has(a.positionId) && ALERT_VENUE[venue](byId.get(a.positionId)) : venue !== 'crypto'));
+    const empty = venue === 'crypto' ? 'No SignalDesk trades open on Coinbase. Synced holdings are not watched by SignalDesk rules.' : 'No alerts for this venue.';
+    const body = !intel ? waiting() : !alerts.length ? el('p', { className: 'today-empty', textContent: empty }) : el('ul', { className: 'today-list' }, alerts.map((a) => el('li', { className: `today-alert is-${a.tone}` }, [
+      el('div', {}, [el('span', { className: 'asset', textContent: `${a.asset}${a.execution === 'LIVE' ? ' · LIVE' : ''}` }), el('span', { className: 'today-alert-action', textContent: a.action })]),
       el('div', { className: 'today-alert-detail', textContent: a.detail }),
     ])));
     return card('Portfolio attention', updatedAt(intel), body);
@@ -194,7 +226,12 @@
 
   // ---------- Entry point ----------
   function renderToday(container, state) {
+    const venue = SD.venue.current(state);
     container.replaceChildren(
+      el('div', { className: 'today-venue-bar' }, [
+        el('div', {}, [el('span', { className: 'today-venue-label', textContent: 'Showing' }), el('strong', { textContent: SD.venue.LABEL[venue] })]),
+        SD.venue.controls(state),
+      ]),
       ...metricBanner(state),
       briefing(state),
       el('div', { className: 'today-split' }, [readyForReview(state), attention(state)]),
