@@ -36,7 +36,7 @@
     <main class="main">
       <header class="topbar">
         <h1 class="page-title" id="page-title">Opportunities</h1>
-        <span class="mode-badge">Paper</span>
+        <span class="mode-badge" id="mode-badge" title="Execution venue for approved orders">Paper</span>
       </header>
 
       <section class="tab" id="tab-today" data-title="Today" hidden>
@@ -192,6 +192,24 @@
             <button class="btn btn-primary" id="settings-save" type="submit">Save Settings</button>
             <span class="settings-status" id="settings-status" role="status"></span>
           </form>
+
+          <div class="settings-modes">
+            <label class="field">
+              <span class="field-label">Alpaca mode (stocks / options)</span>
+              <select class="mode-select" id="settings-stock-mode" data-key="stockMode">
+                <option value="paper">Paper</option>
+                <option value="live">LIVE</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Coinbase mode (crypto)</span>
+              <select class="mode-select" id="settings-crypto-mode" data-key="cryptoMode">
+                <option value="paper">Paper</option>
+                <option value="live">LIVE</option>
+              </select>
+            </label>
+            <span class="live-warning" id="settings-live-warning" hidden></span>
+          </div>
 
           <p class="settings-facts" id="settings-facts"></p>
         </div>

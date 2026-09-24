@@ -1,0 +1,124 @@
+// Master execution loop: Connectors -> Strategies -> Risk Engine -> Ledger -> Notifier,
+// every PIPELINE_INTERVAL_MS, plus exit management for open positions.
+// Strategies only propose; the risk engine decides; only the ledger holds state.
+// server.js injects broadcast() so this module never touches sockets directly.
+const alpacaStocks = require('../connectors/alpaca-stock-socket');
+const alpacaNews = require('../connectors/alpaca-news-socket');
+const equityDay = require('../strategies/1-equity-day');
+const cryptoIntra = require('../strategies/2-crypto-intra');
+const equitySwing = require('../strategies/3-equity-swing');
+const optionsSystem = require('../strategies/5-options-system');
+const { processCandidate } = require('../risk/risk-engine');
+const ledger = require('./paper-ledger');
+const { sendApprovalAlert } = require('./notifier');
+const prices = require('../market/latest-prices');
+
+const PIPELINE_INTERVAL_MS = 60000;
+
+let broadcast = () => {}; // set by startPipeline()
+let pipelineTimer = null;
+
+// Each strategy runs isolated: one failing never blocks the others' candidates.
+const STRATEGIES = [
+  ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
+  ['crypto-intraday', () => cryptoIntra.generateCandidates(prices.getLatestPrices())],
+  ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
+  ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
+];
+
+async function collectCandidates() {
+  const all = [];
+  for (const [name, generate] of STRATEGIES) {
+    try {
+      all.push(...(await generate()));
+    } catch (err) {
+      console.error(`[pipeline] strategy ${name} failed:`, err.message);
+    }
+  }
+  return all;
+}
+
+// One pipeline pass. Strategies only propose; the risk engine decides; only
+// the ledger holds state. A failure on one candidate never stops the others.
+let pipelineRunning = false;
+async function runPipeline() {
+  if (pipelineRunning) return console.warn('[pipeline] previous pass still running; skipping this tick');
+  pipelineRunning = true;
+  try {
+    return await pipelinePass();
+  } finally {
+    pipelineRunning = false;
+  }
+}
+
+// Fire-and-forget alert for a freshly staged order. Not awaited, so a slow
+// notifier can never stall the loop; sync throws and rejections are both caught.
+function notify(order) {
+  Promise.resolve()
+    .then(() => sendApprovalAlert(order))
+    .catch((err) => console.error(`[notifier] alert for ${order.id} failed: ${err.message}`));
+}
+
+async function pipelinePass() {
+  const counts = { generated: 0, approved: 0, staged: 0 };
+  const candidates = await collectCandidates();
+  // Read once per pass: every candidate in a pass is sized against the same bankroll.
+  const { bankroll } = ledger.getSettings();
+  counts.generated = candidates.length;
+
+  for (const candidate of candidates) {
+    const result = processCandidate(candidate, bankroll);
+    if (!result.approved) {
+      console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
+      continue;
+    }
+    counts.approved += 1;
+    try {
+      const staged = ledger.stageOrder(result);
+      counts.staged += 1;
+      broadcast('order:staged', staged);
+      console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
+      notify(staged);
+    } catch (err) {
+      // Expected when the same setup is re-proposed on the next tick (duplicate id).
+      console.log(`[pipeline] not staged ${result.id}: ${err.message}`);
+    }
+  }
+
+  // Exit management for filled positions: stops and T1 targets on fresh prices.
+  try {
+    const closed = ledger.monitorPositions(prices.getLatestPrices());
+    for (const t of closed) {
+      console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)`);
+    }
+    if (closed.length) {
+      broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
+    }
+  } catch (err) {
+    console.error('[pipeline] position monitor failed:', err.message);
+  }
+
+  console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
+  return counts;
+}
+
+// Starts the 60s loop. Returns handles for manual passes (tests) and shutdown.
+function startPipeline(options = {}) {
+  if (pipelineTimer) throw new Error("pipeline: already started");
+  if (typeof options.broadcast === "function") broadcast = options.broadcast;
+  pipelineTimer = setInterval(() => {
+    runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
+  }, PIPELINE_INTERVAL_MS);
+  const { bankroll, stockMode, cryptoMode } = ledger.getSettings();
+  console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${bankroll}, `
+    + `stocks/options ${String(stockMode).toUpperCase()}, crypto ${String(cryptoMode).toUpperCase()} (editable in Settings)`);
+  return { runPipeline, stop: stopPipeline };
+}
+
+function stopPipeline() {
+  clearInterval(pipelineTimer);
+  pipelineTimer = null;
+}
+
+module.exports = { startPipeline, stopPipeline, runPipeline, PIPELINE_INTERVAL_MS };

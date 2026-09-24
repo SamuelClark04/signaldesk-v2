@@ -15,6 +15,8 @@
     PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
     INVALIDATED: 'price is already through the stop and the setup was discarded',
     NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
+    LIVE_NOT_INTEGRATED: 'this venue is set to LIVE but broker routing is not built yet. Nothing was traded; '
+      + 'the order is still pending (switch the venue to Paper in Settings to fill it on paper)',
   };
 
   // Send an intent only. The row stays until the server's QUEUE_UPDATED removes it.

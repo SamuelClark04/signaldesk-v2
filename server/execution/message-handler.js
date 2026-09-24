@@ -7,13 +7,30 @@ const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 
-// Guarded approval: fills at the live price, or retires the setup with a reason.
+// Which settings key decides the execution venue for each market.
+const MODE_KEY_BY_MARKET = { stocks: 'stockMode', options: 'stockMode', crypto: 'cryptoMode' };
+
+// Route a guard-approved order: 'paper' fills in the paper ledger; 'live' is
+// reserved for broker integration and does NOT touch the ledger. The order stays
+// pending (nothing was traded anywhere) and the client is told why.
+function routeApproved(order, livePrice) {
+  const modeKey = MODE_KEY_BY_MARKET[order.market];
+  if (!modeKey) throw new Error(`no execution venue for market "${order.market}"`);
+  const mode = ledger.getSettings()[modeKey];
+  if (mode === 'paper') return ledger.executeOrder(order.id, livePrice);
+
+  console.warn(`[LIVE EXECUTION WARNING] Routing ${order.asset} to broker APIs... (Integration pending)`);
+  throw new Error('LIVE_NOT_INTEGRATED');
+}
+
+// Guarded approval: the order guard runs first whatever the venue, then the order
+// is routed by its market's mode. Failed guards retire the setup with a reason.
 function approveWithGuard(id) {
   const order = ledger.getPendingOrders().find((o) => o.id === id);
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
   const check = validateApproval(order, livePrice);
-  if (check.valid) return ledger.executeOrder(id, livePrice);
+  if (check.valid) return routeApproved(order, livePrice);
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
   if (check.reason !== 'NO_LIVE_PRICE') ledger.discardOrder(id);
   throw new Error(check.reason);

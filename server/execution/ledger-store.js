@@ -8,13 +8,30 @@ const path = require('path');
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
 const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
 
-// Editable settings: default value and the accepted range for each key.
+// Editable settings: default and accepted values for each key. Execution modes
+// default to 'paper', and a missing/invalid saved mode falls back to 'paper', so
+// nothing can switch to live except an explicit, valid user update.
+const MODES = ['paper', 'live'];
 const SETTINGS_RULES = {
-  bankroll: { default: 50000, min: 100, max: 100000000 },
+  bankroll: { type: 'number', default: 50000, min: 100, max: 100000000 },
+  stockMode: { type: 'choice', default: 'paper', values: MODES }, // Alpaca: stocks + options
+  cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // Coinbase: crypto
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
 
 let lists = null; // the ledger's { pendingOrders, activePositions, tradeJournal, discardedOrders }
+
+function cleanValue(key, value, rule) {
+  if (rule.type === 'choice') {
+    if (!rule.values.includes(value)) throw new Error(`${key} must be one of: ${rule.values.join(', ')}`);
+    return value;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
+    throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
+  }
+  return n;
+}
 
 // Validate a partial settings object; returns only the known, valid keys.
 function cleanSettings(input) {
@@ -23,11 +40,7 @@ function cleanSettings(input) {
   for (const [key, value] of Object.entries(input)) {
     const rule = SETTINGS_RULES[key];
     if (!rule) throw new Error(`unknown setting "${key}"`);
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
-      throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
-    }
-    clean[key] = n;
+    clean[key] = cleanValue(key, value, rule);
   }
   return clean;
 }

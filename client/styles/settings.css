@@ -11,6 +11,38 @@
 .settings-status.is-error { color: var(--short); }
 .settings-status.is-ok { color: var(--long); }
 
+/* ---------- Execution modes (paper / live) ---------- */
+.settings-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 20px;
+  padding: 0 16px 14px;
+}
+.mode-select {
+  min-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: 13px var(--font-mono);
+}
+.mode-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mode-select.is-live { border-color: var(--short); background: var(--short-bg); color: var(--short); font-weight: 600; }
+.live-warning {
+  align-self: center;
+  padding: 6px 10px;
+  border: 1px solid var(--short);
+  border-radius: var(--radius);
+  background: var(--short-bg);
+  color: var(--short);
+  font-size: 12px;
+}
+
+/* Header badge (defined in main.css) turns red whenever any venue is LIVE. */
+.mode-badge.is-live { border-color: var(--short); background: var(--short-bg); color: var(--short); font-weight: 600; }
+
 .settings-facts {
   margin: 0;
   padding: 10px 16px 14px;
