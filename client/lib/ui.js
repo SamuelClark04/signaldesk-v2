@@ -8,7 +8,13 @@
   // ---------- Formatting ----------
   const decimals = (o) => (o.market === 'crypto' ? (o.entryPrice < 10 ? 4 : 2) : 2);
   const price = (x, o) => (Number.isFinite(x) ? x.toFixed(decimals(o)) : '—');
-  const money = (x) => (Number.isFinite(x) ? `$${x.toFixed(2)}` : '—');
+  // Dollar amounts: thousands separators, always 2 decimals. Locale is pinned to
+  // en-US so "$" always pairs with "," grouping and "." decimals ($50,000.00),
+  // whatever the browser's language. Negatives keep their sign: -$98.83.
+  const USD = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  const money = (x) => (Number.isFinite(x)
+    ? `${x < 0 ? '-' : ''}$${Math.abs(x).toLocaleString('en-US', USD)}`
+    : '—');
   // Size with its unit: options trade in contracts, stocks in shares, crypto in coins.
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const size = (o) => (o.market === 'options' ? plural(o.positionSize, 'contract')

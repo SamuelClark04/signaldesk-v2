@@ -1,0 +1,109 @@
+// Ledger storage: disk persistence + user-editable settings for paper-ledger.js.
+// The ledger owns the trading lists and their mechanics; this module owns how
+// they (and the settings) are written to and restored from
+// server/data/ledger-state.json. Only paper-ledger.js should require this file.
+const fs = require('fs');
+const path = require('path');
+
+const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
+const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
+
+// Editable settings: default value and the accepted range for each key.
+const SETTINGS_RULES = {
+  bankroll: { default: 50000, min: 100, max: 100000000 },
+};
+const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
+
+let lists = null; // the ledger's { pendingOrders, activePositions, tradeJournal, discardedOrders }
+
+// Validate a partial settings object; returns only the known, valid keys.
+function cleanSettings(input) {
+  if (!input || typeof input !== 'object') throw new Error('settings must be an object');
+  const clean = {};
+  for (const [key, value] of Object.entries(input)) {
+    const rule = SETTINGS_RULES[key];
+    if (!rule) throw new Error(`unknown setting "${key}"`);
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
+      throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
+    }
+    clean[key] = n;
+  }
+  return clean;
+}
+
+// ---------- Persistence ----------
+// Write to a temp file then rename, so a crash mid-write never leaves a torn file.
+// A failed save is logged, not thrown: the in-memory ledger stays authoritative.
+function save() {
+  if (!lists) throw new Error('ledger-store: attach() the ledger lists before saving');
+  const state = { version: STATE_VERSION, savedAt: new Date().toISOString(), settings, ...lists };
+  try {
+    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
+    const tmp = `${STATE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, STATE_PATH);
+  } catch (err) {
+    console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}`);
+  }
+}
+
+// Settings are restored key by key: a missing (v1 file) or invalid value keeps its
+// default instead of discarding the whole ledger.
+function restoreSettings(saved) {
+  if (!saved) return;
+  for (const [key, value] of Object.entries(saved)) {
+    try {
+      Object.assign(settings, cleanSettings({ [key]: value }));
+    } catch (err) {
+      console.warn(`[ledger] ignoring saved setting: ${err.message}; keeping ${settings[key] ?? 'default'}`);
+    }
+  }
+}
+
+// An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.
+function load() {
+  if (!fs.existsSync(STATE_PATH)) return;
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    for (const key of Object.keys(lists)) {
+      if (!Array.isArray(state[key])) throw new Error(`"${key}" is missing or not an array`);
+    }
+    for (const [key, list] of Object.entries(lists)) list.push(...state[key]);
+    restoreSettings(state.settings);
+    const { pendingOrders, activePositions, tradeJournal, discardedOrders } = lists;
+    console.log(`[ledger] restored ${pendingOrders.length} pending, ${activePositions.length} open, `
+      + `${tradeJournal.length} closed, ${discardedOrders.length} rejected, bankroll $${settings.bankroll} from ${STATE_PATH}`);
+  } catch (err) {
+    const aside = `${STATE_PATH}.corrupt-${Date.now()}`;
+    try { fs.renameSync(STATE_PATH, aside); } catch { /* leave it in place */ }
+    console.error(`[ledger] could not load ${STATE_PATH} (${err.message}); moved to ${aside}, starting empty`);
+  }
+}
+
+const LIST_KEYS = ['pendingOrders', 'activePositions', 'tradeJournal', 'discardedOrders'];
+
+// Called once by the ledger at startup: remembers its lists and restores from disk.
+// Checked BEFORE touching the file, so a wiring mistake can never cause a good
+// state file to be treated as corrupt and moved aside.
+function attach(ledgerLists) {
+  if (lists) throw new Error('ledger-store: already attached');
+  if (!ledgerLists || !LIST_KEYS.every((k) => Array.isArray(ledgerLists[k]))) {
+    throw new Error(`ledger-store: attach() needs arrays for ${LIST_KEYS.join(', ')}`);
+  }
+  lists = ledgerLists;
+  load();
+}
+
+// ---------- Settings ----------
+const getSettings = () => ({ ...settings });
+
+// Validates, applies and persists. Throws (changing nothing) if any value is invalid.
+function updateSettings(newSettings) {
+  const clean = cleanSettings(newSettings);
+  Object.assign(settings, clean);
+  save();
+  return getSettings();
+}
+
+module.exports = { attach, save, getSettings, updateSettings };

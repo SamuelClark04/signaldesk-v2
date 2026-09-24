@@ -3,37 +3,11 @@
 // Lifecycle: stageOrder -> pendingOrders -> executeOrder -> activePositions
 //            -> closePosition -> tradeJournal
 //            pendingOrders -> discardOrder -> discardedOrders (never traded)
-// Every change is persisted to server/data/ledger-state.json and restored on start,
-// together with the user-editable settings (currently the paper bankroll).
-const fs = require('fs');
-const path = require('path');
+// Trading mechanics only: every change is persisted through ledger-store.js,
+// which also owns the user-editable settings (currently the paper bankroll).
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
-
-const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
-const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
-
-// Editable settings: default value and the accepted range for each key.
-const SETTINGS_RULES = {
-  bankroll: { default: 50000, min: 100, max: 100000000 },
-};
-const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
-
-// Validate a partial settings object; returns only the known, valid keys.
-function cleanSettings(input) {
-  if (!input || typeof input !== 'object') throw new Error('settings must be an object');
-  const clean = {};
-  for (const [key, value] of Object.entries(input)) {
-    const rule = SETTINGS_RULES[key];
-    if (!rule) throw new Error(`unknown setting "${key}"`);
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
-      throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
-    }
-    clean[key] = n;
-  }
-  return clean;
-}
+const store = require('./ledger-store');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -42,53 +16,6 @@ const tradeJournal = [];
 // same deterministic id cannot put a rejected trade back in the queue.
 const discardedOrders = [];
 const LISTS = { pendingOrders, activePositions, tradeJournal, discardedOrders };
-
-// ---------- Persistence ----------
-// Write to a temp file then rename, so a crash mid-write never leaves a torn file.
-// A failed save is logged, not thrown: the in-memory ledger stays authoritative.
-function saveState() {
-  const state = { version: STATE_VERSION, savedAt: new Date().toISOString(), settings, ...LISTS };
-  try {
-    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-    const tmp = `${STATE_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-    fs.renameSync(tmp, STATE_PATH);
-  } catch (err) {
-    console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}`);
-  }
-}
-
-// Settings are restored key by key: a missing (v1 file) or invalid value keeps its
-// default instead of discarding the whole ledger.
-function restoreSettings(saved) {
-  if (!saved) return;
-  for (const [key, value] of Object.entries(saved)) {
-    try {
-      Object.assign(settings, cleanSettings({ [key]: value }));
-    } catch (err) {
-      console.warn(`[ledger] ignoring saved setting: ${err.message}; keeping ${settings[key] ?? 'default'}`);
-    }
-  }
-}
-
-// An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.
-function loadState() {
-  if (!fs.existsSync(STATE_PATH)) return;
-  try {
-    const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-    for (const key of Object.keys(LISTS)) {
-      if (!Array.isArray(state[key])) throw new Error(`"${key}" is missing or not an array`);
-    }
-    for (const [key, list] of Object.entries(LISTS)) list.push(...state[key]);
-    restoreSettings(state.settings);
-    console.log(`[ledger] restored ${pendingOrders.length} pending, ${activePositions.length} open, `
-      + `${tradeJournal.length} closed, ${discardedOrders.length} rejected, bankroll $${settings.bankroll} from ${STATE_PATH}`);
-  } catch (err) {
-    const aside = `${STATE_PATH}.corrupt-${Date.now()}`;
-    try { fs.renameSync(STATE_PATH, aside); } catch { /* leave it in place */ }
-    console.error(`[ledger] could not load ${STATE_PATH} (${err.message}); moved to ${aside}, starting empty`);
-  }
-}
 
 function findIndex(list, candidateId) {
   return list.findIndex((o) => o.id === candidateId);
@@ -108,7 +35,7 @@ function stageOrder(sizedCandidate) {
   }
   const order = { ...sizedCandidate, status: 'pending', stagedAt: Date.now() };
   pendingOrders.push(order);
-  saveState();
+  store.save();
   return { ...order };
 }
 
@@ -125,7 +52,7 @@ function executeOrder(candidateId, fillPrice) {
     openedAt: Date.now(),
   };
   activePositions.push(position);
-  saveState();
+  store.save();
   return { ...position };
 }
 
@@ -136,7 +63,7 @@ function discardOrder(candidateId) {
   const [order] = pendingOrders.splice(i, 1);
   const discarded = { ...order, status: 'discarded', discardedAt: Date.now() };
   discardedOrders.push(discarded);
-  saveState();
+  store.save();
   return { ...discarded };
 }
 
@@ -190,7 +117,7 @@ function closePosition(candidateId, exitPrice, exitReason) {
   };
   activePositions.splice(i, 1);
   tradeJournal.push(entry);
-  saveState();
+  store.save();
   return { ...entry };
 }
 
@@ -231,19 +158,8 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o }));
 const getActivePositions = () => activePositions.map((p) => ({ ...p }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
-// ---------- Settings ----------
-const getSettings = () => ({ ...settings });
-
-// Validates, applies and persists. Throws (changing nothing) if any value is invalid.
-function updateSettings(newSettings) {
-  const clean = cleanSettings(newSettings);
-  Object.assign(settings, clean);
-  saveState();
-  return getSettings();
-}
-
-// Restore persisted state once, when the module is first required.
-loadState();
+// Hand the lists to the store once: it restores them from disk, then saves on every change.
+store.attach(LISTS);
 
 module.exports = {
   stageOrder,
@@ -254,7 +170,8 @@ module.exports = {
   getPendingOrders,
   getActivePositions,
   getTradeJournal,
-  getSettings,
-  updateSettings,
+  // Settings live in the store; re-exported so callers keep one ledger API.
+  getSettings: store.getSettings,
+  updateSettings: store.updateSettings,
 };
 
