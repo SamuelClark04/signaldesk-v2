@@ -50,11 +50,31 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return send(ws, 'error', 'invalid JSON'); }
     if (msg.type === 'ping') return send(ws, 'pong', Date.now());
+    if (QUEUE_ACTIONS[msg.type]) return handleQueueAction(ws, msg);
     send(ws, 'error', `unknown message type: ${msg.type}`);
   });
   send(ws, 'hello', { server: 'signaldesk-v2', ts: Date.now() });
   send(ws, 'orders:snapshot', ledger.getPendingOrders());
 });
+
+// Client intents. The client only asks; the ledger decides and the server
+// broadcasts the resulting queue so every open client shows the same state.
+const QUEUE_ACTIONS = {
+  APPROVE: (id) => ledger.executeOrder(id),
+  REJECT: (id) => ledger.discardOrder(id),
+};
+
+function handleQueueAction(ws, { type, id }) {
+  try {
+    if (typeof id !== 'string' || !id) throw new Error('missing order id');
+    const result = QUEUE_ACTIONS[type](id);
+    console.log(`[ledger] ${type} ${id} -> ${result.status}`);
+  } catch (err) {
+    console.warn(`[ledger] ${type} ${id} failed: ${err.message}`);
+    send(ws, 'ACTION_FAILED', { type, id, error: err.message });
+  }
+  broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
+}
 
 // Drop dead client connections every 30s.
 const heartbeat = setInterval(() => {

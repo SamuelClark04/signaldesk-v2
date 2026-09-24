@@ -201,7 +201,10 @@ html, body {
   font-size: 12px;
   cursor: pointer;
 }
-.btn:disabled { color: var(--text-faint); cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn-approve:hover:not(:disabled) { border-color: var(--long); background: var(--long-bg); color: var(--long); }
+.btn-reject:hover:not(:disabled) { border-color: var(--short); background: var(--short-bg); color: var(--short); }
+.btn:disabled { color: var(--text-faint); cursor: not-allowed; opacity: 0.6; }
 
 .empty { padding: 32px 16px; color: var(--text-faint); text-align: center; }
 

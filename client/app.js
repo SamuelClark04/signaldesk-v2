@@ -9,6 +9,8 @@
   const $ = (id) => document.getElementById(id);
   const pending = new Map(); // candidate id -> staged order
   const expanded = new Set(); // candidate ids with the detail row open
+  const inFlight = new Set(); // candidate ids with an APPROVE/REJECT awaiting the server
+  let socket = null;
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
   function showTab(name) {
@@ -52,6 +54,26 @@
   const td = (text, className = '') => el('td', { textContent: text, className });
 
   // ---------- Approvals Queue ----------
+  // Send an intent only. The row stays until the server's QUEUE_UPDATED removes it.
+  function sendAction(type, id) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    inFlight.add(id);
+    socket.send(JSON.stringify({ type, id }));
+    renderQueue();
+  }
+
+  function actionButton(type, label, className, id) {
+    const offline = !socket || socket.readyState !== WebSocket.OPEN;
+    const btn = el('button', {
+      className,
+      textContent: label,
+      disabled: inFlight.has(id) || offline,
+      title: offline ? 'Offline' : '',
+    });
+    btn.addEventListener('click', () => sendAction(type, id));
+    return btn;
+  }
+
   function renderRow(o) {
     const dir = o.direction === 'short' ? 'short' : 'long';
     const catalyst = o.catalyst && o.catalyst.headline
@@ -72,8 +94,8 @@
       el('td', { className: 'catalyst', textContent: catalyst, title: catalyst }),
       el('td', { className: 'num age', textContent: age(o.stagedAt), dataset: { ts: o.stagedAt } }),
       el('td', {}, el('div', { className: 'actions' }, [
-        el('button', { className: 'btn', textContent: 'Approve', disabled: true, title: 'Execution not wired yet' }),
-        el('button', { className: 'btn', textContent: 'Reject', disabled: true, title: 'Execution not wired yet' }),
+        actionButton('APPROVE', 'Approve', 'btn btn-approve', o.id),
+        actionButton('REJECT', 'Reject', 'btn btn-reject', o.id),
       ])),
     ]);
     row.addEventListener('click', (e) => {
@@ -99,8 +121,12 @@
 
   // Receive staged orders from the server and render them.
   function receiveStagedOrders(orders, { replace = false } = {}) {
-    if (replace) pending.clear();
+    if (replace) {
+      pending.clear();
+      inFlight.clear();
+    }
     for (const o of [].concat(orders)) if (o && o.id) pending.set(o.id, o);
+    for (const id of expanded) if (!pending.has(id)) expanded.delete(id);
     renderQueue();
   }
 
@@ -113,6 +139,12 @@
   const HANDLERS = {
     'orders:snapshot': (orders) => receiveStagedOrders(orders, { replace: true }),
     'order:staged': (order) => receiveStagedOrders(order),
+    QUEUE_UPDATED: (orders) => receiveStagedOrders(orders, { replace: true }),
+    ACTION_FAILED: ({ type, id, error }) => {
+      console.warn(`[signaldesk] ${type} ${id} failed: ${error}`);
+      inFlight.delete(id);
+      renderQueue();
+    },
   };
 
   function setConn(state, label) {
@@ -124,7 +156,8 @@
   function connect() {
     setConn('connecting', 'Connecting…');
     const ws = new WebSocket(WS_URL);
-    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); });
+    socket = ws;
+    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); renderQueue(); });
     ws.addEventListener('message', (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
@@ -133,6 +166,7 @@
     });
     ws.addEventListener('close', () => {
       setConn('closed', `Offline · retry ${backoff / 1000}s`);
+      renderQueue(); // disables the action buttons while offline
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);
     });
