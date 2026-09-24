@@ -31,7 +31,9 @@
 
   // ---------- WebSocket ----------
   const isOnline = () => !!socket && socket.readyState === WebSocket.OPEN;
-  SD.queue.init({ isOnline, send: (msg) => socket.send(JSON.stringify(msg)) });
+  const transport = { isOnline, send: (msg) => socket.send(JSON.stringify(msg)) };
+  SD.queue.init(transport);
+  SD.portfolio.init(transport);
 
   const HANDLERS = {
     'orders:snapshot': (orders) => SD.queue.receive(orders, { replace: true }),
@@ -40,6 +42,7 @@
     POSITIONS_UPDATED: (positions) => SD.portfolio.render(positions || []),
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
     ACTION_FAILED: (payload) => SD.queue.actionFailed(payload),
+    ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
   };
 
   function setConn(state, label) {

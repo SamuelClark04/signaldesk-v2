@@ -79,6 +79,44 @@
       <section class="tab" id="tab-portfolio" data-title="Portfolio" hidden>
         <div class="panel">
           <div class="panel-header">
+            <h2 class="panel-title">What to Buy (Allocator)</h2>
+            <span class="panel-hint">Buy-only rebalance toward the target model. Suggestions only; nothing is staged.</span>
+          </div>
+
+          <form class="alloc-form" id="alloc-form" novalidate>
+            <label class="field">
+              <span class="field-label">Deposit amount</span>
+              <span class="input-wrap">
+                <span class="input-prefix">$</span>
+                <input class="input" id="alloc-amount" type="number" min="1" step="any" inputmode="decimal" placeholder="1000" required>
+              </span>
+            </label>
+            <button class="btn btn-primary" id="alloc-submit" type="submit">Calculate</button>
+            <span class="alloc-status" id="alloc-status" role="status"></span>
+          </form>
+
+          <div id="alloc-result" hidden>
+            <div class="alloc-summary" id="alloc-summary"></div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Asset</th>
+                    <th class="num">Current</th>
+                    <th class="num">Target</th>
+                    <th class="num">Buy</th>
+                    <th class="num">≈ Units</th>
+                  </tr>
+                </thead>
+                <tbody id="alloc-body"></tbody>
+              </table>
+            </div>
+            <ul class="alloc-notes" id="alloc-notes"></ul>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
             <h2 class="panel-title">Active Positions</h2>
             <span class="count" id="positions-count">0</span>
             <span class="panel-hint">Filled paper trades, managed by the server's stop and target monitor</span>

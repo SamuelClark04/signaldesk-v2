@@ -5,6 +5,7 @@
 const ledger = require('./paper-ledger');
 const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
+const { calculateAllocation } = require('../strategies/4-portfolio-pilot');
 
 // Guarded approval: fills at the live price, or retires the setup with a reason.
 function approveWithGuard(id) {
@@ -37,12 +38,23 @@ function createMessageHandler({ send, broadcast }) {
     broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
   }
 
+  // Allocator: read-only math, answered to the requesting client only.
+  function handleAllocation(ws, { amount }) {
+    try {
+      const proposal = calculateAllocation(amount, ledger.getActivePositions(), prices.getLatestPrices());
+      send(ws, 'ALLOCATION_PROPOSAL', proposal);
+    } catch (err) {
+      send(ws, 'ALLOCATION_PROPOSAL', { error: err.message });
+    }
+  }
+
   // Entry point for every raw client frame.
   return function handleMessage(ws, raw) {
     let msg;
     try { msg = JSON.parse(raw); } catch { return send(ws, 'error', 'invalid JSON'); }
     if (msg.type === 'ping') return send(ws, 'pong', Date.now());
     if (QUEUE_ACTIONS[msg.type]) return handleQueueAction(ws, msg);
+    if (msg.type === 'CALCULATE_ALLOCATION') return handleAllocation(ws, msg);
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };
 }
