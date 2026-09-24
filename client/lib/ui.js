@@ -9,7 +9,11 @@
   const decimals = (o) => (o.market === 'crypto' ? (o.entryPrice < 10 ? 4 : 2) : 2);
   const price = (x, o) => (Number.isFinite(x) ? x.toFixed(decimals(o)) : '—');
   const money = (x) => (Number.isFinite(x) ? `$${x.toFixed(2)}` : '—');
-  const size = (o) => (o.market === 'stocks' ? String(o.positionSize) : o.positionSize.toFixed(6));
+  // Size with its unit: options trade in contracts, stocks in shares, crypto in coins.
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const size = (o) => (o.market === 'options' ? plural(o.positionSize, 'contract')
+    : o.market === 'stocks' ? plural(o.positionSize, 'share')
+      : `${o.positionSize.toFixed(6)} coins`);
   const signed = (x, fmt) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${fmt(Math.abs(x))}`;
   const pnlClass = (x) => (x > 0 ? 'pnl-pos' : x < 0 ? 'pnl-neg' : '');
   const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

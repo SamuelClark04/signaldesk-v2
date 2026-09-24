@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { isApproved } = require('../risk/risk-engine');
-const { getRoundTripRate } = require('../risk/cost-authority');
+const { estimateRoundTripFees } = require('../risk/cost-authority');
 
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
 const STATE_VERSION = 1;
@@ -103,18 +103,40 @@ function discardOrder(candidateId) {
   return { ...discarded };
 }
 
+// Options value at exit, per share of underlying: each leg's intrinsic value at
+// the underlying exit price (buy legs +, sell legs -). Intrinsic ignores the time
+// value left in the options, so exits are valued as if at expiry: a spread
+// is worth at most its strike width and a stopped-out long call is worth 0.
+function optionsExitValue(legs, underlyingPrice) {
+  return legs.reduce((v, leg) => {
+    const intrinsic = leg.type === 'put'
+      ? Math.max(0, leg.strike - underlyingPrice)
+      : Math.max(0, underlyingPrice - leg.strike);
+    return v + (leg.side === 'sell' ? -1 : 1) * (leg.ratio || 1) * intrinsic;
+  }, 0);
+}
+
+// Gross P/L before fees, plus the per-share option value at exit (options only).
+function grossPnlAt(pos, exitPrice) {
+  if (pos.market !== 'options') {
+    const sign = pos.direction === 'short' ? -1 : 1;
+    return { grossPnl: (exitPrice - pos.fillPrice) * pos.positionSize * sign };
+  }
+  const { debit, multiplier, legs } = pos.optionsData;
+  const exitValue = optionsExitValue(legs || [], exitPrice);
+  return { grossPnl: (exitValue - debit) * multiplier * pos.positionSize, optionsExitValue: exitValue };
+}
+
+// exitPrice is always the UNDERLYING price (options are valued from their legs).
 function closePosition(candidateId, exitPrice, exitReason) {
   if (!(exitPrice > 0)) throw new Error('paper-ledger: exitPrice must be a positive number');
   const i = findIndex(activePositions, candidateId);
   if (i === -1) throw new Error(`paper-ledger: no open position ${candidateId}`);
 
-  const [pos] = activePositions.splice(i, 1);
-  const sign = pos.direction === 'short' ? -1 : 1;
-  const grossPnl = (exitPrice - pos.fillPrice) * pos.positionSize * sign;
-
-  // Round-trip rate is split evenly across the entry and exit legs.
-  const halfRate = getRoundTripRate(pos.market) / 2;
-  const fees = halfRate * pos.positionSize * (pos.fillPrice + exitPrice);
+  // Compute everything before removing the position, so a failure leaves it open.
+  const pos = activePositions[i];
+  const { grossPnl, optionsExitValue: exitValue } = grossPnlAt(pos, exitPrice);
+  const fees = estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice);
   const netPnl = grossPnl - fees;
 
   const entry = {
@@ -127,7 +149,9 @@ function closePosition(candidateId, exitPrice, exitReason) {
     fees,
     netPnl,
     rMultiple: netPnl / pos.dollarRisk,
+    ...(exitValue === undefined ? {} : { optionsExitValue: exitValue }),
   };
+  activePositions.splice(i, 1);
   tradeJournal.push(entry);
   saveState();
   return { ...entry };

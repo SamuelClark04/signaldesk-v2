@@ -8,6 +8,9 @@ const ROUND_TRIP_COST_RATE = {
   stocks: 0.0010, // slippage, both legs
 };
 
+// Options are costed per contract, not per notional: flat fees + slippage, both legs.
+const OPTIONS_ROUND_TRIP_PER_CONTRACT = 3.00;
+
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
 
 function getRoundTripRate(market) {
@@ -16,17 +19,25 @@ function getRoundTripRate(market) {
   return rate;
 }
 
+// Round-trip cost in dollars for a sized position. The ledger uses the same
+// function at close, so the gate and the journal never disagree on fees.
+// For stocks/crypto, pass entry and exit prices; options ignore them.
+function estimateRoundTripFees(market, positionSize, entryPrice, exitPrice = entryPrice) {
+  if (market === 'options') return OPTIONS_ROUND_TRIP_PER_CONTRACT * positionSize;
+  // Round-trip rate is split evenly across the entry and exit legs.
+  return (getRoundTripRate(market) / 2) * positionSize * (entryPrice + exitPrice);
+}
+
 // candidate must already be sized: { market, positionSize, entryPrice }.
 function evaluateCosts(candidate, dollarRisk) {
   if (!(dollarRisk > 0)) {
     return { approved: false, reason: 'Invalid dollar risk', feeDrag: null };
   }
-  if (ROUND_TRIP_COST_RATE[candidate.market] === undefined) {
+  if (candidate.market !== 'options' && ROUND_TRIP_COST_RATE[candidate.market] === undefined) {
     return { approved: false, reason: `Unknown market: ${candidate.market}`, feeDrag: null };
   }
 
-  const notional = candidate.positionSize * candidate.entryPrice;
-  const estimatedFees = notional * getRoundTripRate(candidate.market);
+  const estimatedFees = estimateRoundTripFees(candidate.market, candidate.positionSize, candidate.entryPrice);
   const feeDrag = estimatedFees / dollarRisk;
 
   if (feeDrag > MAX_FEE_DRAG) {
@@ -35,4 +46,10 @@ function evaluateCosts(candidate, dollarRisk) {
   return { approved: true, feeDrag, estimatedFees };
 }
 
-module.exports = { evaluateCosts, getRoundTripRate, MAX_FEE_DRAG };
+module.exports = {
+  evaluateCosts,
+  estimateRoundTripFees,
+  getRoundTripRate,
+  MAX_FEE_DRAG,
+  OPTIONS_ROUND_TRIP_PER_CONTRACT,
+};

@@ -7,9 +7,11 @@
 // vertical debit spread (the short leg finances the long one). Otherwise a
 // single-leg call.
 //
-// NOTE: the risk engine and ledger size and track the UNDERLYING (market
-// 'stocks'); there is no contract/premium model yet. Entry, stop and target
-// below are underlying prices.
+// market 'options': the risk engine sizes in contracts from optionsData.debit
+// (max loss = debit × multiplier), and the ledger values the position from its
+// legs. Entry zone, invalidation and targets are UNDERLYING price levels: they
+// drive the approval guard and the exit monitor.
+// Until the real chain is wired, debit and strikes are simulated (see CONFIG).
 const { getATMStraddle } = require('../connectors/options-chain');
 const { calculateExpectedMove } = require('../intelligence/expected-move');
 
@@ -23,8 +25,25 @@ const TRIGGERS = { AAPL: { above: 100 } };
 const CONFIG = {
   entryBufferPct: 0.002, // entry zone: live price up to +0.2%
   stopFractionOfMove: 0.5, // invalidation at half the expected move below entry => T1 ~ 2R
-  minStopPct: 0.0035, // keep clear of the risk engine's ~0.29% stock cost floor
+  minStopPct: 0.0035, // minimum underlying distance to the invalidation level
+  spreadDebitFraction: 0.6, // SIMULATED: vertical debit ≈ 60% of the ATM call
+  strikeIncrement: 1, // SIMULATED: strikes on $1 increments
+  multiplier: 100, // shares per standard equity option contract
 };
+
+const toStrike = (x) => Math.round(x / CONFIG.strikeIncrement) * CONFIG.strikeIncrement;
+
+// Long ATM call; the spread sells a call at the top of the expected move (T1),
+// which caps the payoff exactly where the trade takes profit anyway.
+function buildOptionsData(shielded, livePrice, t1, callPrice) {
+  const longStrike = toStrike(livePrice);
+  const legs = [{ side: 'buy', type: 'call', strike: longStrike, ratio: 1 }];
+  if (!shielded) return { debit: callPrice, multiplier: CONFIG.multiplier, legs };
+
+  const shortStrike = Math.max(toStrike(t1), longStrike + CONFIG.strikeIncrement);
+  legs.push({ side: 'sell', type: 'call', strike: shortStrike, ratio: 1 });
+  return { debit: cents(callPrice * CONFIG.spreadDebitFraction), multiplier: CONFIG.multiplier, legs };
+}
 
 const cents = (x) => Math.round(x * 100) / 100;
 const lookup = (src, key) => (src instanceof Map ? src.get(key) : src && src[key]);
@@ -46,12 +65,14 @@ async function buildCandidate(asset, livePrice, now) {
 
   const t1 = cents(livePrice + expectedMove);
   const date = etDate.format(now);
+  const optionsData = buildOptionsData(shielded, livePrice, t1, callPrice);
+  const strikes = optionsData.legs.map((l) => `${l.side} ${l.strike}C`).join(' / ');
 
   return {
     // One options idea per asset per day, whichever structure the shield picked.
     id: `${STRATEGY_ID}:LONG:${asset}:${date}`,
     asset,
-    market: 'stocks',
+    market: 'options',
     strategyId: STRATEGY_ID,
     setupType,
     direction: 'long',
@@ -68,9 +89,11 @@ async function buildCandidate(asset, livePrice, now) {
       `${asset} trading above trigger level ${TRIGGERS[asset].above}`,
       `Expected move ±${cents(expectedMove)} = (call ${callPrice} + put ${putPrice}) × 0.85`,
       `IVP ${ivp} ${shielded ? '>' : '≤'} ${IVP_SHIELD_THRESHOLD} → ${setupType}`,
-      'Levels are on the underlying; the ledger simulates the underlying, not option premium',
+      `${strikes} for ${optionsData.debit} debit (max loss $${cents(optionsData.debit * optionsData.multiplier)} per contract)`,
+      'Stop and target are underlying levels; strikes and debit are simulated until the live chain is wired',
     ],
     timestamp: new Date(now).toISOString(),
+    optionsData,
   };
 }
 
