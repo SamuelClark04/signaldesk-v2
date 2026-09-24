@@ -6,13 +6,16 @@
 //   setup    = within the last 6 bars (~1 day) the low flushed >= 3% under the mean
 //   trigger  = the last completed bar closed at/below the mean and the LIVE price
 //              is now back above it (a fresh reclaim; one signal per flush)
-//   stop     = the tightest stop the fee gate allows (below);  target = 3R
+//   stop     = the tightest stop the fee gate allows (below)
+//   target   = 3R (strict) or 2R (moderate): the live Settings dial, risk/strictness.js,
+//              read on every pass
 // Why: the risk engine rejects fee drag above 0.35R, and fee drag = round-trip
 // cost / stop %. The stop is the round-trip cost (cost-authority.js, from the
 // Coinbase fee tier in .env) / 0.34R, rounded UP to 0.5%. Intro tier (0.90%
-// taker + 0.10% spread per leg = 2.00% round trip): 6% stop (0.33R), 18% target.
+// taker + 0.10% spread per leg = 2.00% round trip): 6% stop (0.33R), 18% target
+// at 3R (12% at 2R). The fee drag depends on the stop only, not the target.
 // The old flat 2.64% estimate gave the 8% stop / 24% target.
-// Target check: the 3R target must sit at or below the nearest major DAILY
+// Target check: the target must sit at or below the nearest major DAILY
 // resistance (risk/structure.js); otherwise the setup is rejected and reported
 // via takeBlocks(). The thesis states the target's viability, the news
 // sentiment (connectors/news-sentiment.js) and the expected hold.
@@ -23,6 +26,7 @@ const { getHistory } = require('../connectors/history-bars');
 const { getDailyBars } = require('../connectors/daily-bars');
 const { checkTarget } = require('../risk/structure');
 const { getRoundTripRate } = require('../risk/cost-authority');
+const { getStrictness } = require('../risk/strictness');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
@@ -39,7 +43,7 @@ const CONFIG = {
   flushPct: 0.03,
   stopPct: feeStopPct(getRoundTripRate('crypto')),
   entryBufferPct: 0.002,
-  targetsR: [{ level: 1, r: 3, allocation: 1 }],
+  targetsR: [{ level: 1, allocation: 1 }], // r: getStrictness().targetR, per pass
   tradeType: 'Swing Trade',
   expectedDuration: '2-7 days',
 };
@@ -79,7 +83,7 @@ function analyse(bars) {
 function levels(live) {
   const entryMax = px(live * (1 + CONFIG.entryBufferPct));
   const invalidation = floorPx(entryMax * (1 - CONFIG.stopPct));
-  return { entryMax, invalidation, target: px(entryMax + CONFIG.targetsR[0].r * (entryMax - invalidation)) };
+  return { entryMax, invalidation, target: px(entryMax + getStrictness().targetR * (entryMax - invalidation)) };
 }
 
 function candidate(symbol, live, s, now, ctx) {
@@ -100,10 +104,10 @@ function candidate(symbol, live, s, now, ctx) {
     newsSentiment: ctx.news && ctx.news.ok ? { score: ctx.news.score, label: ctx.news.label, source: ctx.news.source } : null,
     entryZone: { min: px(s.mean), max: entryMax },
     invalidation,
-    targets: CONFIG.targetsR.map((t) => ({ level: t.level, price: px(entryMax + t.r * risk), allocation: t.allocation })),
+    targets: CONFIG.targetsR.map((t) => ({ level: t.level, price: px(entryMax + getStrictness().targetR * risk), allocation: t.allocation })),
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} flushed to ${px(s.flushBar.low)} (${depth.toFixed(1)}% under its ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean `
-      + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${CONFIG.targetsR[0].r}R move; `
+      + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${getStrictness().targetR}R move (${getStrictness().level} setting); `
       + `invalid below ${invalidation} (${+(CONFIG.stopPct * 100).toFixed(1)}% stop). ${ctx.target.text} `
       + `${sentiment.describe(ctx.news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
@@ -129,7 +133,7 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
       if (lastSignal.get(symbol) === s.flushBar.time) { tally.skip(symbol, 'This flush was already signalled'); continue; }
       if (!(live > s.mean)) { tally.skip(symbol, 'Flushed, not yet reclaiming the mean'); continue; }
       if (!(s.lastClose <= s.mean)) { tally.skip(symbol, 'Reclaim happened earlier (not fresh)'); continue; }
-      // The 3R target must clear the fees AND sit below major daily resistance.
+      // The target must sit below major daily resistance (the stop already clears the fee gate).
       const { entryMax, target } = levels(live);
       const t = checkTarget(await getDailyBars(symbol, now), entryMax, target, px);
       if (!t.ok) {

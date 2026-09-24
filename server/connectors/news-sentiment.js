@@ -10,13 +10,18 @@
 //      score = 50 + 50 * (bullish − bearish) / (bullish + bearish + 2)
 //      (the +2 keeps a single headline from reading as "extreme").
 // No relevant headlines -> score null ("no recent news"), not 50.
-// Never throws: { ok: true, score|null, label, source, bullish, bearish, neutral, total, at } | { ok: false, error }.
+// headlines: the MAX_HEADLINES most recent focused Alpaca articles (the ones the
+// headline score counts), newest first, each { title, url, at, source, tone }
+// with tone = SignalDesk's reading of that headline (bullish/bearish/neutral).
+// With a Finnhub score the same Alpaca headlines are attached for context.
+// Never throws: { ok: true, score|null, label, source, bullish, bearish, neutral, total, headlines, at } | { ok: false, error }.
 const { scoreHeadline } = require('../intelligence/sentiment-nlp');
 
 const CACHE_MS = 90 * 60 * 1000;
 const FAIL_MS = 15 * 60 * 1000;
 const WINDOW_H = 48;
 const MAX_TAGS = 6;
+const MAX_HEADLINES = 5;
 const TIMEOUT_MS = 8000;
 const cache = new Map(); // symbol -> { at, result }
 
@@ -41,6 +46,13 @@ async function fromFinnhub(symbol) {
   return { ok: true, score, label: label(score), source: `Finnhub news sentiment${Number.isFinite(bull) ? ` (${Math.round(bull * 100)}% bullish articles)` : ''}` };
 }
 
+// One article for the UI. Only http(s) links are passed on (anything else: null).
+function headlineOf(n, score) {
+  const url = typeof n.url === 'string' && /^https?:\/\//i.test(n.url) ? n.url : null;
+  return { title: String(n.headline || '').slice(0, 300), url, at: n.created_at || n.updated_at || null,
+    source: n.source || n.author || null, tone: score > 0 ? 'bullish' : score < 0 ? 'bearish' : 'neutral' };
+}
+
 async function fromHeadlines(symbol) {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
@@ -53,13 +65,15 @@ async function fromHeadlines(symbol) {
   if (!r.ok || !r.json || !Array.isArray(r.json.news)) return { ok: false, error: `Alpaca news HTTP ${r.status}` };
   const focused = r.json.news.filter((n) => Array.isArray(n.symbols) && n.symbols.includes(tag) && n.symbols.length <= MAX_TAGS);
   let bullish = 0; let bearish = 0;
-  for (const n of focused) {
+  const headlines = [];
+  for (const n of focused) { // newest first (sort=desc)
     const s = scoreHeadline(n.headline).score;
     if (s > 0) bullish += 1; else if (s < 0) bearish += 1;
+    if (headlines.length < MAX_HEADLINES) headlines.push(headlineOf(n, s));
   }
   const total = focused.length;
   const score = total ? Math.round(50 + (50 * (bullish - bearish)) / (bullish + bearish + 2)) : null;
-  return { ok: true, score, label: label(score), bullish, bearish, neutral: total - bullish - bearish, total,
+  return { ok: true, score, label: label(score), bullish, bearish, neutral: total - bullish - bearish, total, headlines,
     source: `${total} headline${total === 1 ? '' : 's'} in ${WINDOW_H}h (Alpaca news, SignalDesk scoring)` };
 }
 
@@ -70,7 +84,10 @@ async function getSentiment(symbol, now = Date.now()) {
   if (hit && now - hit.at < (hit.result.ok ? CACHE_MS : FAIL_MS)) return { ...hit.result };
   let result;
   try {
-    result = (await fromFinnhub(s)) || (await fromHeadlines(s));
+    const finnhub = await fromFinnhub(s);
+    const heads = await fromHeadlines(s);
+    // A Finnhub score keeps its number; the Alpaca headlines are shown alongside it.
+    result = finnhub ? { ...finnhub, headlines: heads.ok ? heads.headlines : [], headlineSource: heads.ok ? heads.source : null } : heads;
   } catch (err) {
     result = { ok: false, error: err.name === 'TimeoutError' ? 'news source timed out' : err.message };
   }

@@ -156,3 +156,18 @@
 .hud-basis.is-bid { background: var(--long-bg); color: var(--long); }
 .hud-basis.is-model { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
 .hud-underlying { font-family: var(--font-mono); font-size: 11px; }
+
+/* ---------- News & Catalysts tab (Phase 41) ---------- */
+.news-head { display: grid; grid-template-columns: minmax(200px, 320px) 1fr; align-items: center; gap: 12px; margin-bottom: 10px; }
+@media (max-width: 760px) { .news-head { grid-template-columns: 1fr; } }
+.news-catalyst { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--bg); }
+.news-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.news-item { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.news-tone { padding: 0 6px; border-radius: 4px; font: 600 10px/18px var(--font-mono); text-align: center; text-transform: uppercase; background: var(--surface-2); color: var(--text-muted); }
+.news-tone.is-bullish { background: var(--long-bg); color: var(--long); }
+.news-tone.is-bearish { background: rgba(251, 113, 133, 0.14); color: var(--short); }
+.news-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.news-title { color: var(--text); font-size: 13px; line-height: 1.4; text-decoration: none; overflow-wrap: anywhere; }
+a.news-title:hover { color: var(--accent); text-decoration: underline; }
+.news-meta { color: var(--text-faint); font-size: 11px; }
+.news-note { margin-top: 10px; font-size: 11px; }

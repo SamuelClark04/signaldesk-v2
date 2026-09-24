@@ -1,7 +1,8 @@
 // News sentiment gauge (0 = extreme bearish, 100 = extreme bullish) for the
 // charted symbol. Asks the server with GET_SENTIMENT (server caches ~90 min) at
 // most once per REFRESH_MS per symbol; app.js hands NEWS_SENTIMENT back here.
-// Exposes window.SignalDesk.sentiment: { badge(symbol, opts), received(r) }.
+// Exposes window.SignalDesk.sentiment: { badge(symbol, opts), data(symbol), received(r) }
+// (data: the full result incl. headlines, for the News & Catalysts tab).
 (() => {
   const SD = window.SignalDesk;
   const { el } = SD.ui;
@@ -46,5 +47,5 @@
     ]);
   }
 
-  SD.sentiment = { badge, received };
+  SD.sentiment = { badge, received, data: get };
 })();

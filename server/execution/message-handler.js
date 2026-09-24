@@ -220,7 +220,8 @@ function createMessageHandler({ send, broadcast }) {
   function handleSettings(ws, { payload }) {
     try {
       const settings = ledger.updateSettings(payload);
-      console.log(`[settings] updated: ${JSON.stringify(settings)}`);
+      const { riskProfiles, strictnessLevels, ...shown } = settings;
+      console.log(`[settings] updated: ${JSON.stringify(shown)}`);
       broadcast('SETTINGS_UPDATED', settings);
       // Modes or bankroll changed: refresh what each venue has to trade with.
       publishBrokerState(broadcast, { force: true })

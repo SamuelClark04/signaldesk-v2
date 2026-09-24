@@ -9,6 +9,7 @@ const cryptoSwing = require('../strategies/2-crypto-swing');
 const equitySwing = require('../strategies/3-equity-swing');
 const optionsSystem = require('../strategies/5-options-system');
 const { processCandidate } = require('../risk/risk-engine');
+const strictness = require('../risk/strictness');
 const { sizingBankroll } = require('../risk/venue-capital');
 const { computeProximity } = require('../intelligence/trigger-proximity');
 const ledger = require('./paper-ledger');
@@ -214,7 +215,8 @@ function startPipeline(options = {}) {
   }, PIPELINE_INTERVAL_MS);
   const { bankroll, riskProfile, riskPct, stockMode, cryptoMode } = ledger.getSettings();
   console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${bankroll}, risk ${riskProfile} ${(riskPct * 100).toFixed(1)}%/trade, `
-    + `stocks/options ${String(stockMode).toUpperCase()}, crypto ${String(cryptoMode).toUpperCase()} (editable in Settings)`);
+    + `stocks/options ${String(stockMode).toUpperCase()}, crypto ${String(cryptoMode).toUpperCase()} `
+    + `strictness ${strictness.describe()} (all editable in Settings)`);
   return { runPipeline, stop: stopPipeline };
 }
 

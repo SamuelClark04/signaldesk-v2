@@ -6,7 +6,7 @@
   const SD = window.SignalDesk;
   const { el, price } = SD.ui;
 
-  const TABS = [['thesis', 'Thesis'], ['structure', 'Price structure'], ['context', 'Market context'], ['sources', 'Sources']];
+  const TABS = [['thesis', 'Thesis'], ['structure', 'Price structure'], ['context', 'Market context'], ['news', 'News & Catalysts'], ['sources', 'Sources']];
   let tab = 'thesis';
 
   const col = (title, children) => el('div', { className: 'sa-col' }, [el('h4', { className: 'sa-h', textContent: title }), ...children]);
@@ -91,7 +91,7 @@
       return b;
     }));
     const asOf = watch ? '' : `As of ${o.stagedAt ? when(o.stagedAt) : '—'} · Source: ${o.strategyId || 'SignalDesk'}`;
-    const body = { thesis: () => thesis(o, watch), structure: () => structure(o, ctx, watch), context: () => context(ctx.state, o), sources: () => sources(o, watch) }[tab]();
+    const body = { thesis: () => thesis(o, watch), structure: () => structure(o, ctx, watch), context: () => context(ctx.state, o), news: () => SD.newsPanel.render(o), sources: () => sources(o, watch) }[tab]();
     return el('section', { className: 'opp-analysis', id: 'opp-analysis' }, [
       el('div', { className: 'sa-head' }, [tabs, el('span', { className: 'sa-asof', textContent: asOf })]),
       el('div', { className: 'sa-body' }, body),

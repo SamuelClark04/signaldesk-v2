@@ -7,6 +7,7 @@ const path = require('path');
 
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
 const { RISK_PROFILES, DEFAULT_PROFILE, riskPctFor } = require('../risk/risk-profiles');
+const { LEVELS: STRICTNESS_LEVELS, DEFAULT_LEVEL: DEFAULT_STRICTNESS } = require('../risk/strictness');
 
 const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: older files load with none)
 
@@ -19,6 +20,7 @@ const SETTINGS_RULES = {
   stockMode: { type: 'choice', default: 'paper', values: MODES }, // Alpaca: stocks + options
   cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // Coinbase: crypto
   riskProfile: { type: 'choice', default: DEFAULT_PROFILE, values: Object.keys(RISK_PROFILES) }, // % risked per new trade
+  strictness: { type: 'choice', default: DEFAULT_STRICTNESS, values: Object.keys(STRICTNESS_LEVELS) }, // setup gates (risk/strictness.js)
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
 
@@ -116,9 +118,10 @@ function attach(ledgerLists) {
 }
 
 // ---------- Settings ----------
-// riskPct and the profile table are derived (never stored), so the UI shows
-// the server's numbers instead of keeping its own copy.
-const getSettings = () => ({ ...settings, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES } });
+// riskPct and the profile/strictness tables are derived (never stored), so the
+// UI shows the server's numbers instead of keeping its own copy.
+const getSettings = () => ({ ...settings, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES },
+  strictnessLevels: Object.fromEntries(Object.entries(STRICTNESS_LEVELS).map(([k, v]) => [k, { ...v }])) });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.
 function updateSettings(newSettings) {

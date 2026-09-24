@@ -48,7 +48,8 @@
     return el('section', { className: 'slog' }, [
       el('div', { className: 'slog-bar' }, [
         el('h3', { className: 'scan-h', textContent: 'Live scanner log' }),
-        el('span', { className: 'slog-muted', textContent: last ? `Last pass ${time(last)} · every ${Math.round(((state.scan && state.scan.intervalMs) || 60000) / 1000)}s · newest first` : 'Waiting for the first pass' }),
+        el('span', { className: 'slog-muted', textContent: `${last ? `Last pass ${time(last)} · every ${Math.round(((state.scan && state.scan.intervalMs) || 60000) / 1000)}s · newest first` : 'Waiting for the first pass'}`
+          + `${state.settings && state.settings.strictness ? ` · strictness: ${state.settings.strictness}` : ''}` }),
       ]),
       log.length
         ? el('ol', { className: 'slog-list' }, log.map((e) => entry(e, opts)))

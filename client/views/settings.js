@@ -1,4 +1,6 @@
-// Settings tab: Risk Management (risk profile, bankroll, paper/live execution venues).
+// Settings tab: Risk Management (risk profile, strategy strictness, bankroll,
+// paper/live execution venues). Strictness is sent the moment it is clicked (no
+// Save needed); the server applies it from the next 60 s scan.
 // Sends requested changes; the server validates, persists and broadcasts
 // SETTINGS_UPDATED to every client. The header badge and LIVE warnings are
 // driven only by server-confirmed settings, never by unsaved UI state.
@@ -32,6 +34,7 @@
     $('settings-save').disabled = on;
     for (const m of MODE_SELECTS) $(m.id).disabled = on;
     $('settings-risk').querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    $('settings-strictness').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     clearTimeout(pendingTimer);
     if (on) {
       pendingTimer = setTimeout(() => {
@@ -83,6 +86,24 @@
     }));
   }
 
+  // Strategy strictness: sent immediately on click (server-confirmed state only;
+  // the button that looks active is always the saved level). Labels and numbers
+  // come from the server (settings.strictnessLevels).
+  function renderStrictness() {
+    const box = $('settings-strictness');
+    if (!saved || !saved.strictnessLevels) { box.replaceChildren(el('span', { className: 'settings-status', textContent: 'Waiting for the server…' })); return; }
+    box.replaceChildren(...Object.entries(saved.strictnessLevels).map(([key, lv]) => {
+      const active = key === saved.strictness;
+      const b = el('button', { type: 'button', className: `settings-risk-opt is-${key}${active ? ' is-active' : ''}`, disabled: pending }, [
+        el('strong', { textContent: lv.label }),
+        el('span', { textContent: `Crypto target ${lv.targetR}R · resistance ${lv.resistanceLookbackDays ? `last ${lv.resistanceLookbackDays} days` : 'full history'}` })]);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(active));
+      b.onclick = () => { if (!active) request({ strictness: key }); };
+      return b;
+    }));
+  }
+
   // Going LIVE is the one change that needs an explicit confirmation.
   function changeMode(m) {
     const value = $(m.id).value;
@@ -121,7 +142,9 @@
     const pct = saved.riskPct;
     $('settings-facts').replaceChildren('Saved: ', el('strong', { textContent: `${PROFILE_LABEL[saved.riskProfile] || saved.riskProfile} (${pctText(pct)})` }),
       ' risk on a ', el('strong', { textContent: money(saved.bankroll) }), ' paper bankroll, so each new trade risks up to ',
-      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop. Staged setups and open positions keep the size they were given.');
+      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop. Staged setups and open positions keep the size they were given. Strictness: ',
+      el('strong', { textContent: (saved.strictnessLevels && saved.strictnessLevels[saved.strictness] || {}).label || saved.strictness || 'strict' }),
+      ' (sizing, the fee gate, the capital cap and the earnings shields are the same at every level).');
   }
 
   // Server truth arrived (on connect, after our save, or after another client's save).
@@ -139,6 +162,7 @@
     if (draftProfile === saved.riskProfile) draftProfile = null; // saved: no longer a draft
     renderModes();
     renderRisk();
+    renderStrictness();
     renderFacts();
   }
 
@@ -148,6 +172,7 @@
     if (settings) saved = settings;
     renderModes();
     renderRisk();
+    renderStrictness();
     renderFacts();
   }
 
@@ -155,6 +180,7 @@
   for (const m of MODE_SELECTS) $(m.id).addEventListener('change', () => changeMode(m));
   renderFacts();
   renderRisk();
+  renderStrictness();
 
   SD.settings = {
     init: (t) => { transport = t; },
