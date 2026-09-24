@@ -169,8 +169,17 @@
     const lv = (fn) => (ready ? fn() : '—');
     const cost = (x) => (Number.isFinite(x) ? money(x) : '—');
     const rr = ready && s.t1 && s.stop && s.stop.net < 0 ? `${(s.t1.net / -s.stop.net).toFixed(2)} : 1` : '—';
-    const bankroll = ctx.settings && ctx.settings.bankroll;
-    const riskPct = bankroll > 0 && o.dollarRisk > 0 ? ` (${((o.dollarRisk / bankroll) * 100).toFixed(2)}%)` : '';
+    // Sizing basis = the bankroll of the venue this order would go to (paper,
+    // live Coinbase or live Alpaca), and risk % against THAT bankroll only.
+    const [modeKey, broker] = VENUE[o.market] || [null, '?'];
+    const liveVenue = ctx.settings && modeKey && ctx.settings[modeKey] === 'live';
+    const vb = SD.portfolioTable.venueBankroll(ctx.state || {}, liveVenue ? (broker === 'Coinbase' ? 'coinbase' : 'alpaca') : 'paper');
+    const riskShare = vb.amount > 0 && o.dollarRisk > 0 ? o.dollarRisk / vb.amount : null;
+    const riskPct = riskShare === null ? (liveVenue ? ' (% unknown: live account not loaded)' : '') : ` (${(riskShare * 100).toFixed(2)}%)`;
+    // The risk engine still sizes every order from the PAPER bankroll; on a live
+    // venue that can be far more than the intended 1% of the real account.
+    const paperBankroll = ctx.settings && ctx.settings.bankroll;
+    const oversized = ready && liveVenue && riskShare !== null && o.riskPct > 0 && riskShare > o.riskPct * 1.25;
     const summary = ready && o.thesis ? o.thesis.split(/(?<=\.)\s/)[0] : '';
     return el('aside', { className: 'opp-right' }, [
       el('header', { className: 'opp-right-head' }, [
@@ -192,8 +201,10 @@
         kv('Quantity (est.)', lv(() => size(o))),
       ]),
       el('div', { className: 'opp-kv-group' }, [
-        kv('Sizing basis', bankroll > 0 ? `${money(bankroll)} configured bankroll` : '—'),
-        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`)),
+        kv('Sizing basis', vb.amount > 0 ? `${money(vb.amount)} · ${vb.label}` : `${vb.label} · ${vb.note}`),
+        kv('Risk amount (est.)', lv(() => `${money(o.dollarRisk)}${riskPct}`), oversized ? 'text-short' : ''),
+        ...(oversized ? [el('p', { className: 'opp-size-warn', textContent: `Sized from the paper bankroll (${money(paperBankroll)}): this risks ${(riskShare * 100).toFixed(2)}% `
+          + `of your live ${broker} account, not ${(o.riskPct * 100).toFixed(0)}%. Live sizing is not isolated yet.` })] : []),
         kv('Estimated entry cost', lv(() => cost(c.entry))),
         kv('Estimated exit cost (T1)', lv(() => cost(c.exitT1))),
         kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),

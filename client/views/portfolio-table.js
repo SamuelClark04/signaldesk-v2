@@ -101,8 +101,31 @@
       fresh: rows.filter((r) => r.m.live).length,
       unmarked: counted.filter((r) => r.m.gross === null).length,
       live: rows.length - counted.length,
+      // Venue-isolated bankroll: paper = configured bankroll; Live Crypto = the
+      // Coinbase account's value (holdings + cash); Combined = both.
+      liveAccountValue: useCb ? cbValue + cbCash : 0,
     };
+    totals.currentBankroll = (usePaper ? bankroll : 0) + totals.liveAccountValue;
+    totals.bankrollLabel = [usePaper ? 'paper bankroll' : '', useCb ? 'Coinbase account value' : ''].filter(Boolean).join(' + ');
     return { rows, totals };
+  }
+
+  // The bankroll a single order is measured against, by the venue it will use:
+  // 'paper' | 'coinbase' | 'alpaca'. { amount|null, label, note }. Live accounts
+  // are only known after a sync (Coinbase) or from BROKER_STATE (Alpaca equity).
+  function venueBankroll(state, key) {
+    if (key === 'coinbase') {
+      const cb = state.holdings && state.holdings.coinbase;
+      if (!cb || !cb.ok) return { amount: null, label: 'Live Coinbase account value', note: 'not synced: press Sync Broker' };
+      return { amount: metrics(state, 'crypto').totals.liveAccountValue, label: 'Live Coinbase account value', note: `synced ${clock(cb.syncedAt)}` };
+    }
+    if (key === 'alpaca') {
+      const v = state.broker && state.broker.venues && state.broker.venues.alpaca;
+      if (!v || !v.ok || !(v.equity > 0)) return { amount: null, label: 'Live Alpaca equity', note: v && v.error ? `unavailable: ${v.error}` : 'unavailable' };
+      return { amount: v.equity, label: 'Live Alpaca equity', note: `as of ${clock(v.fetchedAt)}` };
+    }
+    const b = state.settings && state.settings.bankroll;
+    return { amount: b > 0 ? b : null, label: 'Paper bankroll', note: 'configured in Settings' };
   }
 
   // ---------- Holdings table ----------
@@ -247,5 +270,5 @@
     ]);
   }
 
-  SD.portfolioTable = { mark, metrics, holdingsTable, exposure, attention, details, display, pct };
+  SD.portfolioTable = { mark, metrics, venueBankroll, holdingsTable, exposure, attention, details, display, pct };
 })();

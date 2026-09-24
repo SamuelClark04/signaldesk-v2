@@ -187,6 +187,7 @@
       livePrice: state.prices ? state.prices[active.asset] : null,
       refPrice: state.refPrices ? state.refPrices[active.asset] : null,
       settings: state.settings,
+      state, // venue bankrolls for the risk panel (synced holdings, broker state)
       online: transport.isOnline(),
       busy: !active.isWatch && inFlight.has(active.id),
       onApprove,

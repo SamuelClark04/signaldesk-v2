@@ -156,6 +156,8 @@
       summary(data),
       el('div', { className: 'pf-kpis' }, [
         kpi('Portfolio value', money(t.accountValue), `${opts.venueLabel} · ${data.rows.length} position${data.rows.length === 1 ? '' : 's'}`),
+        // Isolated per venue: paper cash never inflates live buying power (and vice versa).
+        kpi('Spendable cash', `${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`, t.currentBankroll > 0 ? `Bankroll ${money(t.currentBankroll)} (${t.bankrollLabel})` : 'No bankroll for this venue yet', t.cash < 0 ? 'pnl-neg' : ''),
         kpi('Concentration', total > 0 ? `${((values[topIdx] / total) * 100).toFixed(0)}%` : '—', total > 0 ? `Top holding (${data.rows[topIdx].p.asset.replace('-USD', '')})` : 'No holdings'),
         kpi('Estimated exit cost', money(t.exitFees), 'If every position shown closed now'),
         kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, 'Positions with a live price'),

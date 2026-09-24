@@ -82,7 +82,7 @@
       card('Holdings value', money(t.holdingsValue), t.unmarked ? `${t.unmarked} position(s) without a P/L mark` : t.useCb ? 'Live prices; Coinbase coins without one at their sync value' : 'Open positions at live prices'),
       // Each setup is sized on its own (up to the bankroll in notional), so open
       // positions can commit more than the bankroll: say so instead of hiding it.
-      !t.usePaper ? card('Spendable cash', money(t.cash), 'Coinbase USD + USDC balance at the last sync')
+      !t.usePaper ? card('Spendable cash', money(t.cash), 'Coinbase USD + USDC at the last sync (live cash only; no paper money)')
         : t.cash >= 0 ? card('Spendable cash', money(t.cash), `Not committed to open positions${t.useCb ? ' (paper) + Coinbase cash' : ` (${money(t.committed)} committed)`}`)
         : card('Spendable cash', `−${money(-t.cash)}`, `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll${t.useCb ? ' (Coinbase cash included)' : ''}`, 'pnl-neg'),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),

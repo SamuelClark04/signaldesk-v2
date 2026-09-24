@@ -65,7 +65,7 @@
       items = [
         metric('Account value', money(t.accountValue), `${SD.venue.LABEL[m.venue]} · cash ${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`),
         metric('Open positions', String(m.count), `${money(t.holdingsValue)} at live prices`),
-        metric('Open risk', money(m.risk), `${t.accountValue > 0 ? `${((m.risk / t.accountValue) * 100).toFixed(2)}% of account · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
+        metric('Open risk', money(m.risk), `${t.currentBankroll > 0 ? `${((m.risk / t.currentBankroll) * 100).toFixed(2)}% of ${t.bankrollLabel} · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
         metric('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No marked positions' : `${pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
         metric("Today's change", signed(m.todayPnl, money), `${pct(m.todayPct)} · realized today (SignalDesk trades)`, pnlClass(m.todayPnl)),
       ];
