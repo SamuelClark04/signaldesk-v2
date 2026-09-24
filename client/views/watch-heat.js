@@ -1,4 +1,4 @@
-// Market Watch "heating up" filter: with 80 monitored symbols, the rail lists
+// Market Watch "heating up" filter: with 83 monitored symbols, the rail lists
 // only the ones worth watching now:
 //   - within 1.5% of a strategy trigger (server TRIGGER_PROXIMITY, strategies' own maths)
 //   - a setup in the approvals queue

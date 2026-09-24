@@ -40,15 +40,22 @@ start "" /b powershell -NoProfile -WindowStyle Hidden -Command "$u='http://127.0
 
 REM Cloudflare quick tunnel: the SERVER starts cloudflared (so it can read the
 REM random trycloudflare.com address, allow it and print it); this only finds the
-REM executable: project root, scripts\, then PATH. TUNNEL=off in .env skips it.
+REM executable: project root, scripts\, Program Files, winget, Downloads, then PATH. TUNNEL=off in .env skips it.
 set "CLOUDFLARED_EXE="
 if exist "%~dp0..\cloudflared.exe" set "CLOUDFLARED_EXE=%~dp0..\cloudflared.exe"
 if not defined CLOUDFLARED_EXE if exist "%~dp0cloudflared.exe" set "CLOUDFLARED_EXE=%~dp0cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%ProgramFiles%\cloudflared\cloudflared.exe" set "CLOUDFLARED_EXE=%ProgramFiles%\cloudflared\cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%ProgramFiles(x86)%\cloudflared\cloudflared.exe" set "CLOUDFLARED_EXE=%ProgramFiles(x86)%\cloudflared\cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%CommonProgramFiles%\cloudflared\cloudflared.exe" set "CLOUDFLARED_EXE=%CommonProgramFiles%\cloudflared\cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%CommonProgramFiles(x86)%\cloudflared\cloudflared.exe" set "CLOUDFLARED_EXE=%CommonProgramFiles(x86)%\cloudflared\cloudflared.exe"
+if not defined CLOUDFLARED_EXE if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe" set "CLOUDFLARED_EXE=%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe"
+if not defined CLOUDFLARED_EXE for /d %%d in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\Cloudflare.cloudflared*") do if not defined CLOUDFLARED_EXE if exist "%%d\cloudflared.exe" set "CLOUDFLARED_EXE=%%d\cloudflared.exe"
+if not defined CLOUDFLARED_EXE for /f "delims=" %%c in ('dir /b /o-d "%USERPROFILE%\Downloads\cloudflared*.exe" 2^>nul') do if not defined CLOUDFLARED_EXE set "CLOUDFLARED_EXE=%USERPROFILE%\Downloads\%%c"
 if not defined CLOUDFLARED_EXE for /f "delims=" %%c in ('where cloudflared 2^>nul') do if not defined CLOUDFLARED_EXE set "CLOUDFLARED_EXE=%%c"
 REM (single-line IFs: a path like "Program Files (x86)" breaks a parenthesised block)
 if defined CLOUDFLARED_EXE echo Cloudflare tunnel: "%CLOUDFLARED_EXE%"
 if defined CLOUDFLARED_EXE echo Your public https://....trycloudflare.com link appears below in a box once it is ready.
-if not defined CLOUDFLARED_EXE echo Cloudflare tunnel: cloudflared.exe not found ^(project folder, scripts\ or PATH^): local access only.
+if not defined CLOUDFLARED_EXE echo Cloudflare tunnel: cloudflared.exe not found ^(project folder, scripts\, Program Files, winget, Downloads or PATH^): local access only.
 
 echo Starting SignalDesk on http://127.0.0.1:%SD_PORT%  ^(Ctrl+C to stop^)
 echo The browser opens automatically once the server is up.

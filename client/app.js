@@ -49,10 +49,11 @@
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
     SCAN_LOG: (log) => { state.scanLog = log || []; }, // live scanner log (Scanner tab), once per pass
     PILOT_ACTIONS: (list) => { state.pilotActions = list || []; }, // Portfolio Pilot SELL / TRIM (Approvals)
+    PILOT_MATRIX: (m) => { state.pilotMatrix = m; }, // HOLD / ADD / TRIM / SELL + ROTATE per holding
     MACRO_EVENTS: (list) => { state.macro = list || []; }, // FOMC / CPI / FDA calendar (News & Catalysts)
     NEWS_SENTIMENT: (r) => SD.sentiment.received(r), // 0-100 gauge for the charted symbol
     SAVED_SETUPS: (list) => { state.saved = list || []; }, // bookmarks (Opportunities → Saved)
-    UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 80 monitored symbols + names
+    UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 83 monitored symbols + names
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
     BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)
   };

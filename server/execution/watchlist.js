@@ -20,7 +20,7 @@ const FILE = process.env.WATCHLIST_PATH || path.join(__dirname, '..', 'data', 'w
 const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
 const MAX_TRIGGER_LENGTH = 80;
 
-// First-run defaults: the core list (not all 80 monitored symbols), no notes.
+// First-run defaults: the core list (not all 83 monitored symbols), no notes.
 const DEFAULTS = CORE_WATCHLIST.map((symbol) => ({ symbol, triggerCondition: '' }));
 // Static placeholder texts older versions wrote as "triggers" (stale prices): dropped on load.
 const LEGACY_TEXT = new Set(['Breakout above 231.10', 'Pullback to SMA20 after earnings', 'Reclaim of 512.40',

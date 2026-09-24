@@ -14,6 +14,7 @@ const alpacaNews = require('./connectors/alpaca-news-socket');
 const coinbase = require('./connectors/coinbase-socket');
 const ledger = require('./execution/paper-ledger');
 const { createMessageHandler } = require('./execution/message-handler');
+const pilotHandler = require('./execution/pilot-handler'); // PILOT_MATRIX snapshot for new clients
 const { startPipeline, stopPipeline, runPipeline, getScanStatus, getProximity } = require('./execution/pipeline');
 const { getBrokerState } = require('./execution/broker-state');
 const rejectionStats = require('./execution/rejection-stats');
@@ -33,7 +34,7 @@ const { buildIntelligence } = require('./intelligence/dashboard-intel');
 // LAN_ACCESS=true opens it to the Wi-Fi. See security/access-policy.js.
 const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = require('./security/access-policy');
 const authGate = require('./security/auth-gate');
-const tunnel = require('./security/tunnel'); // Cloudflare quick tunnel (TUNNEL=off disables)
+const tunnel = require('./security/tunnel-manager'); // Cloudflare quick tunnel (TUNNEL=off disables)
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -112,6 +113,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SCAN_STATUS', getScanStatus());
   send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
+  send(ws, 'PILOT_MATRIX', pilotHandler.getMatrix());
   send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());
   send(ws, 'TRIGGER_PROXIMITY', getProximity());

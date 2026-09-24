@@ -136,7 +136,8 @@ function reducePosition(candidateId, fraction, exitPrice, exitReason) {
   if (pos.market === 'options') throw new Error('paper-ledger: options positions cannot be reduced');
   if (!(fraction > 0 && fraction < 1)) throw new Error('paper-ledger: fraction must be between 0 and 1');
   const raw = pos.positionSize * fraction;
-  const q = pos.market === 'stocks' ? Math.floor(raw) : Math.floor(raw * 1e8) / 1e8;
+  const step = pos.market === 'stocks' ? (pos.fractional ? 1e4 : 1) : 1e8; // whole shares, 0.0001 share (fractional), or 8-decimal coins
+  const q = Math.floor(raw * step + 1e-9) / step;
   if (!(q > 0) || q >= pos.positionSize) throw new Error('TRIM_TOO_SMALL: the position is too small to trim');
   const share = q / pos.positionSize;
   const part = { ...pos, id: `${pos.id}:trim:${Date.now()}`, parentId: pos.id, positionSize: q, dollarRisk: pos.dollarRisk * share };

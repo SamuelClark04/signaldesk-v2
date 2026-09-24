@@ -30,7 +30,7 @@
   // Size with its unit: options trade in contracts, stocks in shares, crypto in coins.
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const size = (o) => (o.market === 'options' ? plural(o.positionSize, 'contract')
-    : o.market === 'stocks' ? plural(o.positionSize, 'share')
+    : o.market === 'stocks' ? (Number.isInteger(o.positionSize) ? plural(o.positionSize, 'share') : `${o.positionSize.toFixed(4)} shares`) // fractional (Pilot)
       : `${o.positionSize.toFixed(6)} coins`);
   const signed = (x, fmt) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${fmt(Math.abs(x))}`;
   const pnlClass = (x) => (x > 0 ? 'pnl-pos' : x < 0 ? 'pnl-neg' : '');

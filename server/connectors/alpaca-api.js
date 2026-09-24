@@ -73,7 +73,7 @@ async function getAccount() {
 // Checks that make a bracket order safe to send, before any network call.
 function validateOrder(c, size, entryPrice) {
   if (c.market !== 'stocks') return `Alpaca live routing supports stocks only (got "${c.market}")`;
-  if (!Number.isInteger(size) || size < 1) return `bracket orders need a whole share quantity (got ${size})`;
+  if (!Number.isInteger(size) || size < 1) return `bracket orders need a whole share quantity (got ${size}); Alpaca refuses fractional shares in a bracket, so fractional Pilot buys execute on paper`;
   const tp = c.targets && c.targets[0] && c.targets[0].price;
   if (!(tp > 0)) return 'no take-profit: live bracket orders need one (Portfolio Pilot core holdings have none, by design); nothing was sent. Buy it on paper, or at the broker';
   if (!(c.invalidation > 0) || !(entryPrice > 0)) return 'missing stop or entry price';

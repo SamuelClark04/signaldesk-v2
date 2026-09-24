@@ -5,9 +5,13 @@
 //     tunnel page open the WebSocket;
 //   - print it in a box on this console (easy to copy) with cloudflared's own
 //     startup lines prefixed [tunnel];
-//   - use it for the alert emails' "Open Approvals" link (TUNNEL_PUBLIC_URL).
+//   - make it the app's public address in memory: APP_PUBLIC_URL (restored when
+//     the tunnel ends) and TUNNEL_PUBLIC_URL, which the alert emails' "Open
+//     Approvals" link uses (notifier.js); no restart, no .env edit.
 // cloudflared.exe is found via CLOUDFLARED_EXE (Start-SignalDesk.bat sets it),
-// then the project root, scripts/, then PATH. TUNNEL=off in .env disables it.
+// then the project root, scripts/, the installer's Program Files / Common Files
+// folders, winget (Links, Packages), the user's Downloads (cloudflared*.exe, the
+// newest), then PATH. TUNNEL=off in .env disables it.
 // If cloudflared exits it is restarted (at most MAX_RESTARTS, backing off); the
 // child is killed when the server stops.
 const { spawn } = require('child_process');
@@ -24,11 +28,33 @@ let child = null;
 let stopping = false;
 let restarts = 0;
 let publicUrl = null;
+let savedAppUrl; // APP_PUBLIC_URL from .env, restored when the tunnel ends
+
+// Files in `dir` matching `re`, newest first (missing folders: none).
+function listMatching(dir, re) {
+  try {
+    return fs.readdirSync(dir).filter((f) => re.test(f)).map((f) => path.join(dir, f))
+      .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  } catch { return []; }
+}
+
+// Every place a Windows install of cloudflared commonly ends up, in search order.
+function candidates(env = process.env) {
+  const list = [env.CLOUDFLARED_EXE, path.join(ROOT, 'cloudflared.exe'), path.join(ROOT, 'scripts', 'cloudflared.exe')];
+  for (const base of [env.ProgramFiles, env['ProgramFiles(x86)'], env.CommonProgramFiles, env['CommonProgramFiles(x86)']]) {
+    if (base) list.push(path.join(base, 'cloudflared', 'cloudflared.exe'));
+  }
+  if (env.LOCALAPPDATA) {
+    const winget = path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet');
+    list.push(path.join(winget, 'Links', 'cloudflared.exe'));
+    for (const dir of listMatching(path.join(winget, 'Packages'), /^Cloudflare\.cloudflared/i)) list.push(path.join(dir, 'cloudflared.exe'));
+  }
+  if (env.USERPROFILE) list.push(...listMatching(path.join(env.USERPROFILE, 'Downloads'), /^cloudflared.*\.exe$/i));
+  return list.filter(Boolean);
+}
 
 function findExe() {
-  if (process.env.CLOUDFLARED_EXE && fs.existsSync(process.env.CLOUDFLARED_EXE)) return process.env.CLOUDFLARED_EXE;
-  for (const p of [path.join(ROOT, 'cloudflared.exe'), path.join(ROOT, 'scripts', 'cloudflared.exe')]) if (fs.existsSync(p)) return p;
-  return 'cloudflared'; // PATH (spawn reports ENOENT if it is not there)
+  return candidates().find((p) => fs.existsSync(p)) || 'cloudflared'; // PATH (spawn reports ENOENT if it is not there)
 }
 
 function box(url) {
@@ -44,7 +70,9 @@ function onLine(line) {
   if (m && m[0] !== publicUrl) {
     publicUrl = m[0];
     policy.addAllowedOrigin(publicUrl);
+    if (savedAppUrl === undefined) savedAppUrl = process.env.APP_PUBLIC_URL || null;
     process.env.TUNNEL_PUBLIC_URL = publicUrl;
+    process.env.APP_PUBLIC_URL = publicUrl;
     box(publicUrl);
     return;
   }
@@ -67,7 +95,7 @@ function launch(port) {
   child.stderr.on('data', read);
   child.on('error', (err) => {
     console.warn(err.code === 'ENOENT'
-      ? '[tunnel] cloudflared not found (project root, scripts/ or PATH): no public tunnel. Install it or set TUNNEL=off.'
+      ? '[tunnel] cloudflared not found (project folder, scripts/, Program Files, winget, Downloads or PATH): no public tunnel. Install it or set TUNNEL=off.'
       : `[tunnel] could not start cloudflared: ${err.message}`);
     stopping = true;
   });
@@ -76,6 +104,8 @@ function launch(port) {
     if (publicUrl) policy.removeAllowedOrigin(publicUrl);
     publicUrl = null;
     delete process.env.TUNNEL_PUBLIC_URL;
+    if (savedAppUrl) process.env.APP_PUBLIC_URL = savedAppUrl; else delete process.env.APP_PUBLIC_URL;
+    savedAppUrl = undefined;
     if (stopping) return;
     if (restarts >= MAX_RESTARTS) { console.warn(`[tunnel] cloudflared exited (code ${code}); giving up after ${MAX_RESTARTS} restarts`); return; }
     restarts += 1;
@@ -96,4 +126,4 @@ function stop() {
   if (child) { try { child.kill(); } catch { /* already gone */ } }
 }
 
-module.exports = { start, stop, url: () => publicUrl };
+module.exports = { start, stop, url: () => publicUrl, candidates, findExe };

@@ -1,8 +1,9 @@
 // Portfolio → Portfolio Pilot: health dashboard + recommendations built from the
 // server's attention alerts (DASHBOARD_INTELLIGENCE, one per open position), and
-// the Capital Allocator: a deposit becomes fully formed BUY setups (volatility
-// stop, 2R target) that the server stages into Opportunities → Approvals;
-// nothing executes until they are approved there.
+// the 4-action matrix (portfolio-matrix.js), and the Capital Allocator: the trend
+// ranker's top leaders (above the 200-day SMA, 30% cap) get a deposit as fully
+// formed BUY setups (8-18% stop, T1 2.5R / T2 4.5R, fractional units) staged
+// into Opportunities → Approvals; nothing executes until approved there.
 // Exposes window.SignalDesk.portfolioPilot.
 (() => {
   const SD = window.SignalDesk;
@@ -105,13 +106,20 @@
     ]);
   }
 
-  // What the server did with each buy: staged (size, stop, target) or why not.
+  // What the server did with each buy: staged (size, stop, targets) or why not.
   function setupCell(pr, r) {
     const s = (pr.setups || []).find((x) => x.asset === r.asset);
     if (!s) return el('td', { className: 'pf-muted', textContent: r.recommendedBuyAmount > 0 ? '—' : 'Nothing to buy' });
     if (!s.staged) return el('td', { className: 'pf-muted', textContent: `Not staged: ${s.reason}` });
     const p = { market: r.asset.includes('-') ? 'crypto' : 'stocks', entryPrice: s.entryPrice };
-    return el('td', { className: 'text-long', textContent: `Staged ${money(s.notional)} · stop ${price(s.invalidation, p)} · no fixed target${s.cappedByAmount ? '' : ' (risk-limited)'}` });
+    const units = p.market === 'stocks' ? `${s.positionSize} sh` : `${s.positionSize} coins`;
+    return el('td', { className: 'text-long', textContent: `Staged ${money(s.notional)} (${units}) · SL ${price(s.invalidation, p)} · T1 ${price(s.targets[0], p)} / T2 ${price(s.targets[1], p)}${s.cappedByAmount ? '' : ' · risk-limited'}` });
+  }
+
+  // The ranker's full list: why each leader was picked or passed over.
+  function rankingList(pr) {
+    return el('details', { className: 'pf-ranking' }, [el('summary', { textContent: `Trend ranking (${(pr.ranking || []).filter((r) => r.qualified).length} of ${(pr.ranking || []).length} above their 200-day SMA)` }),
+      el('ul', { className: 'pf-notes' }, (pr.ranking || []).map((r) => el('li', { className: r.qualified ? '' : 'pf-muted', textContent: `${r.asset}: ${r.qualified ? '' : 'disqualified. '}${r.reason}` })))]);
   }
 
   function openApprovals(opts) {
@@ -140,18 +148,21 @@
     const fmtPct = (x) => `${(x * 100).toFixed(1)}%`;
     return el('section', { className: 'pf-card pf-alloc' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Capital allocator — What to buy' })]),
-      el('p', { className: 'pf-sub', textContent: 'Buy-only rebalance of a deposit toward the pilot target model (BTC 40% · ETH 30% · SPY 30%), at live prices. '
-        + 'Each buy becomes a setup with a volatility stop (no fixed take-profit: core holdings exit at the stop or an approved Pilot sell/trim), sized by the risk engine (never above its allocation) and sent to Opportunities → Approvals. '
+      el('p', { className: 'pf-sub', textContent: 'A 260-day trend ranker scores 13 stocks and 5 coins; anything under its 200-day SMA is never bought. '
+        + 'The deposit goes to the top 3-4 leaders not more than 18% above their 50-day SMA, by score, with no asset above 30% of the portfolio (part is kept for swing setups already waiting in Approvals). '
+        + 'Each buy is a setup in fractional units (0.0001 share) with a structural stop 8-18% below entry, T1 at 2.5R (sells 35%) and T2 at 4.5R, sized by the risk engine and sent to Approvals. '
         + 'Generating again replaces Pilot buys still waiting.' }),
       form,
       ...(alloc.error ? [el('p', { className: 'pf-error', textContent: alloc.error })] : []),
       ...(pr ? [
         el('p', { className: 'pf-text' }, ['Pilot holdings ', el('strong', { textContent: money(pr.portfolioValue) }), ' + deposit ', el('strong', { textContent: money(pr.deposit) }),
-          ' → ', el('strong', { textContent: money(pr.newTotal) }), pr.unallocated > 0 ? ` · ${money(pr.unallocated)} left unallocated` : '']),
+          ' → ', el('strong', { textContent: money(pr.newTotal) }), pr.reserve > 0 ? ` · ${money(pr.reserve)} kept for swing setups` : '', pr.unallocated > 0 ? ` · ${money(pr.unallocated)} stays cash` : '']),
         el('table', { className: 'data-table pf-table pf-alloc-table' }, [
-          el('thead', {}, el('tr', {}, ['Asset', 'Current', 'Target', 'Buy', '≈ Units', 'Setup'].map((h, i) => el('th', { textContent: h, className: i && i < 5 ? 'num' : '' })))),
-          el('tbody', {}, pr.recommendations.map((r) => el('tr', {}, [
+          el('thead', {}, el('tr', {}, ['Rank', 'Asset', 'Score', 'Now', 'After', 'Buy', '≈ Units', 'Setup'].map((h, i) => el('th', { textContent: h, className: i !== 1 && i < 7 ? 'num' : '' })))),
+          el('tbody', {}, pr.recommendations.map((r) => el('tr', { title: r.reason }, [
+            el('td', { className: 'num', textContent: `#${r.rank}` }),
             el('td', {}, el('span', { className: 'asset', textContent: r.asset })),
+            el('td', { className: 'num', textContent: String(r.score) }),
             el('td', { className: 'num', textContent: fmtPct(r.currentWeight) }),
             el('td', { className: 'num', textContent: fmtPct(r.targetWeight) }),
             el('td', { className: `num ${r.recommendedBuyAmount > 0 ? 'text-long' : ''}`, textContent: money(r.recommendedBuyAmount) }),
@@ -159,7 +170,9 @@
             setupCell(pr, r),
           ]))),
         ]),
+        ...((pr.swing || []).length ? [el('p', { className: 'pf-sub', textContent: `Swing setups in Approvals: ${pr.swing.map((x) => `${x.asset} (${x.setupType})`).join(', ')}` })] : []),
         ...((pr.setups || []).some((x) => x.staged) ? [openApprovals(opts)] : []),
+        rankingList(pr),
         ...(pr.notes && pr.notes.length ? [el('ul', { className: 'pf-notes' }, pr.notes.map((n) => el('li', { textContent: n })))] : []),
       ] : []),
     ]);
@@ -183,6 +196,7 @@
         kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, 'Positions with a live price'),
       ]),
       el('div', { className: 'pf-pilot-grid' }, [recTable(data, opts), recDetail(selected, opts)]),
+      SD.portfolioMatrix.card(opts.state),
       allocator(opts),
     ]);
   }

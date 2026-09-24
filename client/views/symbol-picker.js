@@ -1,5 +1,5 @@
 // Chart symbol picker: a <select> in the Setups chart header listing the full
-// monitored universe (UNIVERSE from the server: 40 crypto + 40 stocks), grouped
+// monitored universe (UNIVERSE from the server: 42 crypto + 41 stocks), grouped
 // by market, so any symbol can be charted, not only the ones heating up.
 // Picking one calls ctx.onPickSymbol(symbol): opportunities.js opens its queued
 // setup if it has one, else Market Watch. While the user is working the picker

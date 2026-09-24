@@ -12,8 +12,9 @@
 //                  exitRule.targetValue. Older option positions use the
 //                  underlying's stop / T1 like everything else.
 // LIVE positions exit at the broker (bracket orders); the reconciler records
-// those real fills, so they are skipped here. Portfolio Pilot core holdings
-// never exit at a target: only their stop or an approved Pilot SELL / TRIM.
+// those real fills, so they are skipped here. Portfolio Pilot buys since Phase 50
+// carry T1 (35%) / T2 macro targets like any plan; older Pilot holdings have no
+// targets and leave only at their stop or an approved Pilot SELL / TRIM.
 const { saleValue } = require('./option-marks');
 
 let L = null; // { activePositions, closePosition, reducePosition, save }
@@ -21,7 +22,6 @@ function bind(ctx) { L = ctx; }
 
 // The next open target (T2 once T1 has filled), or null.
 function nextTarget(pos) {
-  if (pos.strategyId === 'portfolio-pilot') return null;
   const list = (pos.targets || []).filter((t) => t.price > 0);
   const open = pos.t1Filled ? list.slice(1) : list;
   if (!open.length) return null;

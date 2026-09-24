@@ -71,7 +71,9 @@
     const atBroker = a.execution === 'LIVE' || a.adopted;
     const busy = ctx.inFlight.has(a.id);
     const qty = pos ? (a.action === 'SELL' ? pos.positionSize : pos.positionSize * a.fraction) : null;
-    const what = a.action === 'SELL' ? 'Sell the whole position' : `Sell ${Math.round(a.fraction * 100)}% of the position`;
+    const what = a.action === 'SELL' ? `Sell the whole position${a.rotation ? ` (then rotate ~${money(a.rotation.proceeds)} into ${a.rotation.asset}: its buy waits below as a setup)` : ''}`
+      : `Sell ${Math.round(a.fraction * 100)}% of the position`;
+    const label = a.action === 'SELL' && a.rotation ? 'SELL + ROTATE' : a.action;
     const approve = el('button', { type: 'button', className: 'btn apv-approve is-sell', disabled: busy || !ctx.online || atBroker,
       textContent: busy ? 'Sending…' : atBroker ? 'Sell at the broker' : `Approve / Execute ${a.action} (paper)` });
     approve.title = atBroker ? 'LIVE / adopted holding: SignalDesk places no sell orders for it; sell it at the broker' : '';
@@ -84,12 +86,13 @@
     return el('article', { className: `apv-card is-${a.action.toLowerCase()}` }, [
       el('header', { className: 'apv-head' }, [
         SD.scannerDetail.badge(a.asset),
-        el('div', { className: 'apv-title' }, [el('strong', { textContent: `${a.action} ${SD.oppDetail.displaySymbol({ asset: a.asset, market: a.market })}` }),
+        el('div', { className: 'apv-title' }, [el('strong', { textContent: `${label} ${SD.oppDetail.displaySymbol({ asset: a.asset, market: a.market })}${a.rotation ? ` → ${a.rotation.asset}` : ''}` }),
           el('span', { textContent: `Portfolio Pilot defense · ${a.reason}` })]),
         el('span', { className: 'apv-expiry', textContent: `proposed ${age(a.createdAt)} ago` }),
       ]),
       el('div', { className: 'apv-grid' }, [
         kv('Holding', pos ? `${size(pos)} @ ${price(pos.fillPrice, pos)} · ${pos.execution === 'LIVE' ? 'LIVE' : 'paper'}` : '—'),
+        ...(a.rotation ? [kv('Rotate into', `${a.rotation.asset} (#1 ranked, score ${a.rotation.score})`, 'text-long')] : []),
         kv('Live price', price(a.price, { market: a.market, entryPrice: a.price })),
         kv('200-day SMA', String(a.levels.sma200)),
         kv('50-day SMA', String(a.levels.sma50)),

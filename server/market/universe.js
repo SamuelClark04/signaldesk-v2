@@ -1,4 +1,4 @@
-// The symbols SignalDesk monitors: 40 stocks + 42 crypto, with display names.
+// The symbols SignalDesk monitors: 41 stocks + 42 crypto, with display names.
 //   Stocks: liquid US stocks/ETFs. Alpaca's free (Basic) data plan allows 30
 //           WebSocket symbol subscriptions, so the first ALPACA_WS_SYMBOL_LIMIT
 //           (default 30) stream live 1m bars; the rest get display-only last
@@ -13,9 +13,9 @@ const STOCK_LIST = [
   ['TSLA', 'Tesla'], ['AMD', 'Advanced Micro Devices'], ['AVGO', 'Broadcom'], ['NFLX', 'Netflix'], ['PLTR', 'Palantir'],
   ['JPM', 'JPMorgan Chase'], ['BAC', 'Bank of America'], ['XOM', 'Exxon Mobil'], ['WMT', 'Walmart'], ['COST', 'Costco'],
   ['UNH', 'UnitedHealth'], ['V', 'Visa'], ['MA', 'Mastercard'], ['INTC', 'Intel'], ['MU', 'Micron'], ['ORCL', 'Oracle'],
-  ['CRM', 'Salesforce'], ['UBER', 'Uber'], ['COIN', 'Coinbase Global'], ['SOFI', 'SoFi'], ['DIA', 'SPDR Dow Jones ETF'],
+  ['CRM', 'Salesforce'], ['UBER', 'Uber'], ['COIN', 'Coinbase Global'], ['SOFI', 'SoFi'], ['LLY', 'Eli Lilly'],
   // Beyond the free 30-symbol stream: last closes only unless the limit is raised.
-  ['CVX', 'Chevron'], ['ADBE', 'Adobe'], ['PYPL', 'PayPal'], ['F', 'Ford'], ['DIS', 'Disney'], ['KO', 'Coca-Cola'],
+  ['DIA', 'SPDR Dow Jones ETF'], ['CVX', 'Chevron'], ['ADBE', 'Adobe'], ['PYPL', 'PayPal'], ['F', 'Ford'], ['DIS', 'Disney'], ['KO', 'Coca-Cola'],
   ['PFE', 'Pfizer'], ['T', 'AT&T'], ['BABA', 'Alibaba'], ['NIO', 'NIO'],
 ];
 

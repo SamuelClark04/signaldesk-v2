@@ -65,10 +65,12 @@ function worstCaseEntry(c) {
   return c.direction === 'short' ? c.entryZone.min : c.entryZone.max;
 }
 
-// Stocks trade in whole shares; crypto to 8 decimals. Always round down so
-// actual risk never exceeds the budget.
-function roundSize(size, market) {
-  return market === 'stocks' ? Math.floor(size) : Math.floor(size * 1e8) / 1e8;
+// Stocks trade in whole shares, or to 0.0001 share for fractional candidates
+// (Portfolio Pilot buys: a $150 slice of SPY); crypto to 8 decimals. Always
+// round down so actual risk never exceeds the budget.
+function roundSize(size, market, fractional = false) {
+  if (market === 'stocks') return fractional ? Math.floor(size * 1e4 + 1e-9) / 1e4 : Math.floor(size);
+  return Math.floor(size * 1e8) / 1e8;
 }
 
 // Linear instruments: risk is the distance from entry to the invalidation level.
@@ -78,7 +80,7 @@ function sizeLinear(candidate, bankroll, riskBudget, maxLeverage, entryPrice, st
   const bySize = riskBudget / stopDistance; // risk-based size
   const byCapital = (bankroll * Math.min(maxLeverage, MAX_CAPITAL_ALLOCATION)) / entryPrice; // capital cap
   const byAmount = candidate.maxNotional > 0 ? candidate.maxNotional / entryPrice : Infinity;
-  const positionSize = roundSize(Math.min(bySize, byCapital, byAmount), candidate.market);
+  const positionSize = roundSize(Math.min(bySize, byCapital, byAmount), candidate.market, !!candidate.fractional);
   if (!(positionSize > 0)) return { error: 'Position size rounds to zero' };
   return {
     positionSize,
