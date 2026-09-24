@@ -1,7 +1,8 @@
 // Opportunities → Approvals: everything that passed every gate and now waits for
 // the user, in one list with a one-click "Approve / Execute" each:
 //   setups         staged orders from every strategy (incl. Portfolio Pilot buys):
-//                  APPROVE runs the same order guard and live routing as Setups
+//                  APPROVE runs the same order guard and live routing as Setups,
+//                  at the card's Trade Amount ($) (trade-amount.js)
 //   pilot actions  Portfolio Pilot SELL / TRIM proposals for open positions:
 //                  APPROVE_ACTION closes (or trims) the PAPER position at the live
 //                  price; LIVE / adopted holdings are sold at the broker instead
@@ -21,9 +22,11 @@
       textContent: `${c.type} ${c.daysAway === 0 ? 'today' : `in ${c.daysAway}d`}`, title: `${c.title} · ${c.date}${c.time ? ` ${c.time}` : ''} (${c.source})` })))] : [];
   }
 
-  function setupCard(o, ctx) {
-    const [modeKey, broker] = VENUE[o.market] || [null, '?'];
+  function setupCard(staged, ctx) {
+    const [modeKey, broker] = VENUE[staged.market] || [null, '?'];
     const live = !!(ctx.state.settings && modeKey && ctx.state.settings[modeKey] === 'live');
+    const amount = SD.tradeAmount.resolve(staged, live);
+    const o = amount.order; // size, risk and P&L at the chosen amount
     const busy = ctx.inFlight.has(o.id);
     const t1 = o.targets && o.targets[0] ? o.targets[0].price : null;
     const s = o.scenarios || {};
@@ -31,9 +34,9 @@
     const rr = best && s.stop && s.stop.net < 0 ? `${(best.net / -s.stop.net).toFixed(2)} : 1${s.plan ? ' blended' : ''}` : '—';
     const left = Math.max(0, EXPIRY_MS - (Date.now() - (o.stagedAt || 0)));
     const blocked = live && o.market === 'options';
-    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked,
+    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked || amount.state === 'blocked',
       textContent: busy ? 'Sending…' : blocked ? 'Live options not wired' : live ? `Approve / Execute LIVE (${broker})` : 'Approve / Execute (paper)' });
-    approve.onclick = () => ctx.onApprove(o, { live, broker });
+    approve.onclick = () => ctx.onApprove(staged, { live, broker });
     const review = el('button', { type: 'button', className: 'btn', textContent: 'Review chart' });
     review.onclick = () => ctx.onReview(o.id);
     const dismiss = el('button', { type: 'button', className: 'btn apv-dismiss', textContent: 'Dismiss', disabled: busy || !ctx.online });
@@ -48,7 +51,7 @@
         el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` }),
       ]),
       el('div', { className: 'apv-grid' }, [
-        kv('Size', `${size(o)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
+        kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
         kv('Entry', `${price(o.entryZone.min, o)} – ${price(o.entryZone.max, o)}`),
         kv('Stop', price(o.invalidation, o), 'text-short'),
         kv(o.targets && o.targets[1] ? 'T1 (50%) / T2' : 'Target 1', t1 ? `${price(t1, o)}${o.targets[1] ? ` / ${price(o.targets[1].price, o)}` : ''}` : '—', 'text-long'),
@@ -59,9 +62,10 @@
       ...(o.smallAccountCap ? [el('p', { className: 'apv-note is-small-cap', textContent: `${o.smallAccountLabel}: 1 contract risks ${money(o.dollarRisk)} `
         + `(${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(1)}% of the bankroll) to its stop, above the ${money(o.budgetRisk)} profile budget; debit ${money(o.notional)}.` })] : []),
       ...(o.capitalCapped ? [el('p', { className: 'apv-note', textContent: `Capital cap: risking ${(o.actualRiskPct * 100).toFixed(2)}% instead of ${(o.riskPct * 100).toFixed(2)}%.` })] : []),
-      ...(o.cappedByAmount ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
+      ...(o.cappedByAmount && amount.amount === null ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
       ...catalystChips(o.catalysts),
       el('p', { className: 'apv-thesis', textContent: o.thesis ? o.thesis.split(/(?<=\.)\s/).slice(0, 2).join(' ') : '' }),
+      SD.tradeAmount.control(staged, amount, ctx.rerender),
       el('div', { className: 'apv-actions' }, [approve, review, dismiss]),
     ]);
   }
@@ -102,7 +106,7 @@
     ]);
   }
 
-  // ctx: { state, online, inFlight:Set, onApprove(o, {live, broker}), onDismiss(o), onReview(id), sendAction(type, id), matchesAsset(market) }
+  // ctx: { state, online, inFlight:Set, onApprove(o, {live, broker}), onDismiss(o), onReview(id), sendAction(type, id), matchesAsset(market), rerender() }
   function render(state, ctx) {
     const orders = [...(state.pending || [])].filter((o) => ctx.matchesAsset(o.market)).sort((a, b) => b.stagedAt - a.stagedAt);
     const actions = (state.pilotActions || []).filter((a) => ctx.matchesAsset(a.market));

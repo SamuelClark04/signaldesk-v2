@@ -113,10 +113,11 @@ async function pipelinePass() {
     scanLog.scanned(id, mod.takeScan());
   }
   // Read once per pass: every candidate is sized with the same risk profile
-  // (Settings: 0.5% / 1% / 2%) against the capital of the venue it would execute
-  // on: the paper bankroll, or the LIVE broker account (cached ~60 s).
+  // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
+  // capital of the venue it would execute on: the paper bankroll, or the LIVE
+  // broker account (cached ~60 s).
   const settings = ledger.getSettings();
-  const { riskPct } = settings;
+  const { riskPct, maxCapitalPct } = settings;
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
@@ -128,7 +129,7 @@ async function pipelinePass() {
       recordRejection(candidate.id, capital.reason, candidate);
       continue;
     }
-    const result = processCandidate(candidate, capital.bankroll, { riskPct, sizingBasis: capital.basis });
+    const result = processCandidate(candidate, capital.bankroll, { riskPct, maxCapitalPct, sizingBasis: capital.basis });
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
       recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason

@@ -2,9 +2,10 @@
 // (fees + spread/slippage) exceed MAX_FEE_DRAG of the trade's dollar risk (1R).
 // Pure functions only: no state, no I/O.
 
-// Crypto costs come from the user's Coinbase Advanced fee tier (.env):
-//   COINBASE_MAKER_FEE      resting limit orders (US entry tier: 0.005 = 0.50%)
-//   COINBASE_TAKER_FEE      orders that cross the spread (US entry tier: 0.009 = 0.90%)
+// Crypto costs come from the user's Coinbase Advanced fee tier (.env). Defaults:
+// the Intro tier (< $10K 30-day volume), as filled in the user's order history:
+//   COINBASE_MAKER_FEE      resting limit orders (0.006 = 0.60%: post-only entries, T1 limits)
+//   COINBASE_TAKER_FEE      orders that cross the spread (0.012 = 1.20%: stops, market exits)
 //   COINBASE_SPREAD_BUFFER  spread/slippage allowance for a TAKER leg (default 0.001)
 // Legs are costed by how they really execute:
 //   entry   maker when the strategy rests a limit inside its entry zone
@@ -16,7 +17,7 @@
 // The gate's exit leg is the average of the target (maker) and stop (taker)
 // outcomes: a trade ends at one or the other. A missing or invalid value falls
 // back to the conservative defaults below (overstating costs is safe).
-const DEFAULT_MAKER_FEE = 0.005; // US entry tier (Coinbase fee schedule, 16 Sep 2026)
+const DEFAULT_MAKER_FEE = 0.006; // Intro tier (< $10K), verified from filled orders (24 Sep 2026)
 const DEFAULT_TAKER_FEE = 0.012;
 const DEFAULT_SPREAD_BUFFER = 0.001;
 
@@ -64,8 +65,9 @@ const blendedRoundTripRate = (market, entryLiquidity = 'taker') =>
   legRate(market, entryLiquidity) + (legRate(market, 'maker') + legRate(market, 'taker')) / 2;
 
 // Tightest stop (fraction of entry) whose blended costs stay within `budget` R,
-// rounded UP to 0.1%. Paper crypto with a maker entry at the US entry tier:
-// 0.50% + (0.50% + 1.00%) / 2 = 1.25% round trip -> 3.7% stop (paper and live).
+// rounded UP to 0.1%. Crypto with a maker entry at the Intro tier: 0.60% +
+// (0.60% maker T1 + 1.30% taker stop incl. spread) / 2 = 1.55% round trip
+// -> 4.6% stop (paper and live), fee drag 0.337R <= 0.35R.
 const minStopPct = (market, entryLiquidity, budget = 0.34) =>
   Math.ceil((blendedRoundTripRate(market, entryLiquidity) / budget) * 1000 - 1e-9) / 1000;
 

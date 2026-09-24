@@ -8,7 +8,7 @@
 // Exposes window.SignalDesk.opportunities.
 (() => {
   const SD = window.SignalDesk;
-  const { el, price } = SD.ui;
+  const { el, price, money } = SD.ui;
 
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
   let subTab = 'setups';
@@ -35,6 +35,7 @@
     const [code, ...rest] = String(error).split(': ');
     if (code === 'LIVE_ORDER_FAILED') return `live order rejected, nothing was filled (${rest.join(': ')})`;
     if (code === 'LIVE_UNRECORDED') return `CHECK YOUR BROKER NOW: ${rest.join(': ')}`;
+    if (code.startsWith('AMOUNT_')) return `trade amount not accepted, nothing was sent and the setup is still pending (${rest.join(': ')})`;
     if (code === 'SIZED_FOR_OTHER_VENUE') return `nothing was sent: this setup was ${rest.join(': ')}. Dismiss it; the next scan re-proposes it sized from the live account`;
     return error;
   }
@@ -58,19 +59,28 @@
   }
 
   // ---------- Actions (intents only) ----------
-  function send(type, id) {
+  function send(type, id, extra = {}) {
     // Only an id that is in the REAL queue can ever be sent (defence in depth).
     if (!mounted || !mounted.state.pending.some((o) => o.id === id)) return;
     if (!transport.isOnline() || inFlight.has(id)) return;
     inFlight.add(id);
-    transport.send({ type, id });
+    transport.send({ type, id, ...extra });
     rerender();
   }
 
-  function onApprove(o, { live, broker }) {
-    if (live && !window.confirm(`Place a LIVE order at ${broker}?\n\n${o.direction.toUpperCase()} ${o.positionSize} ${o.asset}\n`
-      + `Stop ${o.invalidation} · Target ${o.targets && o.targets[0] ? o.targets[0].price : '—'}\n\nThis uses real money.`)) return;
-    send('APPROVE', o.id);
+  // Approve at the setup's Trade Amount ($) (trade-amount.js): the amount goes to
+  // the server, which re-sizes the order; above the risk engine's size it must be
+  // confirmed here first (and the server refuses it unconfirmed).
+  function onApprove(staged, { live, broker }) {
+    const t = SD.tradeAmount.resolve(staged, live);
+    if (t.state === 'blocked') return showNotice(`Not sent: ${t.note}`);
+    const o = t.order;
+    const pct = (x) => `${((x / o.sizingBankroll) * 100).toFixed(2)}% of the bankroll`;
+    if (t.state === 'above' && !window.confirm(`Trade ${money(o.notional)} of ${o.asset}? That is above the risk engine's max safe size (${money(staged.notional)}).\n\n`
+      + `Loss at the stop: ${money(o.dollarRisk)} (${pct(o.dollarRisk)}) instead of ${money(staged.dollarRisk)} (${pct(staged.dollarRisk)}).`)) return undefined;
+    if (live && !window.confirm(`Place a LIVE order at ${broker}?\n\n${o.direction.toUpperCase()} ${o.positionSize} ${o.asset} (${money(o.notional)})\n`
+      + `Stop ${o.invalidation} · Target ${o.targets && o.targets[0] ? o.targets[0].price : '—'}\n\nThis uses real money.`)) return undefined;
+    return send('APPROVE', o.id, t.amount === null ? {} : { amount: t.amount, confirmed: t.state === 'above' });
   }
   const onDismiss = (o) => send('REJECT', o.id);
 
@@ -120,7 +130,8 @@
   const rotator = SD.autoCycle({
     periodMs: ROTATE_MS, key: 'signaldesk.chartRotation',
     canRun: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && rotation.length > 1 && !inFlight.size
-      && !document.querySelector('.opp-rail:hover, .opp-right:hover, .trade-hud:hover') && !(document.activeElement && document.activeElement.id === 'opp-symbol-select')),
+      && !document.querySelector('.opp-rail:hover, .opp-right:hover, .trade-hud:hover') && !(document.activeElement && document.activeElement.id === 'opp-symbol-select')
+      && !(document.activeElement && document.activeElement.classList.contains('ta-input'))), // typing a Trade Amount
     advance: () => {
       const i = rotation.findIndex((r) => (r.id ? r.id === activeId : !activeId && r.symbol === watchSymbol));
       const next = rotation[(i + 1) % rotation.length];
@@ -185,6 +196,7 @@
       onToggleSave,
       onPickSymbol,
       onPickerClosed: rerender, // catch up on updates held while the picker was open
+      rerender, // Trade Amount changes
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
     return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);
@@ -219,7 +231,7 @@
   function approvals(state) {
     for (const id of inFlight) if (!state.pending.some((o) => o.id === id) && !(state.pilotActions || []).some((a) => a.id === id)) inFlight.delete(id);
     return SD.oppApprovals.render(state, { state, online: transport.isOnline(), inFlight, onApprove, onDismiss, matchesAsset,
-      onReview: nav.onReview,
+      onReview: nav.onReview, rerender,
       sendAction: (type, id) => { if (!transport.isOnline() || inFlight.has(id)) return; inFlight.add(id); transport.send({ type, id }); rerender(); } });
   }
 
@@ -227,14 +239,19 @@
     if (!container.dataset.rotationHooked) { // a click in the workspace restarts the rotation countdown
       container.dataset.rotationHooked = '1';
       container.addEventListener('pointerdown', () => rotator.reset());
+      container.addEventListener('input', () => rotator.reset());
     }
     mounted = { container, state };
+    SD.tradeAmount.prune(state.pending);
     // Briefly hold re-renders while the chart's symbol picker is in use (symbol-picker.js).
     if (SD.symbolPicker.holding(container, rerender)) return;
     // Re-renders replace the DOM (every keystroke, every price tick): keep the
-    // search box focused with the caret where it was.
-    const focused = document.activeElement && document.activeElement.id === 'opp-search';
-    const caret = focused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    // search box or a Trade Amount input focused with the caret where it was.
+    const act = document.activeElement;
+    const focusSel = act && act.id === 'opp-search' ? '#opp-search'
+      : act && act.dataset && act.dataset.focusKey && container.contains(act) ? `[data-focus-key="${CSS.escape(act.dataset.focusKey)}"]` : null;
+    const caret = focusSel ? [act.selectionStart, act.selectionEnd] : null;
+    const pageY = window.scrollY;
     const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
     const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
@@ -259,10 +276,11 @@
         : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
     );
 
-    const input = container.querySelector('#opp-search');
-    if (input && focused) {
-      input.focus();
+    const input = focusSel && container.querySelector(focusSel);
+    if (input) {
+      input.focus({ preventScroll: true });
       input.setSelectionRange(caret[0], caret[1]);
+      window.scrollTo(window.scrollX, pageY);
     }
     SCROLLERS.forEach((sel, i) => { const n = container.querySelector(sel); if (n) n.scrollTop = scrolls[i]; });
   }

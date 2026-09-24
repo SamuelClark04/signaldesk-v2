@@ -1,6 +1,7 @@
-// Settings tab: Risk Management (risk profile, strategy strictness, bankroll,
-// paper/live execution venues). Strictness is sent the moment it is clicked (no
-// Save needed); the server applies it from the next 60 s scan.
+// Settings tab: Risk Management (risk profile, strategy strictness, max capital
+// per trade, bankroll, paper/live execution venues). Strictness and the capital
+// cap are sent the moment they are clicked (no Save needed); the server applies
+// them from the next 60 s scan.
 // Sends requested changes; the server validates, persists and broadcasts
 // SETTINGS_UPDATED to every client. The header badge and LIVE warnings are
 // driven only by server-confirmed settings, never by unsaved UI state.
@@ -35,6 +36,7 @@
     for (const m of MODE_SELECTS) $(m.id).disabled = on;
     $('settings-risk').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     $('settings-strictness').querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    $('settings-capital').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     clearTimeout(pendingTimer);
     if (on) {
       pendingTimer = setTimeout(() => {
@@ -104,6 +106,23 @@
     }));
   }
 
+  // Max Capital Per Trade: the risk engine's automatic cap on one position's
+  // notional (options: premium), however tight the stop. Sent immediately; the
+  // choices come from the server (settings.maxCapitalChoices).
+  function renderCapital() {
+    const box = $('settings-capital');
+    if (!saved || !saved.maxCapitalChoices) { box.replaceChildren(el('span', { className: 'settings-status', textContent: 'Waiting for the server…' })); return; }
+    box.replaceChildren(...saved.maxCapitalChoices.map((pct) => {
+      const active = pct === saved.maxCapitalPct;
+      const b = el('button', { type: 'button', className: `settings-risk-opt${pct > 0.15 ? ' is-aggressive' : ''}${active ? ' is-active' : ''}`, disabled: pending }, [
+        el('strong', { textContent: `${Math.round(pct * 100)}%` }), el('span', { textContent: `${money(saved.bankroll * pct)} max per trade` })]);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(active));
+      b.onclick = () => { if (!active) request({ maxCapitalPct: pct }); };
+      return b;
+    }));
+  }
+
   // Going LIVE is the one change that needs an explicit confirmation.
   function changeMode(m) {
     const value = $(m.id).value;
@@ -142,7 +161,9 @@
     const pct = saved.riskPct;
     $('settings-facts').replaceChildren('Saved: ', el('strong', { textContent: `${PROFILE_LABEL[saved.riskProfile] || saved.riskProfile} (${pctText(pct)})` }),
       ' risk on a ', el('strong', { textContent: money(saved.bankroll) }), ' paper bankroll, so each new trade risks up to ',
-      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop. Staged setups and open positions keep the size they were given. Strictness: ',
+      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop and uses at most ',
+      el('strong', { textContent: `${Math.round((saved.maxCapitalPct || 0.1) * 100)}% (${money(saved.bankroll * (saved.maxCapitalPct || 0.1))})` }),
+      ' of the bankroll (change any single trade with its Trade Amount). Staged setups and open positions keep the size they were given. Strictness: ',
       el('strong', { textContent: (saved.strictnessLevels && saved.strictnessLevels[saved.strictness] || {}).label || saved.strictness || 'strict' }),
       ' (sizing, the fee gate, the capital cap and the earnings shields are the same at every level).');
   }
@@ -163,6 +184,7 @@
     renderModes();
     renderRisk();
     renderStrictness();
+    renderCapital();
     renderFacts();
   }
 
@@ -173,6 +195,7 @@
     renderModes();
     renderRisk();
     renderStrictness();
+    renderCapital();
     renderFacts();
   }
 
@@ -201,6 +224,7 @@
   renderFacts();
   renderRisk();
   renderStrictness();
+  renderCapital();
 
   SD.settings = {
     init: (t) => { transport = t; },

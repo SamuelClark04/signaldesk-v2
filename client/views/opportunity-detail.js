@@ -8,43 +8,13 @@
   const { el, money, price, size, signed, pnlClass } = SD.ui;
 
   const VENUE = { stocks: ['stockMode', 'Alpaca'], options: ['stockMode', 'Alpaca'], crypto: ['cryptoMode', 'Coinbase'] };
+  const venueLive = (o, ctx) => { const [k] = VENUE[o.market] || []; return !!(ctx.settings && k && ctx.settings[k] === 'live'); };
   const displaySymbol = (o) => (o.market === 'crypto' ? o.asset.replace('-', '/') : o.asset);
   const px = (x, o) => price(x, o);
   const kv = (k, v, cls = '') => el('div', { className: 'opp-kv' }, [
     el('span', { className: 'opp-k', textContent: k }), el('span', { className: `opp-v ${cls}`, textContent: v })]);
 
   // ---------- Center: analysis ----------
-  // Fallback chart (library not loaded): every level drawn as a line at its relative height.
-  function levelChart(o, livePrice) {
-    const t = o.targets || [];
-    const lines = [
-      { name: 'T2', price: t[1] && t[1].price, cls: 'is-target' },
-      { name: 'T1', price: t[0] && t[0].price, cls: 'is-target' },
-      { name: 'Entry', price: o.entryZone.max, cls: 'is-entry' },
-      { name: 'SL', price: o.invalidation, cls: 'is-stop' },
-      { name: 'Last', price: livePrice, cls: 'is-last' },
-    ].filter((l) => l.price > 0);
-    const all = [...lines.map((l) => l.price), o.entryZone.min];
-    const hi = Math.max(...all); const lo = Math.min(...all);
-    const pad = (hi - lo) * 0.12 || hi * 0.01;
-    const top = (p) => `${((hi + pad - p) / (hi - lo + 2 * pad)) * 100}%`;
-
-    const chart = el('div', { className: 'opp-chart' });
-    chart.setAttribute('role', 'img');
-    chart.setAttribute('aria-label', `Price levels: ${lines.map((l) => `${l.name} ${px(l.price, o)}`).join(', ')}`);
-    const band = el('div', { className: 'opp-band' });
-    band.style.top = top(o.entryZone.max);
-    band.style.height = `calc(${top(o.entryZone.min)} - ${top(o.entryZone.max)})`;
-    chart.append(band, el('div', { className: 'opp-chart-note', textContent: 'Chart feed not connected: levels only' }));
-    for (const l of lines) {
-      const line = el('div', { className: `opp-line ${l.cls}` }, [
-        el('span', { className: 'opp-line-label', textContent: `${l.name} ${px(l.price, o)}` })]);
-      line.style.top = top(l.price);
-      chart.append(line);
-    }
-    return chart;
-  }
-
   // A complete algorithmic setup: levels AND server-sized risk. Market Watch (or
   // anything missing these) is display-only: "—" everywhere, nothing executable.
   // Portfolio Pilot core holdings have no take-profit by design (stop + Pilot sell/trim).
@@ -52,21 +22,6 @@
     && Array.isArray(o.targets) && (o.targets.length > 0 || o.strategyId === 'portfolio-pilot') && o.positionSize > 0;
 
   const WATCH_TEXT = 'Market Watch Mode: Waiting for algorithmic setups.';
-
-  // Market Watch chart: just the live price, centred, until a setup brings levels.
-  function watchChart(o, livePrice) {
-    const chart = el('div', { className: 'opp-chart' });
-    chart.setAttribute('role', 'img');
-    chart.setAttribute('aria-label', `${displaySymbol(o)} last price ${livePrice > 0 ? px(livePrice, o) : 'unavailable'}`);
-    chart.append(el('div', { className: 'opp-watch-mode', textContent: WATCH_TEXT }));
-    if (livePrice > 0) {
-      const line = el('div', { className: 'opp-line is-last' }, [el('span', { className: 'opp-line-label', textContent: `Last ${px(livePrice, o)}` })]);
-      line.style.top = '50%';
-      chart.append(line);
-    }
-    chart.append(el('div', { className: 'opp-chart-note', textContent: 'Chart feed not connected: live price only' }));
-    return chart;
-  }
 
   // Header: badge, symbol + name, big price with its change, setup meta.
   // Change: vs entry for a setup; over the loaded chart range in Market Watch.
@@ -79,7 +34,7 @@
     const shown = livePrice > 0 ? livePrice : ref ? ref.price : null;
     // Live candles when the chart library loaded; static level chart otherwise.
     const chart = SD.liveChart.mount(o, { withLevels: !watch, banner: SD.positionDetail.banner(o, ctx, watch ? WATCH_TEXT : '') })
-      || (watch ? watchChart(o, livePrice) : levelChart(o, livePrice));
+      || (watch ? SD.levelChart.watch(o, livePrice, WATCH_TEXT) : SD.levelChart.levels(o, livePrice));
     let change = null;
     let basis = '';
     if (!watch && livePrice > 0 && o.entryPrice > 0) {
@@ -202,8 +157,9 @@
 
   // Execution button reflects the venue the server will use (it re-checks anyway).
   // Without a complete setup it is always disabled: "Waiting for Setup".
-  function actions(o, ctx) {
+  function actions(o, ctx, amount) {
     const ready = hasLevels(o);
+    const blocked = !!amount && amount.state === 'blocked';
     const [modeKey, broker] = VENUE[o.market] || [null, '?'];
     const live = ctx.settings && modeKey && ctx.settings[modeKey] === 'live';
     const liveOptions = live && o.market === 'options';
@@ -217,8 +173,8 @@
       type: 'button',
       className: `btn ${live && ready ? 'btn-live' : 'btn-solid'} opp-go`,
       textContent: label,
-      disabled: !ready || !ctx.online || ctx.busy || liveOptions || wrongSizing,
-      title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : '',
+      disabled: !ready || !ctx.online || ctx.busy || liveOptions || wrongSizing || blocked,
+      title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : blocked ? amount.note : '',
     });
     const analysis = el('button', { type: 'button', className: 'btn', textContent: 'View full analysis' });
     analysis.onclick = () => { const a = document.getElementById('opp-analysis'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
@@ -237,10 +193,13 @@
     ]);
   }
 
-  function right(o, ctx) {
-    const ready = hasLevels(o);
-    const held = ready ? null : SD.positionDetail.panel(o, ctx); // an open position on this symbol: its details
+  function right(staged, ctx) {
+    const ready = hasLevels(staged);
+    const held = ready ? null : SD.positionDetail.panel(staged, ctx); // an open position on this symbol: its details
     if (held) return held;
+    // Trade Amount ($): every figure below is for the amount chosen (trade-amount.js).
+    const amount = ready ? SD.tradeAmount.resolve(staged, venueLive(staged, ctx)) : null;
+    const o = amount ? amount.order : staged;
     const t = o.targets || [];
     const s = o.scenarios || {};
     const c = o.costs || {};
@@ -291,7 +250,8 @@
       ]),
       el('h3', { className: 'opp-section opp-scen-title', textContent: ready ? `Price scenario (per ${size(o)})` : 'Price scenario' }),
       scenarioTable(o),
-      actions(o, ctx),
+      ...(amount ? [SD.tradeAmount.control(staged, amount, ctx.rerender)] : []),
+      actions(staged, ctx, amount),
     ]);
   }
 

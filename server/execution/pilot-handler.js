@@ -49,7 +49,7 @@ async function stageCandidate(c, broadcast) {
   c.catalysts = macro.catalystsFor(c);
   const settings = ledger.getSettings();
   const capital = await sizingBankroll(c.market, settings);
-  const r = capital.ok ? processCandidate(c, capital.bankroll, { riskPct: settings.riskPct, sizingBasis: capital.basis }) : { approved: false, reason: capital.reason };
+  const r = capital.ok ? processCandidate(c, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis }) : { approved: false, reason: capital.reason };
   if (!r.approved) {
     recordRejection(c.id, r.reason, c);
     scanLog.rejected(c.id, r.reason, c);

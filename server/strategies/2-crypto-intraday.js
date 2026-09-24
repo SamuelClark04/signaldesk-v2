@@ -13,8 +13,8 @@
 //   breakout                 (<= 2% of price on 15m, 3.5% on 1h) and the latest
 //                            closed above it on >= 1.8x relative volume
 // Stop: under the swing low (pullback) or the range low (squeeze), never tighter
-// than the crypto fee floor (cost-authority.js minStopPct, maker entry: 3.7% at
-// the US entry tier). Entry is a limit inside the zone (maker: paper, and a
+// than the crypto fee floor (cost-authority.js minStopPct, maker entry: 4.6% at
+// the Intro tier). Entry is a limit inside the zone (maker: paper, and a
 // live post-only limit at the bid). Targets: T1 1.5R (50%), T2 3R (runner),
 // T1 snapped under resistance from the last 48 hourly bars (risk/target-plan.js;
 // the squeeze breakout's own range is exempt). The live price must still be

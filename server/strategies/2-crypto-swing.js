@@ -13,9 +13,9 @@
 // round-trip cost / stop %. Execution is modelled leg by leg (cost-authority.js):
 // the entry is a resting limit inside the zone (maker: paper, and live Coinbase
 // as a post-only limit at the bid), a target exit is a resting limit (maker),
-// a stop is taker + spread. US entry tier (0.50% maker / 0.90% taker + 0.10%
-// spread): 0.50% + (0.50% + 1.00%) / 2 = 1.25% blended round trip / 0.34R =
-// 3.7% stop, instead of the old all-taker 6%.
+// a stop is taker + spread. Intro tier (0.60% maker / 1.20% taker + 0.10%
+// spread): 0.60% + (0.60% + 1.30%) / 2 = 1.55% blended round trip / 0.34R =
+// 4.6% stop, instead of an all-taker 7.7%.
 // Resistance (risk/target-plan.js): a major DAILY top under the target no longer
 // vetoes the setup when it is far enough away: T1 (50%) snaps just under it and
 // T2 (50% runner) keeps the full target, if the blended net reward still meets

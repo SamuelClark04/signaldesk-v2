@@ -187,3 +187,21 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .hud-pill-sym { color: var(--text); }
 .hud-pill:focus-visible, .hud-min:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 760px) { .trade-hud .hud-title, .hud-pill { cursor: default; } }
+
+/* Trade Amount ($): per-trade dollar override (trade-amount.js), Setups risk card + Approvals cards */
+.ta { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface-2); }
+.ta-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ta-label { color: var(--text); font-size: 13px; font-weight: 600; }
+.ta-wrap { flex: 0 1 150px; }
+.ta-input { width: 100%; font-family: var(--font-mono); text-align: right; }
+.ta-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.ta-pill { padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg); color: var(--text-muted); font: 12px var(--font-mono); cursor: pointer; }
+.ta-pill:hover { border-color: var(--text-faint); color: var(--text); }
+.ta-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ta-pill.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); color: var(--text); }
+.ta-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.ta.is-above { border-color: rgba(251, 191, 36, 0.6); }
+.ta.is-above .ta-note { color: var(--warn); }
+.ta.is-blocked { border-color: rgba(251, 113, 133, 0.6); }
+.ta.is-blocked .ta-note { color: var(--short); }
+.apv-card .ta { margin-top: 0; }

@@ -50,14 +50,17 @@ function stageOrder(sizedCandidate) {
 
 // fillPrice defaults to the risk engine's worst-case entry price. `extra` records
 // how the order was executed, e.g. { execution: 'LIVE', brokerId } for a broker
-// fill; paper fills are tagged { execution: 'PAPER' }.
-function executeOrder(candidateId, fillPrice, extra = {}) {
+// fill; paper fills are tagged { execution: 'PAPER' }. `resized`: the user's
+// Trade Amount override of this order (risk-engine.js resizeOrder), which must
+// come from the risk engine and carry the same id.
+function executeOrder(candidateId, fillPrice, extra = {}, resized = null) {
   const i = findIndex(pendingOrders, candidateId);
   if (i === -1) throw new Error(`paper-ledger: no pending order ${candidateId}`);
+  if (resized && (!isApproved(resized) || resized.id !== candidateId)) throw new Error('paper-ledger: resized order was not approved by the risk engine');
 
   const [order] = pendingOrders.splice(i, 1);
   const position = {
-    ...order,
+    ...(resized || order),
     execution: 'PAPER',
     ...extra,
     status: 'open',

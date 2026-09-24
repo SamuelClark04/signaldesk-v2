@@ -11,6 +11,7 @@ const { recordRejection } = require('./rejection-stats');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const { runPipeline, getScanStatus } = require('./pipeline');
 const { requiredBasis } = require('../risk/venue-capital');
+const { resizeOrder } = require('../risk/risk-engine');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
@@ -29,7 +30,8 @@ const VENUES = {
   crypto: { modeKey: 'cryptoMode', broker: 'Coinbase', api: coinbaseApi },
 };
 
-// Route a guard-approved order by its venue's mode.
+// Route a guard-approved order by its venue's mode (`order` may be the user's
+// resized copy: risk-engine.js resizeOrder, same id, a new quantity).
 //   paper: fill in the paper ledger.
 //   live:  submit to the broker first; only an ACCEPTED order is recorded in the
 //          ledger (tagged execution LIVE + brokerId). A failed submit leaves the
@@ -38,7 +40,8 @@ async function routeApproved(order, livePrice) {
   const venue = VENUES[order.market];
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
   const settings = ledger.getSettings();
-  if (settings[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice);
+  const resized = order.amountOverride ? order : null;
+  if (settings[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice, {}, resized);
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
   // A LIVE order must have been sized from that live account. One staged while
   // the venue was on paper (or before this check existed) is refused, never sent.
@@ -62,7 +65,7 @@ async function routeApproved(order, livePrice) {
       brokerEnvironment: result.environment,
       fillEstimated: true, // the broker's actual fill price is not fetched yet
       ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}),
-    });
+    }, resized);
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.
     console.error(`[LIVE] CRITICAL: ${venue.broker} order ${result.brokerId} was placed for ${order.id} `
@@ -73,11 +76,21 @@ async function routeApproved(order, livePrice) {
 
 // Guarded approval: the order guard runs first whatever the venue, then the order
 // is routed by its market's mode. Failed guards retire the setup with a reason.
-async function approveWithGuard(id) {
+// amount: the user's Trade Amount ($) for this order (Setups / Approvals); the
+// risk engine re-sizes it (fractional shares on paper only: live Alpaca brackets
+// need whole shares). An invalid amount leaves the order pending.
+async function approveWithGuard(id, { amount, confirmed } = {}) {
   const order = ledger.getPendingOrders().find((o) => o.id === id);
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
   const check = validateApproval(order, livePrice);
+  if (check.valid && amount !== undefined && amount !== null) {
+    const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
+    const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });
+    if (!resized.approved) throw new Error(resized.reason);
+    console.log(`[ledger] APPROVE ${id}: trade amount $${Number(amount).toFixed(2)} -> ${resized.positionSize} (was ${order.positionSize}), risk $${resized.dollarRisk.toFixed(2)}`);
+    return routeApproved(resized, livePrice);
+  }
   if (check.valid) return routeApproved(order, livePrice);
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
   if (check.reason !== 'NO_LIVE_PRICE') {
@@ -101,7 +114,7 @@ function closeManually(id) {
 }
 
 const QUEUE_ACTIONS = {
-  APPROVE: (id) => approveWithGuard(id),
+  APPROVE: (id, msg) => approveWithGuard(id, msg),
   REJECT: (id) => {
     const order = ledger.getPendingOrders().find((o) => o.id === id);
     const discarded = ledger.discardOrder(id);
@@ -121,7 +134,8 @@ const MANUAL_SCAN_GAP_MS = 10000;
 let lastManualScan = 0;
 
 function createMessageHandler({ send, broadcast }) {
-  async function handleQueueAction(ws, { type, id }) {
+  async function handleQueueAction(ws, msg) {
+    const { type, id } = msg;
     if (typeof id === 'string' && inFlight.has(id)) {
       send(ws, 'ACTION_FAILED', { type, id, error: 'ORDER_BUSY' });
       return;
@@ -129,7 +143,7 @@ function createMessageHandler({ send, broadcast }) {
     if (typeof id === 'string') inFlight.add(id);
     try {
       if (typeof id !== 'string' || !id) throw new Error('missing order id');
-      const result = await QUEUE_ACTIONS[type](id);
+      const result = await QUEUE_ACTIONS[type](id, msg);
       console.log(`[ledger] ${type} ${id} -> ${result.status}${result.execution === 'LIVE' ? ` (LIVE ${result.brokerId})` : ''}`);
       if (result.status === 'open') {
         broadcast('POSITIONS_UPDATED', ledger.getActivePositions());

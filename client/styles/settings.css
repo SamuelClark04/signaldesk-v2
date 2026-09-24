@@ -11,6 +11,7 @@
 .settings-risk-opt.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); }
 .settings-risk-opt.is-aggressive.is-active { border-color: var(--warn); background: rgba(251, 191, 36, 0.12); }
 .settings-strict { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-capital { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .settings-risk-opt.is-moderate.is-active { border-color: var(--warn); background: rgba(251, 191, 36, 0.12); }
 .settings-risk-opt:disabled { opacity: 0.6; cursor: default; }
 @media (max-width: 560px) { .settings-risk { grid-template-columns: 1fr; } }
