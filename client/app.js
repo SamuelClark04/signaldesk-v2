@@ -135,6 +135,23 @@
     document.querySelectorAll('td.age').forEach((c) => { c.textContent = age(Number(c.dataset.ts)); });
   }, 15000);
 
+  // Order-guard reasons from the server, in plain words.
+  const FAIL_REASONS = {
+    EXPIRED: 'setup is older than 30 minutes and was discarded',
+    PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
+    INVALIDATED: 'price is already through the stop and the setup was discarded',
+    NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
+  };
+
+  let noticeTimer = null;
+  function showNotice(text) {
+    const n = $('queue-notice');
+    n.textContent = text;
+    n.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { n.hidden = true; }, 8000);
+  }
+
   // ---------- WebSocket ----------
   const HANDLERS = {
     'orders:snapshot': (orders) => receiveStagedOrders(orders, { replace: true }),
@@ -143,6 +160,7 @@
     ACTION_FAILED: ({ type, id, error }) => {
       console.warn(`[signaldesk] ${type} ${id} failed: ${error}`);
       inFlight.delete(id);
+      showNotice(`${type === 'APPROVE' ? 'Approval' : 'Rejection'} failed for ${id.split(':')[2] || id}: ${FAIL_REASONS[error] || error}`);
       renderQueue();
     },
   };

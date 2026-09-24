@@ -15,7 +15,10 @@ const coinbase = require('./connectors/coinbase-socket');
 const equityDay = require('./strategies/1-equity-day');
 const { processCandidate } = require('./risk/risk-engine');
 const ledger = require('./execution/paper-ledger');
+const { validateApproval } = require('./execution/order-guard');
+const prices = require('./market/latest-prices');
 
+const HOST = '127.0.0.1'; // local only: there is no auth on the approval socket
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const PIPELINE_INTERVAL_MS = 60000;
@@ -60,9 +63,21 @@ wss.on('connection', (ws) => {
 // Client intents. The client only asks; the ledger decides and the server
 // broadcasts the resulting queue so every open client shows the same state.
 const QUEUE_ACTIONS = {
-  APPROVE: (id) => ledger.executeOrder(id),
+  APPROVE: (id) => approveWithGuard(id),
   REJECT: (id) => ledger.discardOrder(id),
 };
+
+// Guarded approval: fills at the live price, or retires the setup with a reason.
+function approveWithGuard(id) {
+  const order = ledger.getPendingOrders().find((o) => o.id === id);
+  if (!order) throw new Error(`no pending order ${id}`);
+  const livePrice = prices.getLatestPrice(order.asset);
+  const check = validateApproval(order, livePrice);
+  if (check.valid) return ledger.executeOrder(id, livePrice);
+  // A missing price is a data gap, not a verdict on the setup: leave it pending.
+  if (check.reason !== 'NO_LIVE_PRICE') ledger.discardOrder(id);
+  throw new Error(check.reason);
+}
 
 function handleQueueAction(ws, { type, id }) {
   try {
@@ -115,6 +130,15 @@ function runPipeline() {
     }
   }
 
+  // Exit management for filled positions: stops and T1 targets on fresh prices.
+  try {
+    for (const t of ledger.monitorPositions(prices.getLatestPrices())) {
+      console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)`);
+    }
+  } catch (err) {
+    console.error('[pipeline] position monitor failed:', err.message);
+  }
+
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
   return counts;
 }
@@ -141,8 +165,8 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-server.listen(PORT, () => {
-  console.log(`SignalDesk-V2 listening on :${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`SignalDesk-V2 listening on http://${HOST}:${PORT}`);
   start();
 });
 
