@@ -15,6 +15,9 @@
     'Review taking profits': { label: 'TAKE PROFIT?', urgency: 'Medium', tone: 'warn', change: 'Shown at +10% (options: 75% of the way to T1). T1 closes the paper position automatically.' },
     'Trend check required': { label: 'CHECK', urgency: 'Low', tone: 'info', change: 'Shown after 7 days open; re-check the thesis against the current trend.' },
     'No live price': { label: 'WAIT', urgency: 'Low', tone: 'wait', change: 'Needs a fresh quote; paper stop/target checks resume when prices return.' },
+    // Synced broker holdings: SignalDesk's exit rules don't run on them.
+    'External holding': { label: 'BROKER', urgency: 'Low', tone: 'info', change: 'Not opened by SignalDesk: no SignalDesk stop, target or alert rules apply. Review it at the broker.' },
+    'SignalDesk bracket at Coinbase': { label: 'BROKER', urgency: 'Low', tone: 'info', change: 'Its stop and target are live orders at Coinbase; they close it there. The reconciler records the fill here.' },
     Hold: { label: 'HOLD', urgency: 'Low', tone: 'ok', change: 'Becomes Take profit? at +10%, Near stop within 25% of the stop distance, Trend check after 7 days.' },
   };
   const recOf = (row) => RECS[row.alert ? row.alert.action : 'No live price'] || RECS.Hold;
@@ -59,7 +62,7 @@
         el('td', {}, el('span', { className: `pf-rec is-${rec.tone}`, textContent: rec.label })),
         el('td', { className: 'pf-why', textContent: r.alert ? r.alert.detail : 'No alert yet' }),
         el('td', {}, el('span', { className: `pf-urg is-${rec.urgency.toLowerCase()}`, textContent: rec.urgency })),
-        el('td', { className: 'pf-muted', textContent: generatedAt ? `${age(generatedAt)} ago` : '—' }),
+        el('td', { className: 'pf-muted', textContent: r.p.execution === 'BROKER' ? `synced ${age(r.p.syncedAt)} ago` : generatedAt ? `${age(generatedAt)} ago` : '—' }),
       ]);
       tr.onclick = () => opts.onSelect(r.p.id);
       return tr;
@@ -78,7 +81,8 @@
     const { p, m, alert } = row;
     const rec = recOf(row);
     const box = (label, value, cls = '') => el('div', { className: 'pf-box' }, [el('span', { textContent: label }), el('strong', { className: cls, textContent: value })]);
-    const close = el('button', { type: 'button', className: 'btn', textContent: 'Close position', disabled: p.execution === 'LIVE' || !m.live || !opts.online });
+    const atBroker = p.execution === 'LIVE' || p.execution === 'BROKER';
+    const close = el('button', { type: 'button', className: 'btn', textContent: 'Close position', disabled: atBroker || !m.live || !opts.online, title: atBroker ? 'Close at broker' : '' });
     close.onclick = () => opts.onClose(p, m);
     const holdings = el('button', { type: 'button', className: 'btn btn-solid', textContent: 'View in Holdings' });
     holdings.onclick = () => opts.onHoldings(p.id);
@@ -96,7 +100,7 @@
       el('h4', { className: 'pf-h4', textContent: 'What would change it' }),
       el('p', { className: 'pf-text', textContent: rec.change }),
       el('div', { className: 'pf-rec-actions' }, [holdings, close]),
-      el('p', { className: 'pf-fine', textContent: 'Recommendation only. Closing is manual and paper-only here; LIVE positions are closed at the broker.' }),
+      el('p', { className: 'pf-fine', textContent: 'Recommendation only. Closing is manual and paper-only here; live and synced broker positions are closed at the broker.' }),
     ]);
   }
 
@@ -141,7 +145,7 @@
     ]);
   }
 
-  // opts: { state, selectedId, onSelect(id), onClose(p, m), onHoldings(id), send(msg), online, rerender() }
+  // opts: { state, venueLabel, selectedId, onSelect(id), onClose(p, m), onHoldings(id), send(msg), online, rerender() }
   function pilotView(data, opts) {
     const t = data.totals;
     const values = data.rows.map((r) => Math.max(0, r.m.marketValue));
@@ -151,9 +155,9 @@
     return el('div', { className: 'pf-pilot' }, [
       summary(data),
       el('div', { className: 'pf-kpis' }, [
-        kpi('Portfolio value', money(t.accountValue), `Paper account · ${data.rows.length} position${data.rows.length === 1 ? '' : 's'}`),
+        kpi('Portfolio value', money(t.accountValue), `${opts.venueLabel} · ${data.rows.length} position${data.rows.length === 1 ? '' : 's'}`),
         kpi('Concentration', total > 0 ? `${((values[topIdx] / total) * 100).toFixed(0)}%` : '—', total > 0 ? `Top holding (${data.rows[topIdx].p.asset.replace('-USD', '')})` : 'No holdings'),
-        kpi('Estimated exit cost', money(t.exitFees), 'If every paper position closed now'),
+        kpi('Estimated exit cost', money(t.exitFees), 'If every position shown closed now'),
         kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, 'Positions with a live price'),
       ]),
       el('div', { className: 'pf-pilot-grid' }, [recTable(data, opts), recDetail(selected, opts)]),

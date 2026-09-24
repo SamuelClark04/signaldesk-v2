@@ -12,6 +12,7 @@ const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const { runPipeline, getScanStatus } = require('./pipeline');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
+const brokerSync = require('../connectors/broker-sync');
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: their strikes and
@@ -149,6 +150,15 @@ function createMessageHandler({ send, broadcast }) {
     return undefined;
   }
 
+  // "Sync Broker": read-only fetch of real broker holdings; every client gets the
+  // new snapshot (BROKER_HOLDINGS). A repeat within 10 s is answered, not re-fetched.
+  async function handleSync(ws) {
+    send(ws, 'BROKER_HOLDINGS', { ...brokerSync.getSnapshot(), syncing: true });
+    const result = await brokerSync.syncPortfolio();
+    if (result.busy) return send(ws, 'BROKER_HOLDINGS', { ...result.snapshot, notice: 'A sync just ran. Try again in a few seconds.' });
+    return broadcast('BROKER_HOLDINGS', result.snapshot);
+  }
+
   // Allocator: read-only math, answered to the requesting client only.
   function handleAllocation(ws, { amount }) {
     try {
@@ -196,6 +206,7 @@ function createMessageHandler({ send, broadcast }) {
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'CLOSE_POSITION') return handleClose(ws, msg);
+    if (msg.type === 'SYNC_PORTFOLIO') return handleSync(ws).catch((err) => console.error('[broker-sync] sync crashed:', err));
     send(ws, 'error', `unknown message type: ${msg.type}`);
   };
 }

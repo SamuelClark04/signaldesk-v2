@@ -1,5 +1,5 @@
-// Coinbase Advanced Trade API (REST, on demand): account balances for the live crypto venue.
-// Read-only for now: no order endpoints are called from this file.
+// Coinbase Advanced Trade API (REST, on demand) for the live crypto venue:
+// account balances and holdings (read-only), and live order submission/status.
 //
 // Auth: CDP API keys. Every request carries a short-lived JWT signed with the key:
 //   COINBASE_API_KEY    = key name, e.g. organizations/{org}/apiKeys/{id}
@@ -113,6 +113,29 @@ async function getAccount() {
   };
 }
 
+// ---------- Holdings (read-only) ----------
+// Spot positions of the DEFAULT portfolio, with Coinbase's own cost basis and
+// average entry price: { ok, portfolio, positions: [spot_positions item], balances }.
+const PORTFOLIOS_PATH = '/api/v3/brokerage/portfolios';
+
+async function getPortfolioBreakdown() {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    const list = await cbFetch(auth, 'GET', PORTFOLIOS_PATH);
+    const portfolios = ((list && list.portfolios) || []).filter((p) => !p.deleted);
+    const chosen = portfolios.find((p) => p.type === 'DEFAULT') || portfolios[0];
+    if (!chosen) throw new Error('Coinbase: no portfolio found on this key');
+    const path = `${PORTFOLIOS_PATH}/${encodeURIComponent(chosen.uuid)}`;
+    const body = await cbFetch(auth, 'GET', path, { query: '?currency=USD' });
+    const breakdown = body && body.breakdown;
+    if (!breakdown || !Array.isArray(breakdown.spot_positions)) throw new Error('Coinbase: unexpected portfolio breakdown response');
+    return { ok: true, portfolio: chosen.name || chosen.uuid, positions: breakdown.spot_positions, balances: breakdown.portfolio_balances || {} };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
 // ---------- Orders ----------
 const ORDERS_PATH = '/api/v3/brokerage/orders';
 const base8 = (x) => (Math.floor(x * 1e8) / 1e8).toFixed(8).replace(/\.?0+$/, '');
@@ -216,4 +239,4 @@ async function getOrderStatus(brokerId) {
   }
 }
 
-module.exports = { getAccount, submitOrder, getOrderStatus, buildJwt, loadSigningKey };
+module.exports = { getAccount, getPortfolioBreakdown, submitOrder, getOrderStatus, buildJwt, loadSigningKey };

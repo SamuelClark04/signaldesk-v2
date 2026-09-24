@@ -22,6 +22,7 @@ const prices = require('./market/latest-prices');
 const referencePrices = require('./market/reference-prices');
 const { STOCKS, CRYPTO } = require('./market/universe');
 const { getHistory } = require('./connectors/history-bars');
+const brokerSync = require('./connectors/broker-sync');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
 // Local-only by default; LAN_ACCESS=true opens it to the Wi-Fi (token-protected).
@@ -99,6 +100,7 @@ wss.on('connection', (ws) => {
   send(ws, 'PRICES_UPDATED', Object.fromEntries(prices.getLatestPrices()));
   send(ws, 'REFERENCE_PRICES', referencePrices.snapshot());
   send(ws, 'SCAN_STATUS', getScanStatus());
+  send(ws, 'BROKER_HOLDINGS', brokerSync.getSnapshot()); // last Sync Broker result (never auto-fetched)
   try {
     send(ws, 'DASHBOARD_INTELLIGENCE', buildIntelligence());
   } catch (err) {

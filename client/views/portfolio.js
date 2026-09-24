@@ -12,6 +12,11 @@
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
   let mounted = null; // { container, state }
   let subTab = 'holdings';
+  // Venue filter. 'paper' is SignalDesk's own paper ledger (all markets);
+  // 'crypto' is the synced Coinbase account; 'combined' sums both.
+  let venue = 'paper';
+  const VENUES = [['combined', 'Combined'], ['crypto', 'Live Crypto'], ['paper', 'Paper']];
+  const VENUE_LABEL = { combined: 'Paper + Coinbase', crypto: 'Coinbase account', paper: 'Paper ledger' };
   let selectedId = null;
   let notice = '';
   let noticeTimer = null;
@@ -57,26 +62,60 @@
     const [title, sub] = subTab === 'pilot'
       ? ['Portfolio Pilot', 'Review your holdings against the market. Change only when the evidence warrants it.']
       : ['Portfolio', 'Open positions from the ledger, marked to live prices.'];
-    const updated = mounted.state.intelligence && mounted.state.intelligence.generatedAt;
     const btn = el('button', { type: 'button', className: 'btn btn-solid pf-head-btn', textContent: subTab === 'pilot' ? 'View holdings' : 'Review with Pilot' });
     btn.onclick = () => { subTab = subTab === 'pilot' ? 'holdings' : 'pilot'; rerender(); };
+    const toggle = el('div', { className: 'pf-venues-toggle', role: 'group', ariaLabel: 'Venue' }, VENUES.map(([key, label]) => {
+      const b = el('button', { type: 'button', className: `pf-venue-seg${key === venue ? ' is-active' : ''}`, textContent: label });
+      b.setAttribute('aria-pressed', String(key === venue));
+      b.onclick = () => { venue = key; rerender(); };
+      return b;
+    }));
     return el('div', { className: 'pf-header' }, [
       el('div', {}, [el('h2', { className: 'pf-title', textContent: title }), el('p', { className: 'pf-subtitle', textContent: sub })]),
-      el('div', { className: 'pf-header-right' }, [btn, el('span', { className: 'pf-sub', textContent: `Paper ledger · live prices${updated ? ` · Updated ${clock(updated)}` : ''}` })]),
+      el('div', { className: 'pf-header-right' }, [
+        el('div', { className: 'pf-header-actions' }, [toggle, syncButton(), btn]),
+        el('span', { className: 'pf-sub', textContent: syncStatus() }),
+      ]),
     ]);
   }
 
+  // ---------- Sync Broker (SYNC_PORTFOLIO -> BROKER_HOLDINGS) ----------
+  let syncRequested = false;
+  const holdings = () => (mounted.state.holdings || {});
+  function syncButton() {
+    const busy = syncRequested || holdings().syncing;
+    const b = el('button', { type: 'button', className: 'btn pf-sync', textContent: busy ? 'Syncing…' : '⟳ Sync Broker', disabled: busy || !transport.isOnline(),
+      title: transport.isOnline() ? 'Fetch your Coinbase holdings (read-only)' : 'Offline' });
+    b.onclick = () => { syncRequested = true; transport.send({ type: 'SYNC_PORTFOLIO' }); setTimeout(() => { syncRequested = false; rerender(); }, 15000); rerender(); };
+    return b;
+  }
+  function syncStatus() {
+    const h = holdings();
+    const cb = h.coinbase;
+    if (h.notice) return h.notice;
+    if (!cb || cb.status === 'never') return 'Coinbase not synced yet · paper prices are live';
+    if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}`;
+    return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash`;
+  }
+
   function kpis(t) {
+    if (venue === 'crypto' && !t.synced) {
+      return el('div', { className: 'pf-card pf-empty-venue' }, [el('strong', { textContent: 'Coinbase not synced' }),
+        el('span', { className: 'pf-sub', textContent: 'Press Sync Broker to load your real Coinbase holdings (read-only). Until then this view lists only the LIVE trades SignalDesk opened itself, without account totals.' })]);
+    }
     const card = (label, value, sub, cls = '') => el('div', { className: 'pf-kpi' }, [el('span', { className: 'pf-kpi-label', textContent: label }),
       el('strong', { className: `pf-kpi-value ${cls}`, textContent: value }), el('span', { className: 'pf-kpi-sub', textContent: sub })]);
-    const liveNote = t.live ? ` · ${t.live} LIVE excluded` : '';
+    const liveNote = t.live ? ` · ${t.live} LIVE position${t.live === 1 ? '' : 's'} not in totals (broker account not synced)` : '';
+    const parts = [...(t.usePaper ? [`paper ${money(t.bankroll)} bankroll ${t.realized >= 0 ? '+' : '−'} ${money(Math.abs(t.realized))} realized`] : []),
+      ...(t.useCb ? [`Coinbase holdings + ${money(t.cbCash)} cash (sync ${clock(t.syncedAt)})`] : [])];
     return el('div', { className: 'pf-kpis' }, [
-      card('Account value', money(t.accountValue), `${money(t.bankroll)} bankroll ${t.realized >= 0 ? '+' : '−'} ${money(Math.abs(t.realized))} realized${liveNote}`),
-      card('Holdings value', money(t.holdingsValue), t.unmarked ? `${t.unmarked} position(s) at cost (no live mark)` : 'Open paper positions at live prices'),
+      card('Account value', money(t.accountValue), `${parts.join(' · ')}${liveNote}`),
+      card('Holdings value', money(t.holdingsValue), t.unmarked ? `${t.unmarked} position(s) without a P/L mark` : t.useCb ? 'Live prices; Coinbase coins without one at their sync value' : 'Open positions at live prices'),
       // Each setup is sized on its own (up to the bankroll in notional), so open
       // positions can commit more than the bankroll: say so instead of hiding it.
-      t.cash >= 0 ? card('Spendable cash', money(t.cash), `Not committed to open positions (${money(t.committed)} committed)`)
-        : card('Spendable cash', `−${money(-t.cash)}`, `Over-committed: ${money(t.committed)} in open positions exceeds the bankroll`, 'pnl-neg'),
+      !t.usePaper ? card('Spendable cash', money(t.cash), 'Coinbase USD + USDC balance at the last sync')
+        : t.cash >= 0 ? card('Spendable cash', money(t.cash), `Not committed to open positions${t.useCb ? ' (paper) + Coinbase cash' : ` (${money(t.committed)} committed)`}`)
+        : card('Spendable cash', `−${money(-t.cash)}`, `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll${t.useCb ? ' (Coinbase cash included)' : ''}`, 'pnl-neg'),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
     ]);
   }
@@ -107,7 +146,8 @@
     mounted = { container, state };
     for (const id of closing) if (!(state.positions || []).some((p) => p.id === id)) closing.delete(id); // closed
     const focusId = document.activeElement && document.activeElement.id === SD.portfolioPilot.focusId ? SD.portfolioPilot.focusId : null;
-    const data = T().metrics(state);
+    const data = T().metrics(state, venue);
+    if (state.holdings && !state.holdings.syncing) syncRequested = false;
     if (!data.rows.some((r) => r.p.id === selectedId)) selectedId = data.rows.length ? data.rows[0].p.id : null;
     const online = transport.isOnline();
     const onSelect = (id) => { selectedId = id; rerender(); };
@@ -118,7 +158,7 @@
       return b;
     }));
     const body = subTab === 'pilot'
-      ? SD.portfolioPilot.pilotView(data, { state, selectedId, onSelect, onClose, online, rerender,
+      ? SD.portfolioPilot.pilotView(data, { state, venueLabel: VENUE_LABEL[venue], selectedId, onSelect, onClose, online, rerender,
         onHoldings: (id) => { selectedId = id; subTab = 'holdings'; rerender(); }, send: (msg) => transport.send(msg) })
       : el('div', { className: 'pf-holdings-view' }, [
         kpis(data.totals),

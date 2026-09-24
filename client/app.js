@@ -40,7 +40,7 @@
   let currentTab = null;
 
   // ---------- Shared client state (server snapshots; read by Today and Opportunities) ----------
-  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null };
+  const state = { settings: null, broker: null, positions: [], journal: [], pending: [], rejections: null, watchlist: null, intelligence: null, prices: null, refPrices: null, scan: null, holdings: null };
   const upsert = (list, item) => [...list.filter((o) => o.id !== item.id), item];
   const STATE_UPDATES = {
     'orders:snapshot': (orders) => { state.pending = orders || []; },
@@ -56,6 +56,7 @@
     PRICES_UPDATED: (prices) => { state.prices = prices || {}; },
     REFERENCE_PRICES: (closes) => { state.refPrices = closes || {}; }, // last closes of quiet stocks (display only)
     SCAN_STATUS: (scan) => { state.scan = scan; }, // pipeline pass timing + fresh price times
+    BROKER_HOLDINGS: (h) => { state.holdings = h; }, // last Sync Broker snapshot (read-only)
   };
 
   // State-driven views: rendered on entering their tab and on every state change

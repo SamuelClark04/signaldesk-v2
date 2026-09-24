@@ -22,6 +22,13 @@
 .pf-subtitle { margin: 4px 0 0; color: var(--text-muted); }
 .pf-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .pf-head-btn { padding: 9px 22px; font-size: 14px; }
+.pf-header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.pf-venues-toggle { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.pf-venue-seg { padding: 6px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: 13px var(--font-ui); cursor: pointer; }
+.pf-venue-seg:hover { color: var(--text); }
+.pf-venue-seg.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); color: var(--text); font-weight: 600; }
+.pf-sync { padding: 8px 14px; }
+.pf-empty-venue { display: flex; flex-direction: column; gap: 4px; }
 
 /* ---------- KPI cards ---------- */
 .pf-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -55,7 +62,7 @@
 .pf-pnl { font-weight: 600; }
 .pf-pnl-pct { font-size: 12px; opacity: 0.85; }
 .pf-venue { margin-left: 4px; padding: 0 6px; font-size: 11px !important; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
-.pf-venue.is-live { border-color: var(--short); color: var(--short); }
+.pf-venue.is-live { border-color: rgba(45, 212, 191, 0.5); background: var(--long-bg); color: var(--long); font-weight: 600; }
 .pf-step { display: inline-block; padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: 5px; font-size: 12px; white-space: nowrap; }
 .pf-step.is-ok { border-color: rgba(45, 212, 191, 0.4); background: var(--long-bg); color: var(--long); }
 .pf-step.is-warn { border-color: rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.1); color: var(--warn); }
