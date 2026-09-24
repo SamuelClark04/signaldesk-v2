@@ -81,12 +81,13 @@ function notify(order) {
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   const candidates = await collectCandidates();
-  // Read once per pass: every candidate in a pass is sized against the same bankroll.
-  const { bankroll } = ledger.getSettings();
+  // Read once per pass: every candidate in a pass is sized against the same
+  // bankroll and risk profile (Settings: 0.5% / 1% / 2% per trade).
+  const { bankroll, riskPct } = ledger.getSettings();
   counts.generated = candidates.length;
 
   for (const candidate of candidates) {
-    const result = processCandidate(candidate, bankroll);
+    const result = processCandidate(candidate, bankroll, { riskPct });
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
       recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason
@@ -163,8 +164,8 @@ function startPipeline(options = {}) {
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
   }, PIPELINE_INTERVAL_MS);
-  const { bankroll, stockMode, cryptoMode } = ledger.getSettings();
-  console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${bankroll}, `
+  const { bankroll, riskProfile, riskPct, stockMode, cryptoMode } = ledger.getSettings();
+  console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${bankroll}, risk ${riskProfile} ${(riskPct * 100).toFixed(1)}%/trade, `
     + `stocks/options ${String(stockMode).toUpperCase()}, crypto ${String(cryptoMode).toUpperCase()} (editable in Settings)`);
   return { runPipeline, stop: stopPipeline };
 }

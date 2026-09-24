@@ -73,7 +73,7 @@
     if (!watch) {
       rows.unshift(['Strategy', `${o.strategyId || '—'} · ${o.setupType || 'Setup'} · ${o.timeframe || '—'}`],
         ['Proposed', o.timestamp ? when(Date.parse(o.timestamp)) : '—'], ['Staged', o.stagedAt ? when(o.stagedAt) : '—']);
-      rows.push(['Sizing & costs', 'SignalDesk risk engine (1% risk, fee model shared with the ledger)']);
+      rows.push(['Sizing & costs', `SignalDesk risk engine (${o.riskPct > 0 ? `${(o.riskPct * 100).toFixed(1)}%` : 'profile'} risk when staged; fee model shared with the ledger)`]);
       if (o.catalyst && o.catalyst.headline) rows.push(['Catalyst', `${o.catalyst.type || 'news'}: ${o.catalyst.headline}`]);
     }
     return [el('dl', { className: 'sa-dl' }, rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]))];

@@ -139,7 +139,7 @@
       out.push({ name: 'Invalidation', sub: long ? 'Price above stop' : 'Price below stop', value: fmt(o.invalidation), status: !(px > 0) ? 'wait' : safe ? 'pass' : 'fail' });
       out.push({ name: 'Costs', sub: 'Fee drag within 0.35R', value: Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—', status: o.feeDrag <= 0.35 ? 'pass' : 'fail' });
       const bankroll = state.settings && state.settings.bankroll;
-      out.push({ name: 'Risk budget', sub: 'Sized to 1% of bankroll', value: bankroll > 0 ? `${((o.dollarRisk / bankroll) * 100).toFixed(2)}%` : SD.ui.money(o.dollarRisk), status: 'pass' });
+      out.push({ name: 'Risk budget', sub: `Sized to ${o.riskPct > 0 ? `${(o.riskPct * 100).toFixed(1)}%` : 'the risk profile'} of the paper bankroll`, value: bankroll > 0 ? `${((o.dollarRisk / bankroll) * 100).toFixed(2)}%` : SD.ui.money(o.dollarRisk), status: 'pass' });
       const created = Date.parse(o.timestamp) || o.stagedAt; // the guard measures from the setup's creation
       const left = created ? created + 30 * 60000 - Date.now() : null;
       out.push({ name: 'Approval window', sub: 'Order guard expires setups after 30 min', value: left === null ? '—' : left > 0 ? `${Math.ceil(left / 60000)}m left` : 'Expired', status: left === null || left > 0 ? 'pass' : 'fail' });

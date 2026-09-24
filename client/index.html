@@ -85,12 +85,16 @@
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">Risk Management</h2>
-            <span class="panel-hint">Applies from the next pipeline pass; open positions keep their original size</span>
+            <span class="panel-hint">Applies to setups sized from the next scan; staged setups and open positions keep their size</span>
           </div>
 
           <form class="settings-form" id="settings-form" novalidate>
+            <div class="field settings-risk-field">
+              <span class="field-label" id="settings-risk-label">Risk profile (risk per new trade)</span>
+              <div class="settings-risk" id="settings-risk" role="radiogroup" aria-labelledby="settings-risk-label"></div>
+            </div>
             <label class="field">
-              <span class="field-label">Configured bankroll</span>
+              <span class="field-label">Paper trading bankroll</span>
               <span class="input-wrap">
                 <span class="input-prefix">$</span>
                 <input class="input" id="settings-bankroll" type="number" min="100" step="any" inputmode="decimal" required>

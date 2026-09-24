@@ -1,5 +1,18 @@
 /* Settings tab: Risk Management card. Inputs and .btn-primary come from main.css. */
 
+/* ---------- Risk profile (segmented radio) ---------- */
+.settings-risk-field { flex-basis: 100%; }
+.settings-risk { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 560px; }
+.settings-risk-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text-muted); font: 13px var(--font-ui); text-align: left; cursor: pointer; }
+.settings-risk-opt strong { color: var(--text); font-size: 14px; }
+.settings-risk-opt span { font-family: var(--font-mono); font-size: 12px; }
+.settings-risk-opt:hover:not(:disabled) { border-color: var(--text-faint); }
+.settings-risk-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-risk-opt.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); }
+.settings-risk-opt.is-aggressive.is-active { border-color: var(--warn); background: rgba(251, 191, 36, 0.12); }
+.settings-risk-opt:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 560px) { .settings-risk { grid-template-columns: 1fr; } }
+
 .settings-form {
   display: flex;
   flex-wrap: wrap;

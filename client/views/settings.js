@@ -1,4 +1,4 @@
-// Settings tab: Risk Management (bankroll + paper/live execution venues).
+// Settings tab: Risk Management (risk profile, bankroll, paper/live execution venues).
 // Sends requested changes; the server validates, persists and broadcasts
 // SETTINGS_UPDATED to every client. The header badge and LIVE warnings are
 // driven only by server-confirmed settings, never by unsaved UI state.
@@ -16,6 +16,9 @@
   let saved = null; // last settings confirmed by the server
   let pending = false; // an UPDATE_SETTINGS is awaiting the server's reply
   let pendingTimer = null;
+  let draftProfile = null; // risk profile picked but not saved yet (null = the saved one)
+  const PROFILE_LABEL = { conservative: 'Conservative', balanced: 'Balanced', aggressive: 'Aggressive' };
+  const pctText = (x) => `${(x * 100).toFixed(1)}%`;
 
   function setStatus(text, kind = '') {
     const s = $('settings-status');
@@ -28,6 +31,7 @@
     pending = on;
     $('settings-save').disabled = on;
     for (const m of MODE_SELECTS) $(m.id).disabled = on;
+    $('settings-risk').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     clearTimeout(pendingTimer);
     if (on) {
       pendingTimer = setTimeout(() => {
@@ -49,11 +53,34 @@
     transport.send({ type: 'UPDATE_SETTINGS', payload });
   }
 
-  function saveBankroll(e) {
+  // Save Settings sends the risk profile and the bankroll together.
+  function saveForm(e) {
     e.preventDefault();
     const bankroll = Number($('settings-bankroll').value);
     if (!Number.isFinite(bankroll) || bankroll <= 0) return setStatus('Enter a bankroll above $0.', 'error');
-    request({ bankroll });
+    const payload = { bankroll };
+    if (draftProfile && saved && draftProfile !== saved.riskProfile) payload.riskProfile = draftProfile;
+    return request(payload);
+  }
+
+  // Risk profile: segmented radio buttons; percentages come from the server.
+  function renderRisk() {
+    const box = $('settings-risk');
+    if (!saved || !saved.riskProfiles) { box.replaceChildren(el('span', { className: 'settings-status', textContent: 'Waiting for the server…' })); return; }
+    const current = draftProfile || saved.riskProfile;
+    box.replaceChildren(...Object.entries(saved.riskProfiles).map(([key, pct]) => {
+      const b = el('button', { type: 'button', className: `settings-risk-opt is-${key}${key === current ? ' is-active' : ''}`, disabled: pending }, [
+        el('strong', { textContent: PROFILE_LABEL[key] || key }), el('span', { textContent: `${pctText(pct)} per trade` })]);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(key === current));
+      b.onclick = () => {
+        draftProfile = key === saved.riskProfile ? null : key;
+        setStatus(draftProfile ? 'Unsaved: press Save Settings to apply.' : '');
+        renderRisk();
+        renderFacts();
+      };
+      return b;
+    }));
   }
 
   // Going LIVE is the one change that needs an explicit confirmation.
@@ -90,10 +117,11 @@
   }
 
   function renderFacts() {
-    $('settings-facts').replaceChildren(...(saved
-      ? ['Saved bankroll ', el('strong', { textContent: money(saved.bankroll) }),
-        '. The risk engine sizes every new trade to risk 1% of it.']
-      : ['Waiting for the server…']));
+    if (!saved) { $('settings-facts').replaceChildren('Waiting for the server…'); return; }
+    const pct = saved.riskPct;
+    $('settings-facts').replaceChildren('Saved: ', el('strong', { textContent: `${PROFILE_LABEL[saved.riskProfile] || saved.riskProfile} (${pctText(pct)})` }),
+      ' risk on a ', el('strong', { textContent: money(saved.bankroll) }), ' paper bankroll, so each new trade risks up to ',
+      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop. Staged setups and open positions keep the size they were given.');
   }
 
   // Server truth arrived (on connect, after our save, or after another client's save).
@@ -108,7 +136,9 @@
     if (!editing || wasPending) input.value = String(saved.bankroll);
 
     if (wasPending) setStatus('Saved.', 'ok');
+    if (draftProfile === saved.riskProfile) draftProfile = null; // saved: no longer a draft
     renderModes();
+    renderRisk();
     renderFacts();
   }
 
@@ -117,12 +147,14 @@
     setStatus(message || 'Settings were not saved.', 'error');
     if (settings) saved = settings;
     renderModes();
+    renderRisk();
     renderFacts();
   }
 
-  $('settings-form').addEventListener('submit', saveBankroll);
+  $('settings-form').addEventListener('submit', saveForm);
   for (const m of MODE_SELECTS) $(m.id).addEventListener('change', () => changeMode(m));
   renderFacts();
+  renderRisk();
 
   SD.settings = {
     init: (t) => { transport = t; },

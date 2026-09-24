@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 
 const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json');
+const { RISK_PROFILES, DEFAULT_PROFILE, riskPctFor } = require('../risk/risk-profiles');
+
 const STATE_VERSION = 2; // v2 adds settings; v1 files load with default settings
 
 // Editable settings: default and accepted values for each key. Execution modes
@@ -16,6 +18,7 @@ const SETTINGS_RULES = {
   bankroll: { type: 'number', default: 50000, min: 100, max: 100000000 },
   stockMode: { type: 'choice', default: 'paper', values: MODES }, // Alpaca: stocks + options
   cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // Coinbase: crypto
+  riskProfile: { type: 'choice', default: DEFAULT_PROFILE, values: Object.keys(RISK_PROFILES) }, // % risked per new trade
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
 
@@ -109,7 +112,9 @@ function attach(ledgerLists) {
 }
 
 // ---------- Settings ----------
-const getSettings = () => ({ ...settings });
+// riskPct and the profile table are derived (never stored), so the UI shows
+// the server's numbers instead of keeping its own copy.
+const getSettings = () => ({ ...settings, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES } });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.
 function updateSettings(newSettings) {
