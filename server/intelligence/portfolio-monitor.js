@@ -10,6 +10,10 @@
 //   held > 7 days           -> "Trend check required"
 //   otherwise               -> "Hold"
 // No open positions -> a single "cash ready to deploy" note.
+// EXTERNAL holdings (manual Robinhood / other, broker-synced balances bought
+// outside SignalDesk: execution/external-holdings.js) carry the Pilot's
+// protective stop / T1 and are watched like adopted ones: no broker order
+// protects them, so a level hit says "see Approvals" (the Pilot stages the card).
 const ledger = require('../execution/paper-ledger');
 
 const PROFIT_REVIEW_PCT = 0.10;
@@ -28,12 +32,14 @@ function costBasis(p) {
 }
 
 function alertFor(p, livePrice, now) {
-  const where = p.adopted ? `adopted at ${p.broker} (alerts only)` : p.execution === 'LIVE' ? `LIVE at ${p.broker}` : 'paper';
+  const ext = p.execution === 'EXTERNAL';
+  const where = ext ? `${p.external === 'manual' ? 'manual' : 'synced'} at ${p.broker} (Pilot levels)` : p.adopted ? `adopted at ${p.broker} (alerts only)`
+    : p.execution === 'LIVE' ? `LIVE at ${p.broker}` : 'paper';
   const base = { asset: p.asset, positionId: p.id, execution: p.execution || 'PAPER' };
 
   if (!(livePrice > 0)) {
     return { ...base, tone: 'warn', action: 'No live price',
-      detail: p.adopted ? `Feed is quiet: SignalDesk cannot watch its levels, and no orders protect it at ${p.broker}`
+      detail: p.adopted || ext ? `Feed is quiet: SignalDesk cannot watch its levels, and no orders protect it at ${p.broker}`
         : p.execution === 'LIVE' ? 'Feed is quiet; the broker bracket still protects it, but verify at the broker'
         : 'Feed is quiet; paper stop/target checks are paused until prices return' };
   }
@@ -42,6 +48,12 @@ function alertFor(p, livePrice, now) {
   const t1 = p.targets && p.targets[0] && p.targets[0].price;
   // Adopted holdings have no orders at the broker: when a level is reached,
   // the ONLY exit is the user selling there, so say so first.
+  if (ext && p.invalidation > 0 && livePrice <= p.invalidation) {
+    return { ...base, tone: 'warn', action: 'Stop level hit: see Approvals', detail: `${p.asset} ${livePrice} is through its stop ${p.invalidation}; the Pilot's sell card waits in Approvals (${p.broker})` };
+  }
+  if (ext && t1 > 0 && livePrice >= t1 && !p.t1Done) {
+    return { ...base, tone: 'warn', action: 'Target reached: see Approvals', detail: `${p.asset} ${livePrice} reached T1 ${t1}; the Pilot's trim card waits in Approvals (${p.broker})` };
+  }
   if (p.adopted && (long ? livePrice <= p.invalidation : livePrice >= p.invalidation)) {
     return { ...base, tone: 'warn', action: 'Stop level hit: sell at broker', detail: `${p.asset} ${livePrice} is through your stop ${p.invalidation}; nothing sells it automatically (no orders at ${p.broker})` };
   }
@@ -72,14 +84,14 @@ function alertFor(p, livePrice, now) {
   }
 
   const intraday = INTRADAY_TIMEFRAMES.has(String(p.timeframe));
-  if (intraday && etDate.format(p.openedAt) !== etDate.format(now)) {
+  if (intraday && p.openedAt && etDate.format(p.openedAt) !== etDate.format(now)) {
     return { ...base, tone: 'warn', action: 'Held past its timeframe', detail: `${p.timeframe} setup open since ${etDate.format(p.openedAt)}; ${status}` };
   }
   // Profit review: +10% on the position, or (options) 75% of the way to T1.
   if (pct === null ? toTarget >= 0.75 : pct >= PROFIT_REVIEW_PCT) {
     return { ...base, tone: 'ok', action: 'Review taking profits', detail: status };
   }
-  if (now - p.openedAt > STALE_HOLD_MS) {
+  if (p.openedAt && now - p.openedAt > STALE_HOLD_MS) {
     const days = Math.floor((now - p.openedAt) / 86400000);
     return { ...base, tone: 'info', action: 'Trend check required', detail: `Held ${days} days; ${status}` };
   }

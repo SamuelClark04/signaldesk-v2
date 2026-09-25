@@ -15,6 +15,7 @@
 //   at support   live price within NEAR_SMA_PCT of SMA20, and above SMA50
 const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const { getDailyBars } = require('../connectors/daily-bars');
+const gate = require('../risk/reality-gate'); // T1 within 2.5x the daily ATR (Phase 54)
 const { planTargets } = require('../risk/target-plan');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
@@ -102,6 +103,12 @@ async function evaluate(symbol, livePrice, now) {
     blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: tgt.reason,
       candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
     return tally.skip(symbol, 'Rejected: resistance too close to snap T1');
+  }
+  const cap = gate.atrCap(entryMax, tgt.targets[0].price, gate.dailyAtr(bars), 'swing');
+  if (!cap.ok) {
+    blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: `ATR_TARGET_UNREALISTIC: ${cap.reason}`,
+      candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
+    return tally.skip(symbol, 'Rejected: T1 beyond 2.5x the daily ATR');
   }
   const news = await sentiment.getSentiment(symbol, now);
 

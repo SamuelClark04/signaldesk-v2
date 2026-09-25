@@ -39,8 +39,9 @@ const externalActions = require('./external-actions');
 const externalApi = require('./external-api');
 const brokerSync = require('../connectors/broker-sync');
 
-const priceOf = (asset) => prices.getLatestPrice(asset);
-let matrix = { rows: [], equity: null, at: null };
+const priceOf = (asset) => prices.getLatestPrice(asset); // live only: the ranker's "can be bought now"
+const markOf = (asset) => prices.getMarkPrice(asset); // live, else the last session close: valuation + matrix
+let matrix = { rows: [], paperEquity: null, realEquity: null, at: null };
 const tried = new Set(); // ADD / ROTATION ids already sent through the gates (once per day each)
 const getMatrix = () => ({ ...matrix, rows: matrix.rows.map((r) => ({ ...r })) });
 
@@ -57,14 +58,16 @@ function paperEquity() {
 
 // Real money SignalDesk tracks: its LIVE trades (not options) + external holdings.
 const isReal = (p) => (p.execution === 'LIVE' || p.execution === 'EXTERNAL') && p.market !== 'options' && p.direction !== 'short';
-const valueOf = (p) => p.positionSize * (priceOf(p.asset) > 0 ? priceOf(p.asset) : p.fillPrice || 0);
+const inRealBook = (p) => p.execution === 'LIVE' || p.execution === 'EXTERNAL' || !!p.adopted;
+const valueOf = (p) => p.positionSize * (markOf(p.asset) > 0 ? markOf(p.asset) : p.fillPrice || 0);
 function realHoldings() { return [...ledger.getActivePositions().filter(isReal), ...external.positions()]; }
 
-// Combined equity for the matrix weights: paper equity + real holdings + synced cash.
-function combinedEquity(real) {
+// REAL equity (Phase 54): real holdings at mark + synced broker cash. The paper
+// bankroll is never part of it (it has its own book: paperEquity()).
+function realEquity(real) {
   const snap = brokerSync.getSnapshot();
   const cash = ['coinbase', 'alpaca'].reduce((s, v) => s + (snap[v] && snap[v].ok && snap[v].cash > 0 ? snap[v].cash : 0), 0);
-  return paperEquity() + real.reduce((s, p) => s + valueOf(p), 0) + cash;
+  return real.reduce((s, p) => s + valueOf(p), 0) + cash;
 }
 
 // Holdings the allocator counts, by the client's venue filter.
@@ -80,7 +83,7 @@ async function stageCandidate(c, broadcast) {
   c.catalysts = macro.catalystsFor(c);
   const settings = ledger.getSettings();
   const capital = await sizingBankroll(c.market, settings);
-  const r = capital.ok ? processCandidate(c, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis }) : { approved: false, reason: capital.reason };
+  const r = capital.ok ? processCandidate(c, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash }) : { approved: false, reason: capital.reason };
   if (!r.approved) {
     recordRejection(c.id, r.reason, c);
     scanLog.rejected(c.id, r.reason, c);
@@ -97,7 +100,7 @@ async function stageCandidate(c, broadcast) {
 async function stageBuys(amount, broadcast, scope = 'combined') {
   const ranking = await ranker.rankUniverse(priceOf);
   const exiting = new Set(ledger.getPilotActions().filter((a) => a.action !== 'ADD').map((a) => a.asset));
-  const proposal = { ...calculateAllocation(amount, holdingsFor(scope), prices.getLatestPrices(), ranking, ledger.getPendingOrders(), exiting), scope };
+  const proposal = { ...calculateAllocation(amount, holdingsFor(scope), prices.getMarkPrices(), ranking, ledger.getPendingOrders(), exiting), scope };
   const replaced = ledger.getPendingOrders().filter((o) => o.strategyId === PILOT_STRATEGY_ID && (o.pilotKind || 'ALLOCATION') === 'ALLOCATION');
   for (const o of replaced) ledger.discardOrder(o.id); // a new deposit plan supersedes the old one
   const { candidates, skipped } = await pilot.buyCandidates(proposal);
@@ -140,18 +143,20 @@ async function reviewHoldings(broadcast, now = Date.now()) {
   const ext = external.positions();
   const positions = [...ledger.getActivePositions(), ...ext];
   const ranking = await ranker.rankUniverse(priceOf, now);
-  const equity = combinedEquity([...ledger.getActivePositions().filter(isReal), ...ext]);
-  const r = await matrixRules.review(positions, priceOf, { equity, ranking }, now);
+  const books = { paper: paperEquity(), real: realEquity([...ledger.getActivePositions().filter(isReal), ...ext]) };
+  const r = await matrixRules.review(positions, markOf, { ranking, equityOf: (p) => (inRealBook(p) ? books.real : books.paper) }, now);
   const day = new Date(now).toISOString().slice(0, 10);
   const extById = new Map(ext.map((p) => [p.id, p]));
   // External holdings: stop / T1 / T2 alerts win over the matrix; every card gets its instruction.
-  const alerts = externalActions.levelAlerts(ext, priceOf, day);
+  const alerts = externalActions.levelAlerts(ext, markOf, day);
   const alerted = new Set(alerts.map((a) => a.positionId));
   const manualAdds = r.adds.filter((x) => extById.has(x.positionId) && extById.get(x.positionId).external === 'manual');
   const actions = [...r.actions.filter((a) => !alerted.has(a.positionId)), ...alerts]
     .map((a) => (extById.has(a.positionId) ? externalActions.decorate(a, extById.get(a.positionId)) : a))
     .concat(manualAdds.filter((x) => !alerted.has(x.positionId)).map((x) => externalActions.manualAdd(x, extById.get(x.positionId), day)));
-  const sync = ledger.syncPilotActions(actions, new Set(positions.map((p) => p.id)));
+  // A holding the matrix could not judge this pass (no price / history: WAIT) keeps its pending card.
+  const unknown = new Set(r.matrix.filter((x) => x.action === 'WAIT').map((x) => x.positionId));
+  const sync = ledger.syncPilotActions(actions, new Set(positions.map((p) => p.id)), unknown);
   if (sync.changed) broadcast('PILOT_ACTIONS', ledger.getPilotActions());
   for (const a of sync.added.filter((x) => x.external)) {
     Promise.resolve().then(() => sendExternalActionAlert(a)).catch((err) => console.error(`[notifier] ${a.id}: ${err.message}`));
@@ -176,7 +181,7 @@ async function reviewHoldings(broadcast, now = Date.now()) {
     }
   }
   if (staged) broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
-  const next = { rows: r.matrix, equity, at: now };
+  const next = { rows: r.matrix, paperEquity: books.paper, realEquity: books.real, at: now };
   if (JSON.stringify(next.rows) !== JSON.stringify(matrix.rows)) broadcast('PILOT_MATRIX', next);
   matrix = next;
 }

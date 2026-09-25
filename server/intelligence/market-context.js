@@ -4,7 +4,10 @@
 //   Crypto:      BTC's 24h change from the Coinbase ticker, plus breadth across
 //                the streamed coins.
 // |move| < FLAT_PCT reads as flat. Missing data says so instead of guessing.
-// Input: { stockBars: Map(symbol -> [1m bars]), cryptoTicks: { symbol: tick } }.
+// Input: { stockBars: Map(symbol -> [1m bars]), cryptoTicks: { symbol: tick },
+//   references: symbol -> { changePct, prevClose, price } (latest regular session,
+//   from daily bars: reference-prices.js) }. With no bars streamed since start
+//   (market closed, weekend) the equities read is SPY's LAST SESSION change.
 const FLAT_PCT = 0.001; // 0.10%
 const STALE_BAR_MS = 15 * 60 * 1000; // no bar for 15 min: market closed / feed quiet
 
@@ -29,10 +32,19 @@ function breadthText(changes, unit) {
   return `${up} of ${known.length} ${unit} up`;
 }
 
-function equities(stockBars, now) {
+function lastSession(references) {
+  const refs = Object.entries(references || {}).filter(([, r]) => r && Number.isFinite(r.changePct));
+  const spy = (references || {}).SPY;
+  if (!spy || !Number.isFinite(spy.changePct)) return null;
+  return { asset: 'US equities', trend: trendOf(spy.changePct), changePct: spy.changePct, basis: 'SPY last session (market closed)',
+    breadth: breadthText(refs.map(([, r]) => r.changePct), 'stocks'), asOf: spy.time || null, stale: true };
+}
+
+function equities(stockBars, now, references) {
   const entries = [...(stockBars || new Map())].map(([s, bars]) => [s, sessionChange(bars)]).filter(([, v]) => v);
   if (!entries.length) {
-    return { asset: 'US equities', trend: 'unknown', changePct: null, basis: 'SPY today', breadth: 'No bars yet: feed not streaming or market closed since start' };
+    return lastSession(references)
+      || { asset: 'US equities', trend: 'unknown', changePct: null, basis: 'SPY today', breadth: 'No bars yet: feed not streaming or market closed since start' };
   }
   const bySymbol = Object.fromEntries(entries);
   const lead = bySymbol.SPY ? ['SPY', bySymbol.SPY] : entries[0];
@@ -67,8 +79,8 @@ function crypto(cryptoTicks) {
   };
 }
 
-function getMarketContext({ stockBars, cryptoTicks } = {}, now = Date.now()) {
-  return [equities(stockBars, now), crypto(cryptoTicks)];
+function getMarketContext({ stockBars, cryptoTicks, references } = {}, now = Date.now()) {
+  return [equities(stockBars, now, references), crypto(cryptoTicks)];
 }
 
 module.exports = { getMarketContext, FLAT_PCT };

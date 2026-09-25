@@ -12,11 +12,17 @@
 //                  weight under 18%, pulled back to within 3% of its 20- or
 //                  50-day SMA: buy up to the 18% weight
 //   HOLD           healthy: shown with its buffer over the 200-day SMA and weight
-// Weight = position value / COMBINED equity (paper bankroll + realized and open
-// paper P&L + every real holding: SignalDesk's LIVE trades and the external ones,
-// manual Robinhood / other and broker-synced, + synced broker cash; from the
-// pilot handler), so paper and external holdings are judged together.
-const { dailyBars, scoreAsset, CONFIG: RANK } = require('./pilot-ranker');
+// Weight = position value / the equity of ITS OWN BOOK (ctx.equityOf, from the
+// pilot handler; Phase 54): paper positions against the paper account (bankroll
+// + realized and open paper P&L), real holdings (SignalDesk's LIVE trades,
+// adopted, manual Robinhood / other and broker-synced) against the REAL equity
+// (their value + synced broker cash). The paper bankroll never dilutes a real
+// holding's weight, so $10.70 of ETHFI in a $554 account is 1.9%, not 0.3%.
+// ADD (and the rotation buys) only ever go to the Tier-1 core leaders (the
+// ranker's universe: BTC ETH SOL LINK AVAX SPY QQQ NVDA AAPL MSFT META AMZN
+// GOOGL AVGO TSLA AMD COST LLY); speculative altcoins are held or cut, never added to.
+const { dailyBars, scoreAsset, CONFIG: RANK, UNIVERSE } = require('./pilot-ranker');
+const CORE = new Set(UNIVERSE);
 
 const CONFIG = {
   trimFraction: 1 / 3, maxWeight: 0.30, overSma200: 0.50, extended: { stocks: { pct: 0.2, atr: 3 }, crypto: { pct: 0.35, atr: 4 } },
@@ -45,11 +51,12 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
     if (!s || bars.length < RANK.sma200) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: `Only ${bars.length} daily sessions (needs ${RANK.sma200})` }); continue; }
     const { ind } = s;
     const value = p.positionSize * live;
-    const weight = ctx.equity > 0 ? value / ctx.equity : null;
+    const equity = ctx.equityOf ? ctx.equityOf(p) : ctx.equity;
+    const weight = equity > 0 ? value / equity : null;
     const base = { positionId: p.id, asset: p.asset, market: p.market, price: live, execution: p.execution || 'PAPER', adopted: !!p.adopted,
       levels: { sma200: round(ind.s200), sma50: round(ind.s50), sma20: round(ind.s20), atr: round(ind.atr) } };
-    const row = { positionId: p.id, asset: p.asset, weight, buffer200: ind.buffer200, score: s.score, value, execution: p.execution || 'PAPER',
-      external: p.external || null, broker: p.broker || null, adopted: !!p.adopted };
+    const row = { positionId: p.id, asset: p.asset, weight, equity, buffer200: ind.buffer200, score: s.score, value, execution: p.execution || 'PAPER',
+      external: p.external || null, broker: p.broker || null, adopted: !!p.adopted, core: CORE.has(p.asset) };
     const ext = CONFIG.extended[p.market] || CONFIG.extended.stocks;
 
     if (ind.lastClose < ind.s200 && live < ind.s200) {
@@ -76,14 +83,15 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
       continue;
     }
     const near = [ind.s20, ind.s50].some((m) => live >= m * 0.99 && live <= m * (1 + CONFIG.addNearPct));
-    const amount = weight !== null ? Math.floor((CONFIG.addMaxWeight - weight) * ctx.equity * 100) / 100 : 0;
-    if (live > ind.s50 && ind.s50 > ind.s200 && s.score >= CONFIG.addMinScore && weight !== null && weight < CONFIG.addMaxWeight && near && amount >= CONFIG.minAdd) {
+    const amount = weight !== null ? Math.floor((CONFIG.addMaxWeight - weight) * equity * 100) / 100 : 0;
+    if (CORE.has(p.asset) && live > ind.s50 && ind.s50 > ind.s200 && s.score >= CONFIG.addMinScore && weight !== null && weight < CONFIG.addMaxWeight && near && amount >= CONFIG.minAdd) {
       const why = `ADD: ${p.asset} is a winner (price > 50d > 200d SMA, trend score ${s.score}) pulled back near its 20/50-day SMA, at ${pct(weight)} of the account; this adds up to ${CONFIG.addMaxWeight * 100}%.`;
       out.adds.push({ asset: p.asset, positionId: p.id, amount, price: live, why });
       out.matrix.push({ ...row, action: 'ADD', reason: `Score ${s.score}, near the ${live <= ind.s20 * (1 + CONFIG.addNearPct) ? '20' : '50'}-day SMA; add ~$${amount.toFixed(2)}` });
       continue;
     }
-    out.matrix.push({ ...row, action: 'HOLD', reason: `${pct(ind.buffer200)} above the 200-day SMA ${round(ind.s200)}${weight !== null ? `, ${pct(weight)} of the account` : ''}; trend score ${s.score}` });
+    out.matrix.push({ ...row, action: 'HOLD', reason: `${pct(ind.buffer200)} above the 200-day SMA ${round(ind.s200)}${weight !== null ? `, ${pct(weight)} of the account` : ''}; trend score ${s.score}`
+      + `${CORE.has(p.asset) ? '' : ' (speculative: held or cut, never added to)'}` });
   }
   return out;
 }

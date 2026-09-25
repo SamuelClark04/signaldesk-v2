@@ -8,13 +8,16 @@ const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const coinbase = require('../connectors/coinbase-socket');
 const { generateAttentionAlerts } = require('./portfolio-monitor');
 const { getMarketContext } = require('./market-context');
+const referencePrices = require('../market/reference-prices');
+const external = require('../execution/external-holdings');
 
 let lastKey = null;
 
 function buildIntelligence(now = Date.now()) {
   return {
-    attention: generateAttentionAlerts(ledger.getActivePositions(), prices.getLatestPrices(now), now),
-    context: getMarketContext({ stockBars: alpacaStocks.getLatestBars(), cryptoTicks: coinbase.getLatest() }, now),
+    // Every holding: SignalDesk's own positions + external ones (manual / broker-synced) at mark prices.
+    attention: generateAttentionAlerts([...ledger.getActivePositions(), ...external.positions()], prices.getMarkPrices(now), now),
+    context: getMarketContext({ stockBars: alpacaStocks.getLatestBars(), cryptoTicks: coinbase.getLatest(), references: referencePrices.snapshot() }, now),
     generatedAt: now,
   };
 }

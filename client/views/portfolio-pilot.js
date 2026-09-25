@@ -22,7 +22,30 @@
     'SignalDesk bracket at Coinbase': { label: 'BROKER', urgency: 'Low', tone: 'info', change: 'Its stop and target are live orders at Coinbase; they close it there. The reconciler records the fill here.' },
     Hold: { label: 'HOLD', urgency: 'Low', tone: 'ok', change: 'Becomes Take profit? at +10%, Near stop within 25% of the stop distance, Trend check after 7 days.' },
   };
-  const recOf = (row) => RECS[row.alert ? row.alert.action : 'No live price'] || RECS.Hold;
+  // ONE verdict per holding (Phase 54): the Portfolio matrix (server, PILOT_MATRIX)
+  // and a pending Pilot card win; the attention alert only fills in when the
+  // matrix has no row (options, intraday trades). The same weights as the matrix.
+  const VERDICT = {
+    'SELL + ROTATE': { label: 'SELL + ROTATE', urgency: 'High', tone: 'bad', change: 'Clears when the price closes back above its 200-day SMA. The sell waits in Approvals.' },
+    TRIM: { label: 'TRIM', urgency: 'Medium', tone: 'warn', change: 'Clears once the weight / extension falls back under the Pilot limits. The trim waits in Approvals.' },
+    ADD: { label: 'ADD', urgency: 'Low', tone: 'info', change: 'A core leader pulled back to its 20/50-day SMA under 18% weight. The add waits in Approvals.' },
+    HOLD: { label: 'HOLD', urgency: 'Low', tone: 'ok', change: 'Healthy: above its 200-day SMA, within the weight and extension limits.' },
+    WAIT: { label: 'WAIT', urgency: 'Low', tone: 'wait', change: 'Needs a price and 200 daily sessions to judge.' },
+  };
+  const idsOf = (p) => [p.id, p.extId, ...(p.tracked || []).map((t) => t.id)].filter(Boolean);
+  function verdictOf(row, state) {
+    const ids = idsOf(row.p);
+    const m = ((state.pilotMatrix && state.pilotMatrix.rows) || []).find((x) => ids.includes(x.positionId));
+    const card = (state.pilotActions || []).find((a) => ids.includes(a.positionId));
+    if (card) {
+      const v = card.action === 'SELL' ? VERDICT['SELL + ROTATE'] : VERDICT[card.action] || VERDICT.TRIM;
+      return { ...v, label: card.action === 'SELL' && !card.rotation ? 'SELL' : v.label, why: card.instruction || card.reason, matrix: m, pending: true };
+    }
+    if (m) return { ...(VERDICT[m.action] || VERDICT.HOLD), why: m.reason, matrix: m };
+    return { ...(RECS[row.alert ? row.alert.action : 'No live price'] || RECS.Hold), why: row.alert ? row.alert.detail : 'No alert yet', matrix: null };
+  }
+  let viewState = {}; // the state of the current render (recOf reads it)
+  const recOf = (row) => verdictOf(row, viewState);
 
   // Allocator view state (the request/answer run over the WebSocket).
   const alloc = { amount: '', pending: false, error: '', proposal: null };
@@ -43,7 +66,7 @@
   function summary(data) {
     const counts = {};
     for (const r of data.rows) { const l = recOf(r).label; counts[l] = (counts[l] || 0) + 1; }
-    const act = data.rows.filter((r) => ['REVIEW', 'TAKE PROFIT?'].includes(recOf(r).label)).length;
+    const act = data.rows.filter((r) => ['REVIEW', 'TAKE PROFIT?', 'TRIM', 'SELL', 'SELL + ROTATE', 'ADD'].includes(recOf(r).label)).length;
     const title = !data.rows.length ? 'No open positions. Cash is ready to deploy.'
       : act ? `Review ${act} position${act === 1 ? '' : 's'}; keep the rest.` : 'Keep current positions. Nothing needs action.';
     return el('section', { className: `pf-card pf-summary${act ? ' is-warn' : ''}` }, [
@@ -54,15 +77,15 @@
   }
 
   function recTable(data, opts) {
-    const total = data.rows.reduce((s, r) => s + Math.max(0, r.m.marketValue), 0);
     const generatedAt = opts.state.intelligence && opts.state.intelligence.generatedAt;
     const body = data.rows.map((r) => {
       const rec = recOf(r);
       const tr = el('tr', { className: `row${r.p.id === opts.selectedId ? ' is-selected' : ''}` }, [
         el('td', {}, el('div', { className: 'scan-asset' }, [SD.scannerDetail.badge(r.p.asset), el('div', {}, [el('strong', { textContent: T().display(r.p) }), el('span', { textContent: SD.scannerData.nameOf(r.p.asset) })])])),
-        el('td', { className: 'num', textContent: total > 0 ? `${((Math.max(0, r.m.marketValue) / total) * 100).toFixed(0)}%` : '—' }),
-        el('td', {}, el('span', { className: `pf-rec is-${rec.tone}`, textContent: rec.label })),
-        el('td', { className: 'pf-why', textContent: r.alert ? r.alert.detail : 'No alert yet' }),
+        el('td', { className: 'num', textContent: rec.matrix && Number.isFinite(rec.matrix.weight) ? `${(rec.matrix.weight * 100).toFixed(1)}%` : '—',
+          title: rec.matrix && rec.matrix.equity ? `Share of its book's equity (${money(rec.matrix.equity)}): the Portfolio matrix weight` : 'Not in the Portfolio matrix' }),
+        el('td', {}, el('span', { className: `pf-rec is-${rec.tone}`, textContent: `${rec.label}${rec.pending ? ' · in Approvals' : ''}` })),
+        el('td', { className: 'pf-why', textContent: rec.why }),
         el('td', {}, el('span', { className: `pf-urg is-${rec.urgency.toLowerCase()}`, textContent: rec.urgency })),
         el('td', { className: 'pf-muted', textContent: r.p.execution === 'BROKER' ? `synced ${age(r.p.syncedAt)} ago` : generatedAt ? `${age(generatedAt)} ago` : '—' }),
       ]);
@@ -72,7 +95,7 @@
     return el('section', { className: 'pf-card' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Holdings and recommendations' })]),
       el('div', { className: 'table-wrap' }, el('table', { className: 'data-table pf-table' }, [
-        el('thead', {}, el('tr', {}, ['Asset', 'Allocation', 'Recommendation', 'Why', 'Urgency', 'Evidence age'].map((h) => el('th', { textContent: h, className: h === 'Allocation' ? 'num' : '' })))),
+        el('thead', {}, el('tr', {}, ['Asset', 'Weight', 'Recommendation', 'Why', 'Urgency', 'Evidence age'].map((h) => el('th', { textContent: h, className: h === 'Weight' ? 'num' : '' })))),
         el('tbody', {}, body.length ? body : [el('tr', {}, el('td', { colSpan: 6, className: 'pf-empty', textContent: 'No open positions to review.' }))]),
       ])),
     ]);
@@ -92,7 +115,7 @@
       el('div', { className: 'pf-card-head' }, [SD.scannerDetail.badge(p.asset, true), el('div', { className: 'opp-title' }, [
         el('h3', { className: 'pf-h', textContent: `${T().display(p)} recommendation` }), el('span', { className: 'pf-sub', textContent: SD.scannerData.nameOf(p.asset) })]),
       el('span', { className: `pf-rec is-${rec.tone}`, textContent: rec.label })]),
-      el('div', { className: `pf-callout is-${rec.tone}` }, [el('strong', { textContent: alert ? alert.action : 'No live price' }), el('span', { textContent: alert ? alert.detail : 'Waiting for the next scan.' })]),
+      el('div', { className: `pf-callout is-${rec.tone}` }, [el('strong', { textContent: rec.label }), el('span', { textContent: rec.why || (alert ? alert.detail : 'Waiting for the next scan.') })]),
       el('div', { className: 'pf-boxes' }, [
         box('Cost basis', money(m.cost)),
         box('Unrealized (gross)', m.gross === null ? '—' : signed(m.gross, money), m.gross === null ? '' : pnlClass(m.gross)),
@@ -182,6 +205,7 @@
   // opts: { state, venueLabel, selectedId, onSelect(id), onClose(p, m), onHoldings(id), send(msg), online, rerender() }
   function pilotView(data, opts) {
     const t = data.totals;
+    viewState = opts.state; // one verdict source for the summary, the table and the detail card
     const values = data.rows.map((r) => Math.max(0, r.m.marketValue));
     const total = values.reduce((s, v) => s + v, 0);
     const topIdx = values.indexOf(Math.max(...values, 0));
@@ -194,7 +218,7 @@
         kpi('Spendable cash', `${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`, t.currentBankroll > 0 ? `Bankroll ${money(t.currentBankroll)} (${t.bankrollLabel})` : 'No bankroll for this venue yet', t.cash < 0 ? 'pnl-neg' : ''),
         kpi('Concentration', total > 0 ? `${((values[topIdx] / total) * 100).toFixed(0)}%` : '—', total > 0 ? `Top holding (${data.rows[topIdx].p.asset.replace('-USD', '')})` : 'No holdings'),
         kpi('Estimated exit cost', money(t.exitFees), 'If every position shown closed now'),
-        kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, 'Positions with a live price'),
+        kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, t.atClose ? `${t.atClose} at the last session close (market closed)` : 'Positions with a live price'),
       ]),
       el('div', { className: 'pf-pilot-grid' }, [recTable(data, opts), recDetail(selected, opts)]),
       SD.portfolioMatrix.card(opts.state),

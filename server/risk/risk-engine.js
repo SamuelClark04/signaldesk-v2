@@ -14,7 +14,15 @@
 //                  stop is at most SMALL_ACCOUNT.maxRiskPct (5.5%) of the bankroll
 //                  and its whole debit at most SMALL_ACCOUNT.maxDebitPct (12%);
 //                  tagged smallAccountCap so the user sees the real dollar risk.
+//   T1 reality gate (Phase 54): live brackets exit 100% at T1, so the NET
+//   reward : risk of T1 ALONE (after fees, the ledger's own scenarios) must be
+//   >= MIN_T1_NET_RR (1.25 : 1) for every trade, whatever T2 would add.
+//   Live cash cap: options.cashCap (the LIVE venue's spendable cash, e.g.
+//   Coinbase USD + USDC) is a ceiling on notional / premium: a live buy is never
+//   sized above the money actually there.
 const { evaluateCosts } = require('./cost-authority');
+const { priceScenarios } = require('./scenarios');
+const { t1NetRR, MIN_T1_NET_RR } = require('./reality-gate');
 
 const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
@@ -76,12 +84,12 @@ function roundSize(size, market, fractional = false) {
 // Linear instruments: risk is the distance from entry to the invalidation level.
 // candidate.maxNotional (optional, e.g. a Portfolio Pilot buy of a set dollar
 // amount) is a third ceiling: it only ever makes a position smaller.
-function sizeLinear(candidate, bankroll, riskBudget, capPct, entryPrice, stopDistance) {
+function sizeLinear(candidate, bankroll, riskBudget, capPct, entryPrice, stopDistance, cashCap = Infinity) {
   const bySize = riskBudget / stopDistance; // risk-based size
   const byCapital = (bankroll * capPct) / entryPrice; // capital cap
-  const byAmount = candidate.maxNotional > 0 ? candidate.maxNotional / entryPrice : Infinity;
+  const byAmount = Math.min(candidate.maxNotional > 0 ? candidate.maxNotional : Infinity, cashCap) / entryPrice;
   const positionSize = roundSize(Math.min(bySize, byCapital, byAmount), candidate.market, !!candidate.fractional);
-  if (!(positionSize > 0)) return { error: 'Position size rounds to zero' };
+  if (!(positionSize > 0)) return { error: cashCap < Infinity && cashCap / entryPrice < bySize ? `Not enough live cash: $${cashCap.toFixed(2)} spendable` : 'Position size rounds to zero' };
   return {
     positionSize,
     dollarRisk: positionSize * stopDistance, // actual risk after rounding and the caps
@@ -93,14 +101,14 @@ function sizeLinear(candidate, bankroll, riskBudget, capPct, entryPrice, stopDis
 
 // Options (long premium), sized on the real premium: risk to the stop per
 // contract, and the whole premium capped at MAX_PREMIUM_R budgets and the bankroll.
-function sizeOptions(candidate, riskBudget, bankroll, capPct) {
+function sizeOptions(candidate, riskBudget, bankroll, capPct, cashCap = Infinity) {
   const { debit, multiplier, riskPerShare } = candidate.optionsData;
   const premiumPerContract = debit * multiplier;
   const riskPerContract = (riskPerShare || debit) * multiplier;
   const byRisk = Math.floor(riskBudget / riskPerContract);
-  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * capPct) / premiumPerContract);
+  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * capPct, cashCap) / premiumPerContract);
   const positionSize = Math.min(byRisk, byPremium);
-  if (positionSize < 1 && riskPerContract <= SMALL_ACCOUNT.maxRiskPct * bankroll && premiumPerContract <= SMALL_ACCOUNT.maxDebitPct * bankroll) {
+  if (positionSize < 1 && riskPerContract <= SMALL_ACCOUNT.maxRiskPct * bankroll && premiumPerContract <= Math.min(SMALL_ACCOUNT.maxDebitPct * bankroll, cashCap)) {
     return { positionSize: 1, dollarRisk: riskPerContract, notional: premiumPerContract, cappedByNotional: false, smallAccountCap: true };
   }
   if (positionSize < 1) {
@@ -128,9 +136,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   const scale = candidate.speculative ? speculativeScale(candidate) : 1;
   const riskBudget = configuredBankroll * riskPct * scale;
+  const cashCap = options.cashCap >= 0 ? options.cashCap : Infinity;
   const sizing = candidate.market === 'options'
-    ? sizeOptions(candidate, riskBudget, configuredBankroll, capPct)
-    : sizeLinear(candidate, configuredBankroll, riskBudget, capPct, entryPrice, stopDistance);
+    ? sizeOptions(candidate, riskBudget, configuredBankroll, capPct, cashCap)
+    : sizeLinear(candidate, configuredBankroll, riskBudget, capPct, entryPrice, stopDistance, cashCap);
   if (sizing.error) return reject(candidate, sizing.error);
 
   const { positionSize, dollarRisk } = sizing;
@@ -143,6 +152,10 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
 
   const cost = evaluateCosts(sized, dollarRisk);
   if (!cost.approved) return reject(candidate, cost.reason, { feeDrag: cost.feeDrag });
+  const rr = t1NetRR(priceScenarios(sized));
+  if (rr !== null && rr < MIN_T1_NET_RR) {
+    return reject(candidate, `T1_NET_RR_TOO_LOW: T1 alone pays ${rr.toFixed(2)} : 1 after fees (needs ${MIN_T1_NET_RR} : 1; live brackets exit 100% at T1)`, { t1NetRR: rr });
+  }
 
   const approved = Object.freeze({
     ...sized,
@@ -165,6 +178,8 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     actualRiskPct: dollarRisk / configuredBankroll,
     feeDrag: cost.feeDrag,
     estimatedFees: cost.estimatedFees,
+    t1NetRR: rr,
+    ...(cashCap < Infinity ? { cashCap } : {}),
     approvedAt: Date.now(),
   });
   approvedOrders.add(approved);
@@ -192,6 +207,7 @@ function resizeOrder(order, amount, { confirmed = false, fractional = false } = 
   const notional = qty * perUnit;
   if (!(qty > 0) || (!options && notional < MIN_TRADE_USD)) return reject(order, `AMOUNT_BELOW_MINIMUM: $${dollars.toFixed(2)} buys less than ${options ? 'one contract' : order.market === 'stocks' && !fractional && !order.fractional ? 'one whole share' : `$${MIN_TRADE_USD}`}`);
   if (qty > order.positionSize && !confirmed) return reject(order, `AMOUNT_ABOVE_MAX: $${notional.toFixed(2)} is above the risk engine's $${order.notional.toFixed(2)} ceiling; confirm to proceed`);
+  if (order.cashCap >= 0 && notional > order.cashCap + 0.005) return reject(order, `AMOUNT_ABOVE_CASH: $${notional.toFixed(2)} is more than the $${order.cashCap.toFixed(2)} of live cash it was sized against`);
   if (notional > order.sizingBankroll + 0.005) return reject(order, `AMOUNT_ABOVE_BANKROLL: $${notional.toFixed(2)} is more than the $${order.sizingBankroll.toFixed(2)} bankroll it was sized from`);
   const k = qty / order.positionSize;
   const dollarRisk = order.dollarRisk * k;

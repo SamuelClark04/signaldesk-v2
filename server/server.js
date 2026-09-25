@@ -44,7 +44,7 @@ const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 authGate.install(app, PORT); // /login is the only page served without a session
-app.use(express.static(path.join(__dirname, '..', 'client')));
+app.use(express.static(path.join(__dirname, '..', 'client'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') })); // revalidate: never stale JS
 mobileLink.install(app); // behind the sign-in gate, like everything after authGate
 
 app.get('/api/health', (req, res) => {

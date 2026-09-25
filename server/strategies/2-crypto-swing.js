@@ -6,7 +6,10 @@
 //   setup    = within the last 6 bars (~1 day) the low flushed >= 3% under the mean
 //   trigger  = the last completed bar closed at/below the mean and the LIVE price
 //              is now back above it (a fresh reclaim; one signal per flush)
-//   stop     = the tightest stop the fee gate allows (below)
+//   stop     = under the CHART: the flush low less 0.25 of the 4h bar range
+//              (Phase 54 reality gate, risk/reality-gate.js): a chart stop under
+//              3.2% is rejected, never stretched; from 3.2% it may widen to the
+//              fee floor below. T1 must sit within 2.5x the DAILY ATR.
 //   target   = 3R (strict) or 2R (moderate): the live Settings dial, risk/strictness.js,
 //              read on every pass
 // Why: the risk engine rejects fee drag above 0.35R, and fee drag = blended
@@ -30,6 +33,7 @@ const { getDailyBars } = require('../connectors/daily-bars');
 const { planTargets } = require('../risk/target-plan');
 const { minStopPct } = require('../risk/cost-authority');
 const { getStrictness } = require('../risk/strictness');
+const gate = require('../risk/reality-gate');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
@@ -83,15 +87,19 @@ function analyse(bars) {
   return flushed ? { mean, flushBar, lastClose: bars[bars.length - 1].close } : null;
 }
 
-function levels(live) {
+// Levels from the chart: { ok, entryMax, invalidation, pct, widened, target } or { ok: false, reason }.
+function levels(live, s, bars) {
   const entryMax = px(live * (1 + CONFIG.entryBufferPct));
-  const pct = stopPct();
-  const invalidation = floorPx(entryMax * (1 - pct));
-  return { entryMax, invalidation, pct, target: px(entryMax + getStrictness().targetR * (entryMax - invalidation)) };
+  const range = bars.slice(-14).reduce((sum, b) => sum + (b.high - b.low), 0) / Math.min(14, bars.length);
+  const cs = gate.chartStop(entryMax, s.flushBar.low - 0.25 * range, stopPct());
+  if (!cs.ok) return cs;
+  const invalidation = floorPx(cs.invalidation);
+  return { ok: true, entryMax, invalidation, pct: (entryMax - invalidation) / entryMax, widened: cs.widened,
+    target: px(entryMax + getStrictness().targetR * (entryMax - invalidation)) };
 }
 
 function candidate(symbol, live, s, now, ctx) {
-  const { entryMax, invalidation, pct } = levels(live);
+  const { entryMax, invalidation, pct, widened } = ctx.levels;
   const plan = ctx.target;
   const depth = ((s.mean - s.flushBar.low) / s.mean) * 100;
   return {
@@ -113,7 +121,8 @@ function candidate(symbol, live, s, now, ctx) {
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} flushed to ${px(s.flushBar.low)} (${depth.toFixed(1)}% under its ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean `
       + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${getStrictness().targetR}R move (${getStrictness().level} setting); `
-      + `invalid below ${invalidation} (${+(pct * 100).toFixed(1)}% stop, the blended maker/taker fee floor). ${plan.text} `
+      + `invalid below ${invalidation} (${+(pct * 100).toFixed(1)}% stop, under the flush low${widened ? ', widened to the maker/taker fee floor' : ''}). `
+      + `T1 is ${ctx.atrMult.toFixed(2)}x the daily ATR away. ${plan.text} `
       + `${sentiment.describe(ctx.news)} Expected hold: ${CONFIG.expectedDuration}.`,
     confirmationCriteria: [
       `Flush at least ${(CONFIG.flushPct * 100).toFixed(0)}% below the ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean within ${CONFIG.flushLookback} bars`,
@@ -138,19 +147,24 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
       if (lastSignal.get(symbol) === s.flushBar.time) { tally.skip(symbol, 'This flush was already signalled'); continue; }
       if (!(live > s.mean)) { tally.skip(symbol, 'Flushed, not yet reclaiming the mean'); continue; }
       if (!(s.lastClose <= s.mean)) { tally.skip(symbol, 'Reclaim happened earlier (not fresh)'); continue; }
+      const shell = { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: 'Capitulation reversal', direction: 'long', timeframe: CONFIG.timeframe };
+      const id = `${STRATEGY_ID}:REVERSAL:${symbol}:${s.flushBar.time}`;
+      const lv = levels(live, s, candles.get(symbol).bars);
+      if (!lv.ok) { blocks.push({ id, reason: `CHART_STOP_TOO_TIGHT: ${lv.reason}`, candidate: shell }); tally.skip(symbol, 'Rejected: chart stop too tight for the fee tier'); lastSignal.set(symbol, s.flushBar.time); continue; }
       // Overhead daily resistance: snap T1 under it, or reject when it is too close.
-      const { entryMax, invalidation, target } = levels(live);
-      const t = planTargets({ bars: await getDailyBars(symbol, now), entry: entryMax, stop: invalidation, market: 'crypto',
-        entryLiquidity: entryLiquidity(), fmt: px, targets: [{ level: 1, price: target, allocation: 1 }] });
+      const daily = await getDailyBars(symbol, now);
+      const t = planTargets({ bars: daily, entry: lv.entryMax, stop: lv.invalidation, market: 'crypto',
+        entryLiquidity: entryLiquidity(), fmt: px, targets: [{ level: 1, price: lv.target, allocation: 1 }] });
       if (!t.ok) {
-        blocks.push({ id: `${STRATEGY_ID}:REVERSAL:${symbol}:${s.flushBar.time}`, reason: `RESISTANCE_BLOCKS_TARGET: ${t.text}`,
-          candidate: { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: 'Capitulation reversal', direction: 'long', timeframe: CONFIG.timeframe } });
+        blocks.push({ id, reason: `RESISTANCE_BLOCKS_TARGET: ${t.text}`, candidate: shell });
         tally.skip(symbol, 'Rejected: resistance too close to snap T1');
         continue; // not signalled: it may qualify once price breaks the level
       }
+      const cap = gate.atrCap(lv.entryMax, t.targets[0].price, gate.dailyAtr(daily), 'swing');
+      if (!cap.ok) { blocks.push({ id, reason: `ATR_TARGET_UNREALISTIC: ${cap.reason}`, candidate: shell }); tally.skip(symbol, 'Rejected: T1 beyond 2.5x the daily ATR'); continue; }
       lastSignal.set(symbol, s.flushBar.time);
       tally.setup();
-      out.push(candidate(symbol, live, s, now, { target: t, news: await sentiment.getSentiment(symbol, now) }));
+      out.push(candidate(symbol, live, s, now, { target: t, levels: lv, atrMult: cap.mult, news: await sentiment.getSentiment(symbol, now) }));
     } catch (err) {
       console.error(`[crypto-swing] ${symbol} failed: ${err.message}`);
     }

@@ -48,4 +48,19 @@ function getLatestPrice(asset, now = Date.now()) {
   return getLatestPrices(now).get(asset);
 }
 
-module.exports = { getLatestPrices, getLatestPrice, getPriceTimes, setPolled, MAX_PRICE_AGE_MS };
+// MARK prices (Phase 54): the fresh live price, else the latest regular-session
+// close (reference-prices.js seeds it from daily bars while US equities are
+// closed). For VALUING holdings, the Pilot matrix and after-hours scans only:
+// approvals, fills and exits keep reading getLatestPrice(s), which never
+// returns a close, so nothing ever executes at a stale price.
+const reference = new Map(); // asset -> { price, time, prevClose, changePct }
+function setReference(asset, ref) { if (ref && ref.price > 0) reference.set(asset, { ...ref }); }
+const getReference = (asset) => (reference.has(asset) ? { ...reference.get(asset) } : null);
+function getMarkPrices(now = Date.now()) {
+  const out = new Map([...reference].map(([a, r]) => [a, r.price]));
+  for (const [a, p] of getLatestPrices(now)) out.set(a, p);
+  return out;
+}
+const getMarkPrice = (asset, now = Date.now()) => getLatestPrice(asset, now) || (reference.get(asset) || {}).price;
+
+module.exports = { getLatestPrices, getLatestPrice, getPriceTimes, setPolled, setReference, getReference, getMarkPrices, getMarkPrice, MAX_PRICE_AGE_MS };

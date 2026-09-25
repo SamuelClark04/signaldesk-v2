@@ -7,9 +7,10 @@
 //   ADD            a winner pulled back to its 20/50-day SMA, under 18% weight:
 //                  the add is staged as a buy setup (Approvals)
 //   HOLD           healthy: its buffer over the 200-day SMA and its weight
-// Every holding is judged together (paper, LIVE, broker-synced and manual
-// Robinhood / other), weighted against the combined equity; the venue filter
-// only chooses which rows are shown.
+// Every holding is judged, each weighted against ITS OWN book (Phase 54): paper
+// positions vs the paper equity, real holdings (LIVE, broker-synced, manual
+// Robinhood / other) vs the REAL equity only; the paper bankroll never dilutes a
+// real weight. The venue filter chooses which rows (and which equity) are shown.
 // Exposes window.SignalDesk.portfolioMatrix: { card(state) }.
 (() => {
   const SD = window.SignalDesk;
@@ -32,7 +33,9 @@
     const acting = rows.some((r) => r.action !== 'HOLD' && r.action !== 'WAIT');
     return el('section', { className: 'pf-card pf-matrix' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Portfolio matrix: hold · add · trim · sell + rotate' }),
-        el('span', { className: 'pf-sub', textContent: m && m.at ? `checked ${age(m.at)} ago · combined equity ${money(m.equity)}` : 'Waiting for the first pipeline pass' })]),
+        el('span', { className: 'pf-sub', textContent: !(m && m.at) ? 'Waiting for the first pipeline pass' : `checked ${age(m.at)} ago · `
+          + { paper: `paper equity ${money(m.paperEquity)}`, crypto: `real equity ${money(m.realEquity)}` }[SD.venue.current(state)]
+          || `real equity ${money(m.realEquity)} · paper equity ${money(m.paperEquity)} (weights per book)` })]),
       el('p', { className: 'pf-sub', textContent: 'Every holding against its 200/50/20-day averages and the trend ranker, once a minute. '
         + 'Sells, trims and the paired rotation / add buys wait in Approvals; nothing executes until you approve it.' }),
       rows.length ? el('div', { className: 'table-wrap' }, el('table', { className: 'data-table pf-table' }, [
@@ -41,7 +44,7 @@
           el('td', {}, [el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: r.asset, market: r.asset.includes('-') ? 'crypto' : 'stocks' }) }),
             el('span', { className: `pf-venue${r.external === 'manual' ? ' is-manual' : isPaper(r) ? '' : ' is-live'}`, textContent: where(r) })]),
           el('td', {}, el('span', { className: `pf-rec is-${TONE[r.action] || 'info'}`, textContent: r.action })),
-          el('td', { className: 'num', textContent: Number.isFinite(r.weight) ? `${(r.weight * 100).toFixed(1)}%` : '—', title: 'Share of the combined equity (paper + live + external)' }),
+          el('td', { className: 'num', textContent: Number.isFinite(r.weight) ? `${(r.weight * 100).toFixed(1)}%` : '—', title: Number.isFinite(r.equity) ? `Share of its book's equity: ${money(r.equity)}` : '' }),
           el('td', { className: `num ${r.buffer200 < 0 ? 'text-short' : 'text-long'}`, textContent: pct(r.buffer200) }),
           el('td', { className: 'num', textContent: Number.isFinite(r.score) ? String(r.score) : '—' }),
           el('td', { className: 'pf-why', textContent: r.reason }),

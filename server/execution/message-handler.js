@@ -51,7 +51,7 @@ async function routeApproved(order, livePrice) {
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
   const tick = order.market === 'crypto' ? coinbaseSocket.getLatest()[order.asset] : null; // best bid for a post-only limit entry
-  const result = await venue.api.submitOrder(order, order.positionSize, livePrice, { bid: tick && tick.bid });
+  const result = await venue.api.submitOrder(order, order.positionSize, livePrice, { bid: tick && tick.bid, ask: tick && tick.ask });
   if (!result.ok) {
     console.error(`[LIVE] ${venue.broker} order FAILED for ${order.id}: ${result.error}`);
     throw new Error(`LIVE_ORDER_FAILED: ${result.error}`);
@@ -65,7 +65,7 @@ async function routeApproved(order, livePrice) {
       broker: venue.broker,
       brokerEnvironment: result.environment,
       fillEstimated: true, // the broker's actual fill price is not fetched yet
-      ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}),
+      ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}), ...(result.product ? { brokerProduct: result.product } : {}),
     }, resized);
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.
@@ -296,4 +296,4 @@ function createMessageHandler({ send, broadcast }) {
   };
 }
 
-module.exports = { createMessageHandler };
+module.exports = { createMessageHandler, isBusy: (id) => inFlight.has(id) }; // isBusy: expiry-sweeper.js

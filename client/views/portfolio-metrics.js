@@ -15,15 +15,18 @@
   const QTY_DUST = 1e-8;
 
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`;
+  const closeOf = (state, asset) => { const c = state.refPrices && state.refPrices[asset]; return c && c.price > 0 ? c.price : null; }; // latest session close
   const display = (p) => (p.market === 'crypto' ? p.asset.replace('-', '/') : p.asset);
   const costBasis = (p) => (p.market === 'options' && p.optionsData
     ? p.positionSize * p.optionsData.debit * p.optionsData.multiplier : p.positionSize * p.fillPrice);
 
-  // One position marked at a live price (null when there is no fresh price).
-  // Broker holdings without a live price are marked at their value from the
-  // last sync (priceSource 'sync'); their cost is Coinbase's own cost basis.
-  function mark(p, livePrice) {
-    if (p.execution === 'BROKER') return markBroker(p, livePrice);
+  // One position marked at a live price. Without one (market closed, weekend),
+  // stocks / coins are marked at the latest regular-session close (`close`, from
+  // REFERENCE_PRICES; priceSource 'close', live false: closing still needs a
+  // live price). Broker holdings fall back to their value from the last sync
+  // (priceSource 'sync'); their cost is the broker's own cost basis.
+  function mark(p, livePrice, close) {
+    if (p.execution === 'BROKER') return markBroker(p, livePrice > 0 ? livePrice : close, livePrice > 0);
     const cost = costBasis(p);
     const fm = p.feeModel || {};
     // Entry leg at its own rate (maker for a paper limit entry), exit at market (taker).
@@ -31,15 +34,16 @@
       : fm.exitRate ? p.positionSize * ((fm.entryRate ?? fm.exitRate) * p.fillPrice + fm.exitRate * x)
         : fm.legRate ? fm.legRate * p.positionSize * (p.fillPrice + x) : null);
     if (p.market === 'options' && p.optionsData && p.optionsData.contract) return markOption(p, livePrice, cost, exitFees);
-    if (!(livePrice > 0)) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
+    const px = livePrice > 0 ? livePrice : p.market !== 'options' && close > 0 ? close : null;
+    if (!px) return { live: false, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null };
     if (p.market === 'options') { // older setups (no real contract): only the underlying's move is known
       return { live: true, price: livePrice, cost, marketValue: cost, gross: null, net: null, fees: exitFees(livePrice), pctGross: null,
         underlyingMove: livePrice / p.fillPrice - 1 };
     }
     const sign = p.direction === 'short' ? -1 : 1;
-    const gross = (livePrice - p.fillPrice) * p.positionSize * sign;
-    const fees = exitFees(livePrice);
-    return { live: true, price: livePrice, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
+    const gross = (px - p.fillPrice) * p.positionSize * sign;
+    const fees = exitFees(px);
+    return { live: livePrice > 0, priceSource: livePrice > 0 ? 'live' : 'close', price: px, cost, marketValue: cost + gross, gross, fees, net: fees === null ? null : gross - fees,
       pctGross: cost > 0 ? gross / cost : null, r: p.dollarRisk > 0 ? gross / p.dollarRisk : null };
   }
 
@@ -59,7 +63,7 @@
       r: p.dollarRisk > 0 ? gross / p.dollarRisk : null, optionValue: om.value, optionBasis: om.basis, optionAt: om.at };
   }
 
-  function markBroker(p, livePrice) {
+  function markBroker(p, livePrice, isLive = livePrice > 0) {
     const qty = p.positionSize;
     const syncPx = p.brokerValue > 0 && qty > 0 ? p.brokerValue / qty : null;
     const px = livePrice > 0 ? livePrice : syncPx;
@@ -67,7 +71,7 @@
     const marketValue = px ? qty * px : 0;
     const gross = px && cost !== null ? marketValue - cost : null;
     const fees = px && p.feeModel && p.feeModel.legRate ? p.feeModel.legRate * qty * ((p.fillPrice || px) + px) : null;
-    return { live: livePrice > 0, priceSource: livePrice > 0 ? 'live' : syncPx ? 'sync' : null, price: px, cost: cost === null ? marketValue : cost, marketValue,
+    return { live: isLive, priceSource: isLive ? 'live' : livePrice > 0 ? 'close' : syncPx ? 'sync' : null, price: px, cost: cost === null ? marketValue : cost, marketValue,
       gross, fees, net: gross === null || fees === null ? null : gross - fees, pctGross: gross !== null && cost > 0 ? gross / cost : null, r: null, noBasis: cost === null };
   }
 
@@ -108,7 +112,8 @@
       : adoptedOnly
         ? { action: 'Adopted: watched by SignalDesk', detail: `SignalDesk alerts at your stop and target; no orders are placed at ${p.broker} (you sell there)` }
         : { action: `SignalDesk bracket at ${p.broker}`, detail: `${tracked.length} SignalDesk position(s) in this balance; SignalDesk's own trades have stop/target orders at ${p.broker}` };
-    const levels = ext && !tracked.length ? { invalidation: ext.invalidation, targets: ext.targets, extId: ext.id, levelsBasis: ext.levelsBasis, customLevels: ext.customLevels } : {};
+    const levels = ext && !tracked.length ? { invalidation: ext.invalidation, targets: ext.targets, extId: ext.id, levelsBasis: ext.levelsBasis, customLevels: ext.customLevels,
+      dollarRisk: ext.dollarRisk } : {};
     return { p: { ...p, ...levels, tracked, managedQty, freeQty: freeQty > QTY_DUST ? freeQty : 0 }, key: venue,
       alert: urgent ? { ...urgent, asset: p.asset } : (ext && externalAlert(state, ext.id, p.asset)) || { asset: p.asset, tone: 'info', ...info } };
   }
@@ -131,7 +136,7 @@
     if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
     const rows = [...ledger, ...broker, ...manual].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
-      .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset]), alert: r.alert || alerts.get(r.p.id) || null }));
+      .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset], closeOf(state, r.p.asset)), alert: r.alert || alerts.get(r.p.id) || null }));
 
     const paper = rows.filter((r) => r.key === 'paper');
     const cbRows = rows.filter((r) => r.key === 'coinbase');
@@ -168,6 +173,7 @@
       unrealizedPct: committed > 0 ? unrealized / committed : null,
       exitFees: counted.reduce((s, r) => s + (r.m.fees || 0), 0),
       fresh: rows.filter((r) => r.m.live).length,
+      atClose: rows.filter((r) => !r.m.live && r.m.priceSource === 'close').length,
       unmarked: counted.filter((r) => r.m.gross === null).length,
       live: rows.length - counted.length,
       // Venue-isolated bankroll: paper = configured bankroll; Live Crypto = the

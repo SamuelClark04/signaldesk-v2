@@ -17,7 +17,7 @@
 //   C  strength vs BTC over the same window (0-12) + spread quality from the
 //      live Coinbase bid/ask (0-8)                                   0-20
 // Score >= 60 qualifies. Levels: stop under the 30-minute low, never tighter
-// than the taker-entry fee floor (a momentum entry crosses the spread); T1 1.5R
+// than the taker-entry fee floor (a momentum entry crosses the spread); T1 2.0R
 // (50%), T2 3R (runner). conviction = (score - 60) / 40 sets the "Smart
 // Investment Amount": 10% (score 60) to 25% (score 100) of normal risk.
 const { CRYPTO } = require('../market/universe');
@@ -32,7 +32,7 @@ const STRATEGY_ID = 'speculative-crypto';
 const TAG = 'Speculative Moonshot';
 const CONFIG = {
   symbols: [...CRYPTO], surgeMin: 0.025, surgeMax: 0.12, relVolMin: 2.2, volumeCatalyst: 3.5, qualify: 60,
-  freshHighBars: 6, swingBars: 6, stopBufferPct: 0.003, entryBufferPct: 0.003, t1R: 1.5, t2R: 3, cooldownMs: 4 * 60 * 60 * 1000,
+  freshHighBars: 6, swingBars: 6, stopBufferPct: 0.003, entryBufferPct: 0.003, t1R: 2.0, t2R: 3, cooldownMs: 4 * 60 * 60 * 1000, // T1 >= 2R: the risk engine needs >= 1.25 : 1 net at T1 alone (Phase 54)
   tradeType: TAG, expectedDuration: 'Minutes to hours (momentum; exits at stop or targets)',
 };
 const SLOT_SEC = 300;

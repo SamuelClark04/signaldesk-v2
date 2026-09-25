@@ -43,4 +43,14 @@ async function getDailyBars(symbol, now = Date.now()) {
   return hit.bars.filter(done).map((b) => ({ ...b }));
 }
 
-module.exports = { getDailyBars, CACHE_TTL_MS };
+// Cached completed bars only (sync, no fetch): [] when not cached yet. For sync
+// callers (1-equity-day's daily-ATR check); equity-swing keeps the cache warm.
+function peekDailyBars(symbol, now = Date.now()) {
+  const hit = cache.get(symbol);
+  if (!hit || !hit.ok) return [];
+  const today = etDate.format(now);
+  const done = symbol.includes('-') ? (b) => (b.time + 86400) * 1000 <= now : (b) => etDate.format(b.time * 1000) < today;
+  return hit.bars.filter(done).map((b) => ({ ...b }));
+}
+
+module.exports = { getDailyBars, peekDailyBars, CACHE_TTL_MS };

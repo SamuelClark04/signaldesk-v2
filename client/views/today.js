@@ -31,11 +31,11 @@
     if (venue !== 'crypto' && !(bankroll > 0)) return null; // settings not loaded yet
     const data = SD.portfolioTable.metrics(state, venue);
     const t = data.totals;
-    if (venue === 'crypto' && !t.synced) return { venue, unsynced: true, count: data.rows.length };
-    // Open risk: dollar risk to the stop. Synced broker holdings have no SignalDesk
-    // stop; only the SignalDesk trades inside them (p.tracked) carry a known risk.
-    const risks = data.rows.map((r) => (r.p.execution === 'BROKER' ? sum(r.p.tracked || [], (x) => x.dollarRisk) : r.p.dollarRisk));
-    const unstopped = data.rows.filter((r) => r.p.execution === 'BROKER' && !(r.p.tracked || []).length).length;
+    if (venue === 'crypto' && !t.synced && !(t.holdingsValue > 0)) return { venue, unsynced: true, count: data.rows.length };
+    // Open risk: dollar risk to the stop. Synced broker holdings carry the Pilot's
+    // protective stop (Phase 53 levels, p.dollarRisk) or the SignalDesk trades inside them.
+    const risks = data.rows.map((r) => (r.p.execution === 'BROKER' && (r.p.tracked || []).length ? sum(r.p.tracked, (x) => x.dollarRisk) : r.p.dollarRisk || 0));
+    const unstopped = data.rows.filter((r) => r.p.execution === 'BROKER' && !(r.p.tracked || []).length && !(r.p.invalidation > 0)).length;
     const todayPnl = sum(state.journal.filter((x) => TRADE_VENUE[venue](x) && isToday(x.closedAt)), (x) => x.netPnl);
     const startOfDay = t.accountValue - todayPnl;
     return { venue, t, count: data.rows.length, risk: sum(risks, (x) => x), unstopped, todayPnl, todayPct: startOfDay > 0 ? todayPnl / startOfDay : 0 };
@@ -68,7 +68,8 @@
         // Total = Managed (SignalDesk positions) + External (broker coins it doesn't manage) + Cash.
         metric('Account value', usd(t.accountValue), `Total = ${usd(t.managedValue)} managed + ${usd(t.externalValue)} external + ${usd(t.cash)} cash (${cashSource})`),
         metric('Capital deployed', usd(t.holdingsValue), `${plural(m.count, 'position')} · ${t.deployedPct === null ? '—' : `${(t.deployedPct * 100).toFixed(0)}%`} of the account · ${usd(t.cash)} in cash`),
-        metric('Open risk', money(m.risk), `${t.currentBankroll > 0 ? `${((m.risk / t.currentBankroll) * 100).toFixed(2)}% of ${t.bankrollLabel} · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
+        // Live / External: % of the REAL equity (every real holding + cash), never the paper bankroll.
+        metric('Open risk', money(m.risk), `${(m.venue === 'crypto' ? t.accountValue : t.currentBankroll) > 0 ? `${((m.risk / (m.venue === 'crypto' ? t.accountValue : t.currentBankroll)) * 100).toFixed(2)}% of ${m.venue === 'crypto' ? 'real equity' : t.bankrollLabel} · ` : ''}to the stops${m.unstopped ? ` · ${plural(m.unstopped, 'broker holding')} without a stop` : ''}`),
         metric('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No marked positions' : `${pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
         metric("Today's change", signed(m.todayPnl, money), `${pct(m.todayPct)} · realized today (SignalDesk trades)`, pnlClass(m.todayPnl)),
       ];
@@ -133,16 +134,17 @@
     ]);
   }
 
-  // Real: the Approvals Queue (up to 3 cards).
+  // Real: the Approvals Queue (up to 3 cards), approvable ones only (no expired / blocked setup).
   function readyForReview(state) {
-    const real = state.pending.slice(0, 3).map((o) => ({
+    const open = state.pending.filter((o) => !SD.scannerData.blockers(o, state).length);
+    const real = open.slice(0, 3).map((o) => ({
       id: o.id, asset: o.asset, direction: o.direction, timeframe: o.timeframe, market: o.market, entryPrice: o.entryPrice,
       entryMin: o.entryZone.min, entryMax: o.entryZone.max, invalidation: o.invalidation, target: o.targets && o.targets[0] && o.targets[0].price,
     }));
     const body = real.length
       ? el('div', { className: 'today-setups' }, real.map(setupCard))
       : el('p', { className: 'today-empty', textContent: 'No setups in the Approvals Queue. New ones appear here as the risk engine approves them.' });
-    return card('Ready for review', real.length ? `${state.pending.length} in the Approvals Queue` : 'Queue empty', body);
+    return card('Ready for review', real.length ? `${open.length} approvable in the Approvals Queue` : 'Queue empty', body);
   }
 
   function card(title, hint, body, extraClass = '') {
@@ -158,21 +160,21 @@
   const waiting = () => el('p', { className: 'today-empty', textContent: 'Waiting for the server…' });
   const updatedAt = (intel) => (intel ? `updated ${new Date(intel.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '');
 
-  // Real: DASHBOARD_INTELLIGENCE attention alerts (one per open ledger position),
-  // limited to the active venue. Synced broker holdings have no SignalDesk rules.
+  // Real: DASHBOARD_INTELLIGENCE attention alerts (one per holding: ledger positions
+  // and EXTERNAL ones, manual or broker-synced with Pilot levels), by active venue.
   const ALERT_VENUE = {
-    paper: (p) => p.execution !== 'LIVE',
-    crypto: (p) => p.execution === 'LIVE' && p.broker === 'Coinbase',
+    paper: (p) => p.execution !== 'LIVE' && p.execution !== 'EXTERNAL',
+    crypto: (p) => p.execution === 'LIVE' || p.execution === 'EXTERNAL',
     combined: () => true,
   };
   function attention(state) {
     const intel = state.intelligence;
     const venue = SD.venue.current(state);
-    const byId = new Map((state.positions || []).map((p) => [p.id, p]));
+    const byId = new Map([...(state.positions || []), ...((state.external && state.external.positions) || [])].map((p) => [p.id, p]));
     const alerts = !intel ? [] : intel.attention.filter((a) => (a.positionId ? byId.has(a.positionId) && ALERT_VENUE[venue](byId.get(a.positionId)) : venue !== 'crypto'));
-    const empty = venue === 'crypto' ? 'No SignalDesk trades open on Coinbase. Synced holdings are not watched by SignalDesk rules.' : 'No alerts for this venue.';
+    const empty = venue === 'crypto' ? 'No live or external holdings. Sync Broker, or add a holding from another broker in Portfolio.' : 'No alerts for this venue.';
     const body = !intel ? waiting() : !alerts.length ? el('p', { className: 'today-empty', textContent: empty }) : el('ul', { className: 'today-list' }, alerts.map((a) => el('li', { className: `today-alert is-${a.tone}` }, [
-      el('div', {}, [el('span', { className: 'asset', textContent: `${a.asset}${a.execution === 'LIVE' ? ' · LIVE' : ''}` }), el('span', { className: 'today-alert-action', textContent: a.action })]),
+      el('div', {}, [el('span', { className: 'asset', textContent: `${a.asset}${a.execution === 'LIVE' ? ' · LIVE' : a.execution === 'EXTERNAL' ? ' · EXTERNAL' : ''}` }), el('span', { className: 'today-alert-action', textContent: a.action })]),
       el('div', { className: 'today-alert-detail', textContent: a.detail }),
     ])));
     return card('Portfolio attention', updatedAt(intel), body);

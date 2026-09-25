@@ -12,7 +12,7 @@
 const external = require('./external-holdings');
 const prices = require('../market/latest-prices');
 const brokerSync = require('../connectors/broker-sync');
-const coinbaseSell = require('../connectors/coinbase-sell');
+const coinbaseSell = require('../connectors/coinbase-orders'); // sellMarket
 const alpacaApi = require('../connectors/alpaca-api');
 const { T1_SHARE } = require('../risk/protective-levels');
 

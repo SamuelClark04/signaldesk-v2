@@ -159,7 +159,8 @@
   // Without a complete setup it is always disabled: "Waiting for Setup".
   function actions(o, ctx, amount) {
     const ready = hasLevels(o);
-    const blocked = !!amount && amount.state === 'blocked';
+    const failing = ready ? SD.scannerData.blockers(o, ctx.state || {}) : []; // any failed gate (Expired...) blocks approval
+    const blocked = (!!amount && amount.state === 'blocked') || failing.length > 0;
     const [modeKey, broker] = VENUE[o.market] || [null, '?'];
     const live = ctx.settings && modeKey && ctx.settings[modeKey] === 'live';
     const liveOptions = live && o.market === 'options';
@@ -167,6 +168,7 @@
     if (liveOptions) label = 'Live options orders not wired yet';
     const wrongSizing = sizing(o, ctx).mismatch;
     if (wrongSizing) label = `Sized for ${sizing(o, ctx).basis === 'paper' ? 'paper' : 'another venue'}: dismiss & re-scan`;
+    if (failing.length) label = `Blocked: ${failing.join(', ')}`;
     if (ctx.busy) label = 'Sending…';
     if (!ready) label = 'Waiting for Setup';
     const primary = el('button', {
@@ -174,7 +176,7 @@
       className: `btn ${live && ready ? 'btn-live' : 'btn-solid'} opp-go`,
       textContent: label,
       disabled: !ready || !ctx.online || ctx.busy || liveOptions || wrongSizing || blocked,
-      title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : blocked ? amount.note : '',
+      title: !ready ? 'No algorithmic setup selected: nothing can be executed' : !ctx.online ? 'Offline' : failing.length ? 'A gate failed (Scanner gate checklist)' : blocked ? amount.note : '',
     });
     const analysis = el('button', { type: 'button', className: 'btn', textContent: 'View full analysis' });
     analysis.onclick = () => { const a = document.getElementById('opp-analysis'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'start' }); };

@@ -35,10 +35,12 @@
     const s = o.scenarios || {};
     const best = s.plan || s.t1; // a T1/T2 plan: the blended result
     const rr = best && s.stop && s.stop.net < 0 ? `${(best.net / -s.stop.net).toFixed(2)} : 1${s.plan ? ' blended' : ''}` : '—';
-    const left = Math.max(0, EXPIRY_MS - (Date.now() - (o.stagedAt || 0)));
+    // The order guard's window runs from the setup's own timestamp, not from staging.
+    const left = Math.max(0, EXPIRY_MS - (Date.now() - (Date.parse(o.timestamp) || o.stagedAt || 0)));
     const blocked = live && o.market === 'options';
-    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked || amount.state === 'blocked',
-      textContent: busy ? 'Sending…' : blocked ? 'Live options not wired' : live ? `Approve / Execute LIVE (${broker})` : 'Approve / Execute (paper)' });
+    const failing = SD.scannerData.blockers(staged, ctx.state); // any failed gate (Expired, Escaped...) blocks approval
+    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked || amount.state === 'blocked' || failing.length > 0,
+      textContent: busy ? 'Sending…' : failing.length ? `Blocked: ${failing.join(', ')}` : blocked ? 'Live options not wired' : live ? `Approve / Execute LIVE (${broker})` : 'Approve / Execute (paper)' });
     approve.onclick = () => ctx.onApprove(staged, { live, broker });
     const review = el('button', { type: 'button', className: 'btn', textContent: 'Review chart' });
     review.onclick = () => ctx.onReview(o.id);
@@ -51,7 +53,7 @@
         ...(o.speculative ? [el('span', { className: 'opp-moon', textContent: 'Speculative Moonshot' })] : []),
         el('div', { className: 'apv-title' }, [el('strong', { textContent: `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
-        el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` }),
+        el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
       ]),
       el('div', { className: 'apv-grid' }, [
         kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),

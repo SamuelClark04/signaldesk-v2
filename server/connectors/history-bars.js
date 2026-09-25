@@ -13,8 +13,9 @@ const TIMEOUT_MS = 8000;
 const TIMEFRAMES = Object.freeze({
   '1m': { alpaca: '1Min', coinbase: 'ONE_MINUTE', sec: 60, lookbackDays: 7 },
   '5m': { alpaca: '5Min', coinbase: 'FIVE_MINUTE', sec: 300, lookbackDays: 7 },
-  '15m': { alpaca: '15Min', coinbase: 'FIFTEEN_MINUTE', sec: 900, lookbackDays: 14 },
-  '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30 },
+  // 150 bars: the crypto intraday archetypes need >= 80 completed bars (EMA50 + windows).
+  '15m': { alpaca: '15Min', coinbase: 'FIFTEEN_MINUTE', sec: 900, lookbackDays: 14, limit: 150 },
+  '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30, limit: 150 },
   '4h': { alpaca: '4Hour', coinbase: 'ONE_HOUR', sec: 14400, lookbackDays: 180, group: 4 },
   '1d': { alpaca: '1Day', coinbase: 'ONE_DAY', sec: 86400, lookbackDays: 200 },
   // Deeper daily history for 200-day averages (Portfolio Pilot); not a chart timeframe.

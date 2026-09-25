@@ -27,6 +27,7 @@ const optionsData = require('../connectors/options-data');
 const { legSymbols } = require('./option-marks');
 const macro = require('../connectors/macro-events');
 const { reviewHoldings } = require('./pilot-handler');
+const expirySweeper = require('./expiry-sweeper'); // expired setups leave the queue within 30 s
 
 const PIPELINE_INTERVAL_MS = 60000;
 
@@ -48,7 +49,8 @@ const STRATEGIES = [
   ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
   ['crypto-swing', () => cryptoSwing.generateCandidates(prices.getLatestPrices())],
   ['crypto-intraday', () => cryptoIntraday.generateCandidates(prices.getLatestPrices())],
-  ['equity-swing', () => equitySwing.generateCandidates(prices.getLatestPrices())],
+  // Marks: live, else the last session close (after hours / weekends the scan still runs; see the staging loop).
+  ['equity-swing', () => equitySwing.generateCandidates(prices.getMarkPrices())],
   ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
   ['speculative-crypto', () => speculativeCrypto.generateCandidates(prices.getLatestPrices())],
 ];
@@ -122,6 +124,11 @@ async function pipelinePass() {
 
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
+    // Found on a last close (market closed): never staged; re-checked on live prices at the open.
+    if (!(prices.getLatestPrice(candidate.asset) > 0)) {
+      recordRejection(candidate.id, 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
+      continue;
+    }
     const capital = await sizingBankroll(candidate.market, settings);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.
@@ -129,7 +136,7 @@ async function pipelinePass() {
       recordRejection(candidate.id, capital.reason, candidate);
       continue;
     }
-    const result = processCandidate(candidate, capital.bankroll, { riskPct, maxCapitalPct, sizingBasis: capital.basis });
+    const result = processCandidate(candidate, capital.bankroll, { riskPct, maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash });
     if (!result.approved) {
       console.log(`[pipeline] rejected ${result.candidateId}: ${result.reason}`);
       recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason
@@ -232,6 +239,8 @@ async function pipelinePass() {
 function startPipeline(options = {}) {
   if (pipelineTimer) throw new Error("pipeline: already started");
   if (typeof options.broadcast === "function") broadcast = options.broadcast;
+  expirySweeper.start(broadcast);
+  cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
   }, PIPELINE_INTERVAL_MS);

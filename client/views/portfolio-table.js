@@ -14,7 +14,7 @@
   // ---------- Holdings table ----------
   function pnlCell(m, p) {
     if (m.noBasis) return el('td', { className: 'num pf-muted', textContent: 'No cost basis', title: 'Coinbase reports no entry price for this balance (e.g. coins transferred in)' });
-    if (!m.live && m.priceSource !== 'sync' && !(m.gross !== null && m.optionBasis)) return el('td', { className: 'num pf-muted', textContent: 'No live price' });
+    if (!m.live && m.priceSource !== 'sync' && m.priceSource !== 'close' && !(m.gross !== null && m.optionBasis)) return el('td', { className: 'num pf-muted', textContent: 'No live price' });
     if (m.gross === null) {
       if (!Number.isFinite(m.underlyingMove)) return el('td', { className: 'num pf-muted', textContent: 'No option price' });
       return el('td', { className: 'num pf-muted', title: 'No live option prices: showing the underlying move since entry' },
@@ -65,12 +65,14 @@
         el('td', { className: 'num', textContent: price(p.fillPrice, p) }),
         el('td', { className: 'num text-short', textContent: price(lv.invalidation, p) }),
         el('td', { className: 'num text-long', textContent: t1 ? price(t1.price, p) : '—' }),
-        el('td', { className: 'num', title: m.priceSource === 'sync' ? `Value at the last Coinbase sync (${clock(p.syncedAt)}); no live price` : '' },
-          [m.price ? price(m.price, p) : '—', ...(m.priceSource === 'sync' ? [el('span', { className: 'pf-pnl-pct pf-muted', textContent: 'at sync' })] : [])]),
+        el('td', { className: 'num', title: m.priceSource === 'sync' ? `Value at the last ${p.broker} sync (${clock(p.syncedAt)}); no live price`
+          : m.priceSource === 'close' ? 'Latest regular-session close (market closed); closing a paper position still needs a live price' : '' },
+          [m.price ? price(m.price, p) : '—', ...(m.priceSource === 'sync' || m.priceSource === 'close' ? [el('span', { className: 'pf-pnl-pct pf-muted', textContent: `at ${m.priceSource}` })] : [])]),
         pnlCell(m, p),
         el('td', {}, alert ? el('span', { className: `pf-step is-${alert.tone}`, textContent: alert.action, title: alert.detail }) : el('span', { className: 'pf-muted', textContent: '—' })),
         el('td', { className: 'pf-action' }, p.external === 'manual' ? X.rowActions(p, opts)
-          : [...(A.canAdopt(row) ? [A.button(row, opts)] : [p.extId ? null : close]), ...(p.extId ? X.rowActions(p, opts) : [])].filter(Boolean)),
+          // A synced holding with Pilot levels (Phase 53) needs no adoption: Levels edits its stop / T1.
+          : [...(A.canAdopt(row) && !p.extId ? [A.button(row, opts)] : [p.extId ? null : close]), ...(p.extId ? X.rowActions(p, opts) : [])].filter(Boolean)),
       ]);
       tr.onclick = () => opts.onSelect(p.id);
       if (X.isEditing(p)) return [tr, X.formRow(head.length, opts)];

@@ -6,7 +6,12 @@
 //   marketDataMap: Map or object, symbol -> array of 1-minute bars
 //                  ({ open, high, low, close, volume, time: ISO }), or { bars: [...] }
 //   newsContext:   Map or object, symbol -> array of headlines (string or { headline })
+// Reality gate (Phase 54): T1 at 2R / T2 at 3R (the risk engine demands >= 1.25 : 1
+// net at T1 alone), and T1 within 1.0x the DAILY ATR (cached daily bars): a 1-4h
+// hold never plans a multi-day move.
 const { scoreHeadline } = require('../intelligence/sentiment-nlp');
+const { peekDailyBars } = require('../connectors/daily-bars');
+const gate = require('../risk/reality-gate');
 const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'equity-day';
@@ -25,8 +30,8 @@ const CONFIG = {
   maxChasePct: 0.005, // skip if the breakout bar already closed > 0.5% above OR high
   minStopPct: 0.0035, // risk engine rejects stock stops under ~0.29%; keep a margin
   targets: [
-    { level: 1, r: 1, allocation: 0.5 },
-    { level: 2, r: 2, allocation: 0.5 },
+    { level: 1, r: 2, allocation: 0.5 },
+    { level: 2, r: 3, allocation: 0.5 },
   ],
 };
 
@@ -111,6 +116,8 @@ function detectOrb(symbol, rawBars, headlines) {
   const minStop = Math.floor(entryMax * (1 - c.minStopPct) * 100) / 100;
   const invalidation = Math.min(cents(orLow), minStop);
   const risk = entryMax - invalidation;
+  const cap = gate.atrCap(entryMax, entryMax + c.targets[0].r * risk, gate.dailyAtr(peekDailyBars(symbol)), 'intraday');
+  if (!cap.ok) return tally.skip(symbol, `Rejected: ${cap.reason}`);
 
   return {
     id: `${STRATEGY_ID}:ORB:${symbol}:${date}`,

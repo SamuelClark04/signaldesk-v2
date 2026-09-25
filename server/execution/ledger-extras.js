@@ -45,22 +45,27 @@ function unsaveSetup(candidateId) {
 const getPilotActions = () => need().pilotActions.filter((a) => a.status === 'pending').map((a) => ({ ...a, levels: { ...a.levels } }));
 
 // Reconcile with this pass's proposals: new ones are added (an id already seen
-// today, e.g. dismissed, is not re-added); pending ones whose condition no longer
-// holds, or whose position closed, expire. Returns { changed, added: [new actions] }.
-function syncPilotActions(proposals, openIds) {
+// today and dismissed / done is not re-added); pending ones whose condition no
+// longer holds, or whose position closed, expire. A proposal whose earlier card
+// EXPIRED comes back (revived, fresh createdAt): a required TRIM / SELL never
+// silently disappears. Positions in `unknown` (no verdict this pass: no price /
+// history) keep their pending card. Returns { changed, added: [new or revived] }.
+function syncPilotActions(proposals, openIds, unknown = new Set()) {
   const { pilotActions, save } = need();
   const now = Date.now();
   const current = new Set(proposals.map((p) => p.id));
   let changed = false;
   const added = [];
   for (const a of pilotActions) {
-    if (a.status === 'pending' && (!current.has(a.id) || !openIds.has(a.positionId))) {
+    if (a.status === 'pending' && (!openIds.has(a.positionId) || (!current.has(a.id) && !unknown.has(a.positionId)))) {
       Object.assign(a, { status: 'expired', resolvedAt: now });
       changed = true;
     }
   }
   for (const p of proposals) {
-    if (findIndex(pilotActions, p.id) !== -1) continue;
+    const old = pilotActions.find((x) => x.id === p.id);
+    if (old && old.status === 'expired') { Object.assign(old, p, { status: 'pending', createdAt: now, revivedAt: now }); added.push({ ...old }); changed = true; continue; }
+    if (old) continue;
     const a = { ...p, status: 'pending', createdAt: now };
     pilotActions.push(a);
     added.push({ ...a });

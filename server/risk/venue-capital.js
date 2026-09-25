@@ -7,6 +7,11 @@
 // most one call per broker; failures are cached for FAIL_CACHE_MS only.
 // FAIL CLOSED: a live venue whose value can't be read returns ok:false, and the
 // caller must reject the candidate. It never falls back to the paper bankroll.
+// Real equity only (Phase 54): a LIVE venue is sized from that broker account
+// + the manual external holdings (Robinhood / other, external-holdings.js), and
+// returns its spendable CASH (Coinbase USD + USDC, Alpaca cash): the risk engine
+// never sizes a live buy above it (options.cashCap). The paper bankroll never
+// enters a live figure.
 const coinbaseApi = require('../connectors/coinbase-api');
 const alpacaApi = require('../connectors/alpaca-api');
 
@@ -27,12 +32,13 @@ const FETCHERS = {
     const r = await coinbaseApi.getPortfolioBreakdown();
     if (!r.ok) return { ok: false, error: r.error };
     const value = (r.positions || []).reduce((s, p) => s + num(p.total_balance_fiat), 0);
-    return value > 0 ? { ok: true, value } : { ok: false, error: 'Coinbase account value is zero' };
+    const cash = (r.positions || []).filter((p) => p.is_cash).reduce((s, p) => s + num(p.total_balance_fiat), 0);
+    return value > 0 ? { ok: true, value, cash } : { ok: false, error: 'Coinbase account value is zero' };
   },
   async alpaca() {
     const r = await alpacaApi.getAccount();
     if (!r.ok) return { ok: false, error: r.error };
-    return r.equity > 0 ? { ok: true, value: r.equity } : { ok: false, error: 'Alpaca account equity is zero or missing' };
+    return r.equity > 0 ? { ok: true, value: r.equity, cash: Math.max(0, r.cash || 0) } : { ok: false, error: 'Alpaca account equity is zero or missing' };
   },
 };
 
@@ -66,7 +72,17 @@ async function sizingBankroll(market, settings) {
   const basis = `${broker}-live`;
   const r = await liveValue(broker);
   if (!r.ok) return { ok: false, reason: `${UNAVAILABLE}: ${r.error}`, basis };
-  return { ok: true, bankroll: r.value, basis, fetchedAt: r.fetchedAt };
+  const external = manualValue();
+  return { ok: true, bankroll: r.value + external, accountValue: r.value, externalValue: external, cash: r.cash, basis, fetchedAt: r.fetchedAt };
+}
+
+// Market value of the manual external holdings (live price, else last close, else cost).
+function manualValue() {
+  try {
+    const prices = require('../market/latest-prices');
+    return require('../execution/external-holdings').positions().filter((p) => p.external === 'manual')
+      .reduce((s, p) => s + p.positionSize * (prices.getMarkPrice(p.asset) || p.fillPrice || 0), 0);
+  } catch { return 0; }
 }
 
 // The basis an order MUST have been sized with to execute on its venue now.

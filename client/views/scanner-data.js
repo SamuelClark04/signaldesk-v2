@@ -69,8 +69,10 @@
     const covered = new Set(); // `${market}|${asset}` already shown by a setup or rejection
     for (const o of state.pending || []) {
       covered.add(`${o.market}|${o.asset}`);
+      const failing = blockers(o, state); // "Ready" only when every gate passes
       rows.push({ key: o.id, asset: o.asset, market: o.market, setup: o.setupType || 'Setup', side: o.direction, timeframe: o.timeframe,
-        state: 'ready', label: 'Ready', sub: 'Passed the risk engine', rr: netRR(o), data: dataAge(state, o.asset), action: 'review', order: o });
+        state: failing.length ? 'failed' : 'ready', label: failing.length ? `Blocked: ${failing[0]}` : 'Ready',
+        sub: failing.length ? `${failing.join(', ')} failed` : 'Passed the risk engine', rr: netRR(o), data: dataAge(state, o.asset), action: 'review', order: o });
     }
     for (const r of (state.rejections && state.rejections.latest) || []) {
       const key = `${r.market}|${r.asset}`;
@@ -143,12 +145,18 @@
       const safe = px > 0 && (long ? px > o.invalidation : px < o.invalidation);
       out.push({ name: 'Invalidation', sub: long ? 'Price above stop' : 'Price below stop', value: fmt(o.invalidation), status: !(px > 0) ? 'wait' : safe ? 'pass' : 'fail' });
       out.push({ name: 'Costs', sub: 'Fee drag within 0.35R', value: Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—', status: o.feeDrag <= 0.35 ? 'pass' : 'fail' });
-      const bankroll = state.settings && state.settings.bankroll;
-      out.push({ name: 'Risk budget', sub: `Sized to ${o.riskPct > 0 ? `${(o.riskPct * 100).toFixed(1)}%` : 'the risk profile'} of the paper bankroll`, value: bankroll > 0 ? `${((o.dollarRisk / bankroll) * 100).toFixed(2)}%` : SD.ui.money(o.dollarRisk), status: 'pass' });
+      // Sized against the venue it executes on: the paper bankroll, or the LIVE account (real equity only).
+      const [modeKey, broker] = { crypto: ['cryptoMode', 'coinbase'], stocks: ['stockMode', 'alpaca'], options: ['stockMode', 'alpaca'] }[o.market] || [];
+      const needed = state.settings && modeKey && state.settings[modeKey] === 'live' ? `${broker}-live` : 'paper';
+      const basis = o.sizingBasis || 'paper';
+      const basisText = { paper: 'the paper bankroll', 'coinbase-live': 'the live Coinbase account', 'alpaca-live': 'the live Alpaca account' }[basis] || basis;
+      out.push({ name: 'Risk budget', sub: basis === needed ? `Sized to ${o.riskPct > 0 ? `${(o.riskPct * 100).toFixed(1)}%` : 'the risk profile'} of ${basisText} (${SD.ui.money(o.sizingBankroll)})`
+        : `Sized from ${basisText}, but this venue now needs ${needed === 'paper' ? 'the paper bankroll' : `the live ${broker} account`}: dismiss & re-scan`,
+      value: o.sizingBankroll > 0 ? `${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2)}%` : SD.ui.money(o.dollarRisk), status: basis === needed ? 'pass' : 'fail' });
       const created = Date.parse(o.timestamp) || o.stagedAt; // the guard measures from the setup's creation
       const left = created ? created + 30 * 60000 - Date.now() : null;
       out.push({ name: 'Approval window', sub: 'Order guard expires setups after 30 min', value: left === null ? '—' : left > 0 ? `${Math.ceil(left / 60000)}m left` : 'Expired', status: left === null || left > 0 ? 'pass' : 'fail' });
-      if (row.rr !== null) out.push({ name: 'Net reward / risk (T1)', sub: 'After estimated fees', value: `${row.rr.toFixed(2)} : 1`, status: 'info' });
+      if (row.rr !== null) out.push({ name: 'Net reward / risk (T1)', sub: 'T1 alone, after fees (live brackets exit 100% at T1): >= 1.25 : 1', value: `${row.rr.toFixed(2)} : 1`, status: row.rr >= 1.25 ? 'pass' : 'fail' });
     } else if (row.rejection) {
       out.push({ name: row.label, sub: row.rejection.detail || row.rejection.reason, value: new Date(row.rejection.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), status: row.state === 'dismissed' ? 'info' : 'fail' });
     } else {
@@ -157,5 +165,11 @@
     return out;
   }
 
-  SD.scannerData = { setNames, buildRows, filterRows, funnel, gates, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
+  // Gate names a staged order FAILS right now (expired, escaped, through the stop,
+  // fee drag, wrong sizing basis, T1 R:R). Any -> its Approve button is disabled.
+  function blockers(o, state) {
+    return gates({ asset: o.asset, data: dataAge(state, o.asset), order: o, rr: netRR(o) }, state).filter((g) => g.status === 'fail').map((g) => g.name);
+  }
+
+  SD.scannerData = { setNames, buildRows, filterRows, funnel, gates, blockers, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
 })();

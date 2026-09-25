@@ -11,9 +11,11 @@
 // Breakout archetypes are not blocked by the base they are breaking out of:
 //   - Opening Range Breakout (1-equity-day) and Speculative Moonshots
 //     (6-speculative-crypto) have no resistance gate at all;
-//   - base breakouts (5-options-system's squeeze breakout) pass `breakout`:
-//     tops of the last BASE_DAYS days within half an ATR above entry are the
-//     base being broken, not overhead supply, and are skipped.
+//   - breakouts (5-options-system's squeeze, 2-crypto-intraday's squeeze) pass
+//     `breakout`: a top the entry is breaking (at most BREAKOUT_WITHIN, 0.5%,
+//     above entry) is the level being broken, not overhead supply, and is
+//     skipped. Anything higher (a mid-range breakout under the 30- / 100-day
+//     high) is overhead resistance like any other (Phase 54: no ATR band).
 // Pure: bars in, plan out.
 const { resistanceLevels } = require('./structure');
 const { legRate } = require('./cost-authority');
@@ -21,8 +23,8 @@ const { getStrictness } = require('./strictness');
 
 const SNAP_BELOW = 0.995; // T1 just under resistance (limit orders fill before the level)
 const T1_SHARE = 0.5;
-const BASE_DAYS = 30;
-const BAND_ATR = 0.5;
+const BASE_DAYS = 30; // kept for callers; the breakout rule no longer uses it
+const BREAKOUT_WITHIN = 0.005;
 
 const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 
@@ -52,9 +54,8 @@ function planTargets(input) {
 
   let levels = resistanceLevels(bars, entry);
   let skipped = null;
-  if (input.breakout && input.breakout.atr > 0 && bars.length) {
-    const since = bars[bars.length - 1].time - BASE_DAYS * 86400;
-    const inBase = (l) => l.time >= since && l.price <= entry + BAND_ATR * input.breakout.atr;
+  if (input.breakout && bars.length) {
+    const inBase = (l) => l.price <= entry * (1 + BREAKOUT_WITHIN);
     skipped = levels.filter(inBase)[0] || null;
     levels = levels.filter((l) => !inBase(l));
   }
