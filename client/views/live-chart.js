@@ -83,8 +83,8 @@
     }));
     const followBox = el('input', { type: 'checkbox', checked: follow });
     followBox.onchange = () => { follow = followBox.checked; view.chart.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: follow }); if (follow) view.chart.timeScale().scrollToRealTime(); };
-    const fitBtn = el('button', { type: 'button', className: 'lwc-tool', textContent: '⤢ Fit', title: 'Fit all bars' });
-    fitBtn.onclick = () => view.chart.timeScale().fitContent();
+    const fitBtn = el('button', { type: 'button', className: 'lwc-tool', textContent: '⤢ Fit', title: 'Fit all bars and every level line (entry, stop, targets, breakeven)' });
+    fitBtn.onclick = () => { view.chart.priceScale('right').applyOptions({ autoScale: true }); view.chart.timeScale().fitContent(); };
     const full = el('button', { type: 'button', className: 'lwc-tool', textContent: '⛶', title: 'Full screen' });
     full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : view.host.requestFullscreen && view.host.requestFullscreen());
     return el('div', { className: 'lwc-bar' }, [tfs, el('label', { className: 'lwc-tool lwc-follow' }, [followBox, 'Follow price']), fitBtn, full]);
@@ -144,9 +144,41 @@
   }
 
   // Entry band edges, stop and targets as price lines on the candle series.
-  function setLevels(o, withLevels) {
+  // Level lines (Phase 58C): the charted setup's, else the overlay (an open position or
+  // an after-hours options plan on this symbol). Options map the UNDERLYING levels,
+  // labelled with the spread's value there: ENTRY · paid, SL · spread, T1 / T2 ·
+  // spread and the expiry breakeven (BE). Toggle: setLevelsVisible (the trade HUD).
+  let levelsOn = (() => { try { return localStorage.getItem('signaldesk.chartLevels') !== 'off'; } catch { return true; } })();
+  const cyan = () => css('--accent', '#38bdf8');
+  // { entry, entryMin, stop, t1, t2, be, debit, stopValue, t1Value, t2Value, option } from an order / plan / position.
+  function levelsOf(x) {
+    if (!x) return null;
+    const od = x.optionsData || null;
+    const rule = od && od.exitRule;
+    const t = x.targets || [];
+    const plan = x.t1Value !== undefined; // an after-hours plan (after-hours-plans.js)
+    return {
+      option: !!od || plan, entry: plan ? x.refSpot : x.fillPrice || (x.entryZone && x.entryZone.max), entryMin: x.entryZone && x.entryZone.min !== x.entryZone.max ? x.entryZone.min : 0,
+      stop: x.invalidation, t1: plan ? x.t1 : t[0] && t[0].price, t2: plan ? x.t2 : t[1] && t[1].price,
+      be: plan ? x.stats && x.stats.breakeven : od && (od.breakeven || (od.stats && od.stats.breakeven)),
+      debit: plan ? x.debit : od && od.debit, stopValue: plan ? x.stopValue : rule && rule.stopValue, t1Value: plan ? x.t1Value : rule && rule.targetValue, t2Value: plan ? x.t2Value : rule && rule.t2Value,
+    };
+  }
+  function optionSpecs(L) {
+    return [
+      { title: `T2 · spread ${L.t2Value || '—'}`, price: L.t2, color: '#14b8a6', style: 2 },
+      { title: `T1 · spread ${L.t1Value}`, price: L.t1, color: css('--long', '#2dd4bf'), style: 0 },
+      { title: `BE (expiry)`, price: L.be, color: css('--warn', '#fbbf24'), style: 1 },
+      { title: `ENTRY · paid ${L.debit}`, price: L.entry, color: cyan(), style: 2 },
+      { title: `SL · spread ${L.stopValue}`, price: L.stop, color: css('--short', '#fb7185'), style: 0 },
+    ];
+  }
+  function setLevels(o, withLevels, overlay) {
     const t = o.targets || [];
-    const specs = !withLevels ? [] : [
+    const L = withLevels ? levelsOf(o) : levelsOf(overlay);
+    const specs = !levelsOn || !L ? [] : L.option ? optionSpecs(L) : !withLevels ? [
+      { title: 'T1', price: L.t1, color: css('--long', '#2dd4bf') }, { title: 'Entry', price: L.entry, color: cyan() }, { title: 'SL', price: L.stop, color: css('--short', '#fb7185') },
+    ] : [
       { title: 'T2', price: t[1] && t[1].price, color: css('--long', '#2dd4bf') },
       { title: 'T1', price: t[0] && t[0].price, color: css('--long', '#2dd4bf') },
       { title: 'Entry', price: o.entryZone.max, color: css('--accent', '#38bdf8') },
@@ -157,7 +189,7 @@
     if (key === view.levelsKey) return;
     view.levelsKey = key;
     for (const line of view.lines) view.series.removePriceLine(line);
-    view.lines = specs.map((s) => view.series.createPriceLine({ price: s.price, color: s.color, title: s.title, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
+    view.lines = specs.map((s) => view.series.createPriceLine({ price: s.price, color: s.color, title: s.title, lineWidth: s.style === 0 ? 2 : 1, lineStyle: s.style ?? 2, axisLabelVisible: true }));
     view.levels = specs.map((s) => s.price);
   }
 
@@ -196,7 +228,7 @@
 
   function paint() {
     const { o, opts } = view;
-    setLevels(o, opts.withLevels); // price lines first: the autoscale provider reads view.levels
+    setLevels(o, opts.withLevels, opts.overlay); // price lines first: the autoscale provider reads view.levels
     sync(o.asset);
     view.note.textContent = noteText(o);
     view.banner.textContent = opts.banner || '';
@@ -208,11 +240,12 @@
   }
 
   // o: pending order or Market Watch object; withLevels: draw its levels.
-  function mount(o, { withLevels, banner = '' } = {}) {
+  // overlay: an open position / options plan whose levels are drawn in Market Watch.
+  function mount(o, { withLevels, banner = '', overlay = null } = {}) {
     if (!window.LightweightCharts) return null;
     if (!view) { view = create(); view.box.setAttribute('role', 'img'); }
     view.o = o;
-    view.opts = { withLevels, banner };
+    view.opts = { withLevels, banner, overlay };
     loadHistory(o.asset, tf); // no-op while fresh
     paint();
     requestAnimationFrame(fit);
@@ -231,5 +264,12 @@
   // The Moonshot Radar opens a coin on its 5m candles (the user's toolbar pick wins afterwards).
   function setTimeframe(frame) { if (TF_SEC[frame]) tf = frame; }
 
-  SD.liveChart = { record, mount, stats, setTimeframe };
+  function setLevelsVisible(on) {
+    levelsOn = !!on;
+    try { localStorage.setItem('signaldesk.chartLevels', on ? 'on' : 'off'); } catch { /* this session only */ }
+    if (view && view.o) { view.levelsKey = ''; paint(); view.chart.priceScale('right').applyOptions({ autoScale: true }); }
+  }
+  const levelsVisible = () => levelsOn;
+
+  SD.liveChart = { record, mount, stats, setTimeframe, setLevelsVisible, levelsVisible, levelsOf };
 })();

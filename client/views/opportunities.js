@@ -217,7 +217,7 @@
   function approvals(state) {
     for (const id of inFlight) if (!state.pending.some((o) => o.id === id) && !(state.pilotActions || []).some((a) => a.id === id)) inFlight.delete(id);
     return SD.oppApprovals.render(state, { state, online: transport.isOnline(), inFlight, onApprove, onDismiss, matchesAsset,
-      onReview: nav.onReview, rerender,
+      onReview: nav.onReview, onWatch: nav.onWatch, rerender,
       sendAction: (type, id) => { if (!transport.isOnline() || inFlight.has(id)) return; inFlight.add(id); transport.send({ type, id }); rerender(); } });
   }
 

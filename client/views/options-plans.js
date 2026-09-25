@@ -12,7 +12,14 @@
   const kv = (k, v, cls = '') => el('div', { className: 'apv-kv' }, [el('span', { textContent: k }), el('strong', { className: cls, textContent: v })]);
   const usd = (x) => money(x * 100);
 
-  function card(p) {
+  // Chart the underlying with this plan's ENTRY / SL / T1 / T2 / BE lines (Setups, Market Watch overlay).
+  function chartBtn(p, ctx) {
+    const b = el('button', { type: 'button', className: 'btn', textContent: 'Chart levels', disabled: !ctx.onWatch });
+    b.onclick = () => ctx.onWatch(p.asset);
+    return b;
+  }
+
+  function card(p, ctx) {
     const o = { market: 'stocks', entryPrice: p.refSpot };
     const bear = p.type === 'put';
     const legs = p.legs.map((l) => `${l.side === 'buy' ? 'Buy' : 'Sell'} ${l.strike}${l.type === 'put' ? 'P' : 'C'} (Δ ${Math.abs(l.delta).toFixed(2)})`).join(' · ');
@@ -35,7 +42,7 @@
         targets: [{ price: p.t1 }] }, p.stats, p.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
       el('p', { className: 'apv-thesis', textContent: p.thesis.split(/(?<=\.)\s/).slice(0, 3).join(' ') }),
       el('div', { className: 'apv-actions' }, [el('button', { type: 'button', className: 'btn btn-solid', disabled: true, textContent: 'Stages on live quotes at the open',
-        title: 'Priced on the last close: nothing can be approved until the market is open' })]),
+        title: 'Priced on the last close: nothing can be approved until the market is open' }), chartBtn(p, ctx)]),
       el('p', { className: 'apv-note', textContent: `Planned ${age(p.plannedAt)} ago on the last close; cleared the risk engine. Re-priced live at 9:30 ET.` }),
     ]);
   }
@@ -44,7 +51,7 @@
   function section(state, ctx) {
     const list = (state.optionsPlans || []).filter(() => ctx.matchesAsset('options'));
     if (!list.length) return [];
-    return [el('h4', { className: 'opp-section', textContent: `Options plans for the open (${list.length}, market closed)` }), ...list.map(card)];
+    return [el('h4', { className: 'opp-section', textContent: `Options plans for the open (${list.length}, market closed)` }), ...list.map((p) => card(p, ctx))];
   }
 
   SD.optionsPlans = { section };

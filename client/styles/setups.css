@@ -210,3 +210,7 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .ta.is-blocked { border-color: rgba(251, 113, 133, 0.6); }
 .ta.is-blocked .ta-note { color: var(--short); }
 .apv-card .ta { margin-top: 0; }
+/* Phase 58C: trade pill levels + the HUD's chart-lines toggle */
+.hud-pill-lv { font: 600 11px var(--font-mono); margin-left: 6px; }
+.hud-lines { width: auto; padding: 0 8px; font-size: 11px; margin-left: auto; margin-right: 4px; }
+.hud-lines.is-on { color: var(--accent); border-color: var(--accent); }

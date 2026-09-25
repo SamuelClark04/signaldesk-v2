@@ -80,7 +80,7 @@
     exit.onclick = () => ctx.onClosePosition(p, m);
     return el('div', { className: 'hud-pos' }, [
       el('div', { className: 'hud-line' }, [el('span', { className: `hud-venue${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: venue }),
-        el('span', { textContent: realOption ? `${p.direction.toUpperCase()} CALL` : `${p.direction.toUpperCase()} ${size(p)} @ ${price(p.fillPrice, p)}` })]),
+        el('span', { textContent: realOption ? `${p.optionsData.structure === 'vertical' ? (p.optionsData.type === 'put' ? 'BEAR PUT SPREAD' : 'BULL CALL SPREAD') : `LONG ${p.optionsData.type === 'put' ? 'PUT' : 'CALL'}`}` : `${p.direction.toUpperCase()} ${size(p)} @ ${price(p.fillPrice, p)}` })]),
       ...(realOption ? [...optionBlock(p, m), underlyingLine(p, m)] : [pnl]),
       ...(p.market === 'options' && !realOption ? [el('div', { className: 'hud-muted', textContent: 'Simulated spread from the old options strategy: '
         + 'no listed contract, so no live premium. Close it to retire it.' })] : []),
@@ -144,9 +144,15 @@
     const known = marks.filter((m) => m.gross !== null && m.gross !== undefined);
     const total = known.reduce((s, m) => s + m.gross, 0);
     const label = SD.oppDetail.displaySymbol(o);
+    const p0 = positions[0];
+    const t1 = p0.targets && p0.targets[0] && p0.targets[0].price;
+    const ul = { market: 'stocks', entryPrice: p0.invalidation };
     const b = el('button', { type: 'button', className: `hud-pill ${known.length ? pnlClass(total) : 'hud-muted'}`, title: 'Show the trade panel (drag to move)' }, [
       el('span', { className: 'hud-pill-sym', textContent: `${label}${positions.length > 1 ? ` ×${positions.length}` : ''}` }),
       el('strong', { textContent: known.length ? signed(total, money) : '—' }),
+      // Phase 58C: the (underlying) stop and T1 beside the P&L.
+      el('span', { className: 'hud-pill-lv text-short', textContent: `SL ${price(p0.invalidation, p0.market === 'options' ? ul : p0)}` }),
+      el('span', { className: 'hud-pill-lv text-long', textContent: `T1 ${t1 ? price(t1, p0.market === 'options' ? ul : p0) : '—'}` }),
     ]);
     b.setAttribute('aria-label', `Active trade ${label}: expand`);
     return b;
@@ -167,8 +173,12 @@
       const min = el('button', { type: 'button', className: 'hud-min', textContent: '–', title: 'Minimize' });
       min.setAttribute('aria-label', 'Minimize the trade panel');
       min.onclick = () => { view.collapsed = true; saveView(); redraw(node, o, ctx); };
+      // Level lines on the chart (ENTRY / SL / T1 / T2 / BE): on or off.
+      const on = SD.liveChart.levelsVisible ? SD.liveChart.levelsVisible() : true;
+      const lines = el('button', { type: 'button', className: `hud-min hud-lines${on ? ' is-on' : ''}`, textContent: on ? 'Lines ✓' : 'Lines', title: 'Show / hide the entry, stop, target and breakeven lines on the chart' });
+      lines.onclick = () => { SD.liveChart.setLevelsVisible(!on); redraw(node, o, ctx); };
       const bar = el('div', { className: 'hud-title', title: 'Drag to move · double-click to reset' }, [
-        el('span', { textContent: `Active trade${positions.length > 1 ? `s (${positions.length})` : ''}` }), min]);
+        el('span', { textContent: `Active trade${positions.length > 1 ? `s (${positions.length})` : ''}` }), lines, min]);
       bar.addEventListener('pointerdown', (e) => startDrag(e));
       bar.addEventListener('dblclick', () => { view.pos = null; saveView(); place(node); });
       node = el('aside', { className: 'trade-hud', ariaLabel: 'Active trade' }, [bar, ...positions.map((p) => row(p, ctx.livePrice, ctx))]);
