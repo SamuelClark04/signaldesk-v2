@@ -1,6 +1,7 @@
 // Chart symbol picker: a <select> in the Setups chart header listing the full
 // monitored universe (UNIVERSE from the server: 42 crypto + 41 stocks), grouped
-// by market, so any symbol can be charted, not only the ones heating up.
+// by market, so any symbol can be charted, not only the ones heating up, plus
+// every other tradable Coinbase spot coin (GEM_CATALOG, Phase 56, ~350 more).
 // Picking one calls ctx.onPickSymbol(symbol): opportunities.js opens its queued
 // setup if it has one, else Market Watch. While the user is working the picker
 // the page holds its re-renders (a rebuild would snap the dropdown shut), but
@@ -30,7 +31,9 @@
   function build(o, ctx) {
     const u = ctx.state && ctx.state.universe;
     const streamed = new Set((u && u.streamedStocks) || []);
-    const groups = u ? [['Crypto', u.crypto], ['Stocks', u.stocks]] : [];
+    const inUniverse = new Set(u ? u.crypto : []);
+    const gems = ((ctx.state && ctx.state.gemCatalog && ctx.state.gemCatalog.symbols) || []).filter((s) => !inUniverse.has(s));
+    const groups = u ? [['Crypto', u.crypto], ['Stocks', u.stocks], ...(gems.length ? [['Coinbase spot', gems]] : [])] : [];
     const known = new Set(groups.flatMap(([, list]) => list));
     const select = el('select', { id: ID, className: 'opp-symbol-select', title: 'Chart any monitored symbol' }, [
       // A charted symbol outside the universe (e.g. an options underlying) stays selectable.

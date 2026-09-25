@@ -111,14 +111,14 @@ function scheduleReconnect() {
 }
 
 // Stream more products (held coins outside the base universe: synced Coinbase
-// balances, manual crypto holdings). Subscribed now if connected, and kept for
+// balances, manual crypto holdings, Phase 56 gem-watchlist and charted gems). Subscribed now if connected, and kept for
 // every reconnect. A product Coinbase does not list only fails its own message.
 function addProducts(list) {
   const fresh = [...new Set(list)].filter((p) => /^[A-Z0-9]{1,10}-USDC?$/.test(p) && !products.includes(p));
   if (!fresh.length) return [];
   products = [...products, ...fresh];
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'subscribe', product_ids: fresh, channel: 'ticker' }));
-  console.log(`[coinbase] streaming ${fresh.length} more held product(s): ${fresh.join(', ')}`);
+  console.log(`[coinbase] streaming ${fresh.length} more product(s): ${fresh.slice(0, 12).join(', ')}${fresh.length > 12 ? ` +${fresh.length - 12}` : ''}`);
   return fresh;
 }
 

@@ -16,7 +16,7 @@ const TIMEOUT_MS = 8000;
 // Coinbase has no 4-hour candles: 4h is built from 1-hour candles (`group`).
 const TIMEFRAMES = Object.freeze({
   '1m': { alpaca: '1Min', coinbase: 'ONE_MINUTE', sec: 60, lookbackDays: 7 },
-  '5m': { alpaca: '5Min', coinbase: 'FIVE_MINUTE', sec: 300, lookbackDays: 7 },
+  '5m': { alpaca: '5Min', coinbase: 'FIVE_MINUTE', sec: 300, lookbackDays: 7, limit: 150 }, // 12.5 h: the gem coil's 6-hour volume baseline
   // 150 bars: the crypto intraday archetypes need >= 80 completed bars (EMA50 + windows).
   '15m': { alpaca: '15Min', coinbase: 'FIFTEEN_MINUTE', sec: 900, lookbackDays: 14, limit: 150 },
   '1h': { alpaca: '1Hour', coinbase: 'ONE_HOUR', sec: 3600, lookbackDays: 30, limit: 150 },

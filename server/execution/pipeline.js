@@ -28,7 +28,8 @@ const { legSymbols } = require('./option-marks');
 const macro = require('../connectors/macro-events');
 const { reviewHoldings } = require('./pilot-handler');
 const expirySweeper = require('./expiry-sweeper'); // expired setups leave the queue within 30 s
-const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RADAR: 100-point score, every coin
+const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RADAR: 100-point score, every watchlist gem
+const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -109,6 +110,8 @@ async function pipelinePass() {
   // Macro/FDA calendar (re-read every few hours): every setup is tagged with the
   // scheduled events inside its expected hold (candidate.catalysts).
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
+  // Open / staged trades on Coinbase gems keep streaming (exits and approvals need live prices).
+  discovery.stream([...ledger.getActivePositions(), ...ledger.getPendingOrders()].filter((p) => p.market === 'crypto').map((p) => p.asset));
   const candidates = await collectCandidates();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
   for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...cryptoIntraday.takeBlocks(), ...optionsSystem.takeBlocks(), ...speculativeCrypto.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);

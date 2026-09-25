@@ -23,6 +23,11 @@
 button.moon-chip { cursor: pointer; }
 button.moon-chip:hover { color: var(--text); border-color: var(--accent); }
 .moon-chip.is-monitored { border-color: rgba(251, 191, 36, 0.5); color: var(--warn); }
+.moon-chip.is-major { border-style: dashed; color: var(--text-faint); }
+.moon-chip.is-offexchange { border-color: var(--border); color: var(--text-faint); opacity: 0.7; }
+.moon-why { display: block; color: var(--accent); font-size: 11px; line-height: 1.35; }
+.moon-kind { display: block; margin-top: 3px; color: var(--text-faint); font: 10px var(--font-mono); white-space: nowrap; }
+.moon-kind.is-live { color: var(--long); font-weight: 600; }
 
 /* ---------- Leaderboard ---------- */
 .moon-table { white-space: normal; }

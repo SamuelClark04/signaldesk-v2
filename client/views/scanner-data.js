@@ -35,7 +35,9 @@
   const display = (asset, market) => (market === 'crypto' ? asset.replace('-', '/') : asset);
   let serverNames = {}; // from UNIVERSE (server/market/universe.js)
   const setNames = (names) => { serverNames = names || {}; };
-  const nameOf = (asset) => serverNames[asset] || NAMES[asset] || asset;
+  let gemNames = {}; // GEM_CATALOG: every Coinbase spot coin (Phase 56)
+  const setGemNames = (names) => { gemNames = names || {}; };
+  const nameOf = (asset) => serverNames[asset] || NAMES[asset] || gemNames[asset] || asset;
   const colorOf = (asset) => COLORS[asset] || '#38bdf8';
   const initials = (asset) => asset.replace(/-USD$/, '').slice(0, asset.includes('-') ? 1 : 2);
 
@@ -171,5 +173,5 @@
     return gates({ asset: o.asset, data: dataAge(state, o.asset), order: o, rr: netRR(o) }, state).filter((g) => g.status === 'fail').map((g) => g.name);
   }
 
-  SD.scannerData = { setNames, buildRows, filterRows, funnel, gates, blockers, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
+  SD.scannerData = { setNames, setGemNames, buildRows, filterRows, funnel, gates, blockers, universe, isLive, marketOf, nameOf, colorOf, initials, STATES };
 })();

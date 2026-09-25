@@ -1,8 +1,9 @@
-// Opportunities → [Moonshots] (Phase 55): the live Moonshot Radar, on Setups and
-// on Scanner. Data: MOONSHOT_RADAR (server/intelligence/moonshot-radar.js, every
-// pipeline pass and at startup): the top 12 coins by the 100-point Moonshot
-// Conviction Score, even under 60, plus the Buzz strip (CoinGecko trending and
-// Reddit forum mentions, connectors/crypto-social.js).
+// Opportunities → [Moonshots] (Phase 55): the live Moonshot Gem Radar, on Setups
+// and on Scanner. Data: MOONSHOT_RADAR (server/intelligence/moonshot-radar.js, every
+// pipeline pass and at startup): every gem on the Active Gem Watchlist (Phase 56:
+// swept from the whole Coinbase spot catalog, mega-caps excluded) by the 100-point
+// Moonshot Conviction Score, even under 60 (the top 20 are listed), plus the Buzz
+// strip (CoinGecko trending and Reddit mentions matched to Coinbase products).
 //   Active Moonshot Setups   staged System 6 setups (>= 60/100 AND a real surge):
 //                            the full Approvals card with its Smart Investment
 //                            Amount (10-25% of normal risk) and Approve button
@@ -17,6 +18,7 @@
   const M = () => SD.oppMobile;
 
   const BADGE = { TRIGGERED: 'is-hot', 'HEATING UP': 'is-warm', WATCHING: 'is-cool' };
+  const KIND = { IGNITION: 'Ignition', COIL: 'Coil' }; // System 6's two gem triggers
   let selected = null; // charted coin
   let framedFor = null; // the coin the chart was last switched to 5m for
 
@@ -35,10 +37,11 @@
     const run = el('button', { type: 'button', className: 'btn moon-run', disabled: scan.running || !ctx.online, textContent: scan.running ? 'Scanning…' : 'Run scan' });
     run.onclick = () => ctx.onRunScan();
     const btc = r && r.btc ? `BTC ${move(r.btc.move5)} (15 min) · ${move(r.btc.move15)} (30 min)` : '';
+    const shown = r ? Math.min(r.top || 20, r.rows.length) : 0;
     return el('div', { className: 'moon-head' }, [
       el('div', {}, [el('h2', { className: 'scan-title', textContent: 'Moonshot Radar' }),
         el('p', { className: 'scan-subtitle', textContent: r && r.at
-          ? `Top ${r.rows.length} of ${r.ranked} coins by the live 100-point Moonshot Conviction Score · updated ${age(r.at)} ago${btc ? ` · ${btc}` : ''}`
+          ? `Top ${shown} of ${r.swept || r.ranked} Coinbase spot coins scanned · ${r.ranked} watchlist gems scored on 5m candles · Mega-caps excluded · updated ${age(r.at)} ago${btc ? ` · ${btc}` : ''}`
           : 'Waiting for the first scan pass (it runs a few seconds after the server starts).' })]),
       el('div', { className: 'moon-legend' }, [...Object.entries(BADGE).map(([b, cls]) => el('span', { className: `moon-badge ${cls}`, textContent: b })),
         el('span', { className: 'slog-muted', textContent: '≥ 60 · 40–59 · < 40' }), run]),
@@ -51,8 +54,9 @@
     return el('section', { className: 'moon-card moon-setups' }, [
       el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: 'Active Moonshot setups (≥ 60/100)' }),
         el('span', { className: 'count', textContent: String(list.length) })]),
-      ...(list.length ? list.map((o) => SD.oppApprovals.setupCard(o, cardCtx)) : [el('p', { className: 'opp-muted', textContent: 'None right now. A coin becomes a setup when it scores 60+ AND surges +2.5% to +12% '
-        + 'on 2.2x+ volume at a fresh 30-minute high; the risk engine then sizes it at 10-25% of normal risk (the Smart Investment Amount).' })]),
+      ...(list.length ? list.map((o) => SD.oppApprovals.setupCard(o, cardCtx)) : [el('p', { className: 'opp-muted', textContent: 'None right now. A gem becomes a setup when it scores 60+ AND a trigger is live: Momentum Ignition (+2.5% to +14% on 2.2x+ volume '
+        + 'at a fresh 30-minute / 2-hour high) or Accumulation Coil (2.8x+ volume vs 6 hours, higher lows, +1.5% to +5% out of a tight base). '
+        + 'The risk engine then sizes it at 10-25% of normal risk (the Smart Investment Amount).' })]),
     ]);
   }
 
@@ -75,7 +79,13 @@
     };
     return el('section', { className: 'moon-card moon-buzz' }, [
       el('div', { className: 'moon-buzz-row' }, [el('span', { className: 'moon-buzz-label', textContent: 'CoinGecko trending' }),
-        ...(z.trending.length ? z.trending.map((c) => chip(`#${c.rank} ${c.symbol}`, c.monitored ? `${c.symbol}-USD` : null, c.monitored ? 'is-monitored' : ''))
+        // A Coinbase gem is clickable (its product may differ: LIT -> LIGHTER-USD); a major is shown, never a gem.
+        ...(z.trending.length ? z.trending.map((c) => {
+          const x = chip(`#${c.rank} ${c.symbol}${c.product && c.gem && c.product !== `${c.symbol}-USD` ? ` (${c.product.replace('-USD', '')})` : ''}`,
+            c.gem ? c.product : null, c.gem ? 'is-monitored' : c.product ? 'is-major' : 'is-offexchange');
+          x.title = c.gem ? `Chart ${c.product} (Coinbase gem)` : c.product ? `${c.product}: a mega-cap / pegged token (Systems 2 and 4, never the gem radar)` : 'Not tradable on Coinbase';
+          return x;
+        })
           : [el('span', { className: 'slog-muted', textContent: 'No trending list yet' })])]),
       el('div', { className: 'moon-buzz-row' }, [el('span', { className: 'moon-buzz-label', textContent: `Reddit forums (${z.feeds} feeds · ${z.posts} posts)` }),
         ...(z.reddit.length ? z.reddit.map((m) => chip(`${m.symbol.replace('-USD', '')} ${m.mentions}${m.recent ? ` · ${m.recent} new` : ''}`, m.symbol, m.recent ? 'is-monitored' : ''))
@@ -87,24 +97,28 @@
   function board(r, ctx) {
     const rows = (r && r.rows) || [];
     const setupFor = new Set((ctx.state.pending || []).filter((o) => o.speculative).map((o) => o.asset));
-    const body = rows.map((x, i) => {
-      const tr = el('tr', { className: `row moon-row${x.symbol === selected ? ' is-selected' : ''}`, title: x.why }, [
+    const body = rows.slice(0, (r && r.top) || 20).map((x, i) => {
+      const tr = el('tr', { className: `row moon-row${x.symbol === selected ? ' is-selected' : ''}`, title: `${x.why}${x.nearest ? `\nNext: ${x.nearest}` : ''}` }, [
         el('td', {}, el('div', { className: 'scan-asset' }, [SD.scannerDetail.badge(x.symbol), el('div', {}, [
-          el('strong', { textContent: `${i + 1}. ${x.symbol.replace('-', '/')}` }), el('span', { textContent: `${x.name} · ${px(x.price)}` })])])),
+          el('strong', { textContent: `${i + 1}. ${x.symbol.replace('-', '/')}` }), el('span', { textContent: `${x.name} · ${px(x.price)}${x.live === false ? ' (last 5m close)' : ''}` }),
+          ...((x.reasons || []).length ? [el('span', { className: 'moon-why', textContent: x.reasons.slice(0, 2).join(' · ') })] : [])])])),
         el('td', { className: 'num' }, [el('strong', { className: 'moon-score', textContent: `${x.score}` }), el('span', { className: 'slog-muted', textContent: '/100' }),
           el('span', { className: 'moon-bar' }, el('span', { style: `width:${Math.max(2, Math.min(100, x.score))}%` }))]),
-        el('td', { className: 'num', title: '5m frame: last 15 minutes · 15m frame: last 30 minutes' }, [el('span', { className: `moon-move ${moveCls(x.move5)}`, textContent: `${move(x.move5)} 5m` }),
-          el('span', { className: `moon-move ${moveCls(x.move15)}`, textContent: `${move(x.move15)} 15m` })]),
-        el('td', { className: 'num', textContent: Number.isFinite(x.relVol) ? `${x.relVol.toFixed(1)}x` : '—' }),
+        el('td', { className: 'num', title: '5m frame: last 15 minutes · 15m frame: last 30 minutes · coil: last hour' }, [el('span', { className: `moon-move ${moveCls(x.move5)}`, textContent: `${move(x.move5)} 5m` }),
+          el('span', { className: `moon-move ${moveCls(x.move15)}`, textContent: `${move(x.move15)} 15m` }),
+          ...(x.kind === 'COIL' && Number.isFinite(x.move1h) ? [el('span', { className: `moon-move ${moveCls(x.move1h)}`, textContent: `${move(x.move1h)} 1h` })] : [])]),
+        el('td', { className: 'num', textContent: Number.isFinite(x.relVol) ? `${x.relVol.toFixed(1)}x${x.kind === 'COIL' ? ' vs 6h' : ''}` : '—',
+          title: x.kind === 'COIL' ? 'Coil: 15m / 1h volume vs its prior 6-hour average (needs 2.8x)' : 'Latest bar vs the hour before (needs 2.2x)' }),
         el('td', { className: 'num', textContent: `${x.social}/30`, title: `Reddit ${x.buzzDetail.reddit} · trending ${x.buzzDetail.trending} · news ${x.buzzDetail.news}${x.buzzDetail.volumeCatalyst ? ' · volume-catalyst credit' : ''}` }),
         el('td', { className: 'num', textContent: `${x.strength}/20`, title: `vs BTC ${move(x.vsBtc)} (${x.parts.rs}/12) · spread ${x.spreadPct === null ? 'n/a' : `${x.spreadPct}%`} (${x.parts.spread}/8)` }),
-        el('td', {}, el('span', { className: `moon-badge ${BADGE[x.badge] || ''}`, textContent: setupFor.has(x.symbol) ? `${x.badge} · SETUP` : x.badge })),
+        el('td', {}, [el('span', { className: `moon-badge ${BADGE[x.badge] || ''}`, textContent: setupFor.has(x.symbol) ? `${x.badge} · SETUP` : x.badge }),
+          el('span', { className: `moon-kind${x.trigger ? ' is-live' : ''}`, textContent: x.trigger ? `${KIND[x.trigger]} live` : `${KIND[x.kind] || ''} forming` })]),
       ]);
       tr.onclick = () => select(x.symbol, ctx);
       return tr;
     });
     return el('section', { className: 'moon-card moon-board' }, [
-      el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: 'Live Moonshot Radar leaderboard' }),
+      el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: 'Live Moonshot Gem leaderboard (small / mid-caps)' }),
         el('span', { className: 'slog-muted', textContent: 'Tap a coin for its live 5m / 15m chart' })]),
       el('div', { className: 'table-wrap' }, el('table', { className: 'data-table moon-table' }, [
         el('thead', {}, el('tr', {}, ['Coin', 'Score', '5m / 15m move', 'Rel vol', 'Social /30', 'vs BTC /20', 'Badge']
@@ -125,7 +139,8 @@
     return el('section', { className: 'moon-card moon-chart' }, [
       el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: selected ? `${selected.replace('-', '/')} · live chart` : 'Chart' }),
         ...(row ? [el('span', { className: `moon-badge ${BADGE[row.badge] || ''}`, textContent: `${row.score}/100 ${row.badge}` })] : [])]),
-      ...(row ? [el('div', { className: 'moon-parts' }, [part('Velocity', row.parts.velocity, 25), part('Rel volume', row.parts.volume, 25),
+      ...(row && row.nearest ? [el('p', { className: 'slog-muted', textContent: `Next: ${row.nearest}` })] : []),
+      ...(row ? [el('div', { className: 'moon-parts' }, [part(row.kind === 'COIL' ? 'Coil pattern' : 'Velocity', row.parts.velocity, 25), part('Rel volume', row.parts.volume, 25),
         part('Social / trending', row.parts.buzz, 30), part('vs BTC', row.parts.rs, 12), part('Spread', row.parts.spread, 8)])] : []),
       chart || el('p', { className: 'opp-muted', textContent: selected ? 'Chart library unavailable (offline): scores above are live.' : 'Pick a coin in the leaderboard.' }),
       ...(row && row.buzzDetail.title ? [el('p', { className: 'slog-muted', textContent: row.buzzDetail.title })] : []),

@@ -60,6 +60,7 @@ app.get('/api/history/:symbol', async (req, res) => {
     console.warn(`[security] rejected /api/history: ${verdict.reason}`);
     return res.status(403).json({ error: 'forbidden' });
   }
+  require('./connectors/coinbase-discovery').stream([String(req.params.symbol).toUpperCase()]); // a charted Coinbase gem joins the live stream
   const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'));
   res.set('Cache-Control', 'no-store');
   if (result.ok) return res.json(result.bars);
@@ -118,7 +119,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
   send(ws, 'PILOT_MATRIX', pilotHandler.getMatrix());
-  send(ws, 'MOONSHOT_RADAR', require('./intelligence/moonshot-radar').getRadar());
+  for (const [type, payload] of require('./intelligence/moonshot-radar').snapshots()) send(ws, type, payload); // MOONSHOT_RADAR + GEM_CATALOG
   send(ws, 'EXTERNAL_HOLDINGS', externalApi.snapshot());
   send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());
