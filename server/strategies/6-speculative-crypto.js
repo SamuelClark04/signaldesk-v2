@@ -54,8 +54,9 @@ async function bars5(symbol, now) {
   const slot = Math.floor(now / 1000 / SLOT_SEC);
   const hit = candles.get(symbol);
   if (hit && hit.slot === slot) return hit.bars;
-  const r = await getHistory(symbol, '5m');
-  const list = r.ok ? r.bars.filter((b) => (b.time + SLOT_SEC) * 1000 <= now) : (hit ? hit.bars : []);
+  const r = await getHistory(symbol, '5m'); // paced + retried (history-bars.js)
+  if (!r.ok) return hit ? hit.bars : []; // a failed fetch is never cached: the next pass retries it
+  const list = r.bars.filter((b) => (b.time + SLOT_SEC) * 1000 <= now);
   candles.set(symbol, { slot, bars: list });
   return list;
 }
@@ -186,4 +187,4 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
 
-module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, frames, score, to15, STRATEGY_ID, TAG, CONFIG };
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, frames, score, describe, bars5, to15, STRATEGY_ID, TAG, CONFIG };

@@ -19,26 +19,8 @@
   let noticeTimer = null;
   let mounted = null; // { container, state } of the last render, for local re-renders
 
-  // Order-guard and broker reasons from the server, in plain words.
-  const FAIL_REASONS = {
-    EXPIRED: 'setup is older than 30 minutes and was discarded',
-    PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
-    INVALIDATED: 'price is already through the stop and the setup was discarded',
-    NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
-    LIVE_OPTIONS_UNSUPPORTED: 'live options orders are not wired to Alpaca yet (the contract and prices are real; the order routing is not). Nothing was sent; '
-      + 'the order is still pending (set Alpaca mode to Paper to fill it on paper)',
-    ORDER_BUSY: 'an action for this order is already in progress',
-    LIVE_CLOSE_UNSUPPORTED: 'it is a LIVE position: close it at the broker (its exits are orders there)',
-  };
-  function describe(error) {
-    if (FAIL_REASONS[error]) return FAIL_REASONS[error];
-    const [code, ...rest] = String(error).split(': ');
-    if (code === 'LIVE_ORDER_FAILED') return `live order rejected, nothing was filled (${rest.join(': ')})`;
-    if (code === 'LIVE_UNRECORDED') return `CHECK YOUR BROKER NOW: ${rest.join(': ')}`;
-    if (code.startsWith('AMOUNT_')) return `trade amount not accepted, nothing was sent and the setup is still pending (${rest.join(': ')})`;
-    if (code === 'SIZED_FOR_OTHER_VENUE') return `nothing was sent: this setup was ${rest.join(': ')}. Dismiss it; the next scan re-proposes it sized from the live account`;
-    return error;
-  }
+  const describe = (error) => SD.oppApprovals.describeFailure(error); // order-guard / broker reasons in plain words
+  const M = () => SD.oppMobile; // iPhone: segmented panes + sticky Approve bar (opportunities-mobile.js)
 
   // Market Watch: when no queued setup is selected, the workspace follows a live
   // symbol instead. It is NOT a candidate: no id, no levels, no size, so nothing
@@ -104,14 +86,15 @@
   }
 
   // ---------- Filters (one shared state drives the rail toggle and the top tabs) ----------
-  let assetFilter = 'all'; // 'all' | 'stocks' | 'crypto' | 'options'
+  // 'moonshots' (Phase 55): Setups and Scanner show the Moonshot Radar (moonshots-panel.js).
+  let assetFilter = 'all'; // 'all' | 'stocks' | 'crypto' | 'options' | 'moonshots'
   let search = ''; // lower-cased, for matching
   let searchRaw = ''; // exactly as typed, for the input box
-  const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
+  const TOP_TABS = [['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options'], ['moonshots', 'Moonshots']];
 
-  const matchesAsset = (market) => assetFilter === 'all' || market === assetFilter;
-  // Options trade on stock underlyings, so the Options filter watches stocks.
-  const watchMarketOk = (market) => assetFilter === 'all' || market === (assetFilter === 'options' ? 'stocks' : assetFilter);
+  const matchesAsset = (market) => assetFilter === 'all' || market === assetFilter || (assetFilter === 'moonshots' && market === 'crypto');
+  // Options trade on stock underlyings, so the Options filter watches stocks; Moonshots watch coins.
+  const watchMarketOk = (market) => assetFilter === 'all' || market === ({ options: 'stocks', moonshots: 'crypto' }[assetFilter] || assetFilter);
   const matchesSearch = (...fields) => !search || fields.some((f) => String(f || '').toLowerCase().includes(search));
 
   function setFilter(value) {
@@ -129,7 +112,7 @@
   let rotation = []; // [{ id } | { symbol }] from the last Setups render
   const rotator = SD.autoCycle({
     periodMs: ROTATE_MS, key: 'signaldesk.chartRotation',
-    canRun: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && rotation.length > 1 && !inFlight.size
+    canRun: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && assetFilter !== 'moonshots' && !M().isMobile() && rotation.length > 1 && !inFlight.size
       && !document.querySelector('.opp-rail:hover, .opp-right:hover, .trade-hud:hover') && !(document.activeElement && document.activeElement.id === 'opp-symbol-select')
       && !(document.activeElement && document.activeElement.classList.contains('ta-input'))), // typing a Trade Amount
     advance: () => {
@@ -150,8 +133,9 @@
 
   // Rail clicks (opportunities-rail.js): a queued setup, a watch symbol, or an open
   // position (charted as Market Watch, where the Active Trade HUD shows it).
-  const onSelectSetup = (id) => { activeId = id; manualWatch = false; rerender(); };
-  const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; rerender(); };
+  // On an iPhone a tap also jumps to the pane that shows it: a setup's Order & Risk, a symbol's Chart.
+  const onSelectSetup = (id) => { activeId = id; manualWatch = false; M().setPane('order'); rerender(); };
+  const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; M().setPane('chart'); rerender(); };
   function onOpenPosition(p) {
     if (!matchesAsset(p.market) || !watchMarketOk(marketOf(p.asset)) || !matchesSearch(p.asset, p.asset.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
     onWatch(p.asset);
@@ -199,13 +183,15 @@
       rerender, // Trade Amount changes
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
-    return el('div', { className: 'opp-grid' }, [rail, SD.oppDetail.center(active, ctx), SD.oppDetail.right(active, ctx), analysis]);
+    const grid = el('div', { className: 'opp-grid m-panes', dataset: { pane: M().pane() } }, [M().tag(rail, 'queue'), M().tag(SD.oppDetail.center(active, ctx), 'chart'),
+      M().tag(SD.oppDetail.right(active, ctx), 'order'), M().tag(analysis, 'chart')]);
+    return M().wrap(grid, { rerender, bar: SD.oppDetail.actionBar(active, ctx) });
   }
 
   // Scanner / Saved: Review and Watch jump back into the Setups workspace; bookmarks toggle.
   const nav = {
-    onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; rerender(); },
-    onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; rerender(); },
+    onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; if (assetFilter === 'moonshots') assetFilter = 'crypto'; M().setPane('order'); rerender(); },
+    onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; if (assetFilter === 'moonshots') assetFilter = 'crypto'; M().setPane('chart'); rerender(); },
     send: (msg) => { if (transport.isOnline()) transport.send(msg); },
     rerender: () => rerender(),
   };
@@ -267,12 +253,15 @@
     scanBtn.onclick = () => { subTab = 'scanner'; rerender(); };
     // Top-right asset tabs: clicking the active tab again clears the filter.
     const assetTabs = SD.oppRail.segmented(TOP_TABS, assetFilter, 'opp-asset-tabs', (v) => setFilter(v === assetFilter ? 'all' : v));
+    // [Moonshots] on Setups or Scanner: the live Moonshot Radar replaces the workspace.
+    const moon = assetFilter === 'moonshots' && (subTab === 'setups' || subTab === 'scanner');
+    const moonCtx = { state, online: transport.isOnline(), inFlight, onApprove, onDismiss, rerender, onReview: nav.onReview, onRunScan: () => nav.send({ type: 'RUN_SCAN' }) };
     container.replaceChildren(
-      // The Scanner has its own Market filter; Setups gets "Scan markets" + the asset tabs.
-      el('div', { className: 'opp-toolbar' }, subTab === 'scanner' ? [tabs]
-        : [tabs, el('div', { className: 'opp-toolbar-right' }, [...(subTab === 'setups' ? [rotationButton()] : []), scanBtn, assetTabs])]),
+      // The Scanner has its own Market filter; Setups (and the radar) get "Scan markets" + the asset tabs.
+      el('div', { className: 'opp-toolbar' }, subTab === 'scanner' && !moon ? [tabs]
+        : [tabs, el('div', { className: 'opp-toolbar-right' }, [...(subTab === 'setups' && !moon ? [rotationButton()] : []), scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
-      subTab === 'setups' ? setups(state) : subTab === 'approvals' ? approvals(state) : subTab === 'scanner' ? scanner(state)
+      moon ? SD.moonshots.render(state, moonCtx) : subTab === 'setups' ? setups(state) : subTab === 'approvals' ? approvals(state) : subTab === 'scanner' ? scanner(state)
         : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),
     );
 
@@ -292,7 +281,9 @@
     init: (t) => { transport = t; },
     render,
     actionFailed,
-    select: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; },
+    select: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; M().setPane('order'); },
     openApprovals: () => { subTab = 'approvals'; },
+    openSetups: () => { subTab = 'setups'; }, // the iPhone tab bar's "Setups"
+    subTab: () => subTab,
   };
 })();

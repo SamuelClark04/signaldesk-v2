@@ -8,7 +8,7 @@
   const D = () => SD.scannerData;
 
   const PAGE_SIZE = 8;
-  const MARKETS = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
+  const MARKETS = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options'], ['moonshots', 'Moonshots (radar)']];
   const DIRECTIONS = [['both', 'Both'], ['long', 'Long'], ['short', 'Short']];
   const SORT_OPTIONS = [['quality', 'Quality'], ['rr', 'Net R/R'], ['age', 'Data age'], ['asset', 'Asset']];
 

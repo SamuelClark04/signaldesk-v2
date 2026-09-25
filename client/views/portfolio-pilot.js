@@ -30,7 +30,7 @@
     TRIM: { label: 'TRIM', urgency: 'Medium', tone: 'warn', change: 'Clears once the weight / extension falls back under the Pilot limits. The trim waits in Approvals.' },
     ADD: { label: 'ADD', urgency: 'Low', tone: 'info', change: 'A core leader pulled back to its 20/50-day SMA under 18% weight. The add waits in Approvals.' },
     HOLD: { label: 'HOLD', urgency: 'Low', tone: 'ok', change: 'Healthy: above its 200-day SMA, within the weight and extension limits.' },
-    WAIT: { label: 'WAIT', urgency: 'Low', tone: 'wait', change: 'Needs a price and 200 daily sessions to judge.' },
+    WAIT: { label: 'WAIT', urgency: 'Low', tone: 'wait', change: 'Needs a price and 30+ daily sessions (a newer coin is judged on its 50- or 20-day SMA).' },
   };
   const idsOf = (p) => [p.id, p.extId, ...(p.tracked || []).map((t) => t.id)].filter(Boolean);
   function verdictOf(row, state) {
@@ -206,9 +206,9 @@
   function pilotView(data, opts) {
     const t = data.totals;
     viewState = opts.state; // one verdict source for the summary, the table and the detail card
-    const values = data.rows.map((r) => Math.max(0, r.m.marketValue));
-    const total = values.reduce((s, v) => s + v, 0);
-    const topIdx = values.indexOf(Math.max(...values, 0));
+    // Concentration: the SAME weights as the Weight column and the matrix (each book's equity).
+    const weights = data.rows.map((r) => { const v = recOf(r).matrix; return v && Number.isFinite(v.weight) ? v.weight : 0; });
+    const topIdx = weights.indexOf(Math.max(...weights, 0));
     const selected = data.rows.find((r) => r.p.id === opts.selectedId) || data.rows[0] || null;
     return el('div', { className: 'pf-pilot' }, [
       summary(data),
@@ -216,7 +216,7 @@
         kpi('Portfolio value', money(t.accountValue), `${opts.venueLabel} · ${data.rows.length} position${data.rows.length === 1 ? '' : 's'}`),
         // Isolated per venue: paper cash never inflates live buying power (and vice versa).
         kpi('Spendable cash', `${t.cash < 0 ? '−' : ''}${money(Math.abs(t.cash))}`, t.currentBankroll > 0 ? `Bankroll ${money(t.currentBankroll)} (${t.bankrollLabel})` : 'No bankroll for this venue yet', t.cash < 0 ? 'pnl-neg' : ''),
-        kpi('Concentration', total > 0 ? `${((values[topIdx] / total) * 100).toFixed(0)}%` : '—', total > 0 ? `Top holding (${data.rows[topIdx].p.asset.replace('-USD', '')})` : 'No holdings'),
+        kpi('Concentration', weights[topIdx] > 0 ? `${(weights[topIdx] * 100).toFixed(1)}%` : '—', weights[topIdx] > 0 ? `Top holding (${data.rows[topIdx].p.asset.replace('-USD', '')}) of its book's equity` : 'No holdings'),
         kpi('Estimated exit cost', money(t.exitFees), 'If every position shown closed now'),
         kpi('Data coverage', `${t.fresh} of ${data.rows.length} fresh`, t.atClose ? `${t.atClose} at the last session close (market closed)` : 'Positions with a live price'),
       ]),

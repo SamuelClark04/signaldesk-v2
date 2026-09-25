@@ -44,7 +44,7 @@ const app = express();
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 authGate.install(app, PORT); // /login is the only page served without a session
-app.use(express.static(path.join(__dirname, '..', 'client'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') })); // revalidate: never stale JS
+require('./client-assets').install(app, path.join(__dirname, '..', 'client')); // no-cache + ?v=<hash> asset URLs: never stale JS
 mobileLink.install(app); // behind the sign-in gate, like everything after authGate
 
 app.get('/api/health', (req, res) => {
@@ -118,6 +118,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
   send(ws, 'PILOT_MATRIX', pilotHandler.getMatrix());
+  send(ws, 'MOONSHOT_RADAR', require('./intelligence/moonshot-radar').getRadar());
   send(ws, 'EXTERNAL_HOLDINGS', externalApi.snapshot());
   send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());

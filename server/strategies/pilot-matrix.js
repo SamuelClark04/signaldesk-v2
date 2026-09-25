@@ -21,6 +21,8 @@
 // ADD (and the rotation buys) only ever go to the Tier-1 core leaders (the
 // ranker's universe: BTC ETH SOL LINK AVAX SPY QQQ NVDA AAPL MSFT META AMZN
 // GOOGL AVGO TSLA AMD COST LLY); speculative altcoins are held or cut, never added to.
+// A newer listing (30-219 daily sessions, Phase 55) is judged against its longest
+// available average (the 50-day, else the 20-day SMA) instead of waiting for 200.
 const { dailyBars, scoreAsset, CONFIG: RANK, UNIVERSE } = require('./pilot-ranker');
 const CORE = new Set(UNIVERSE);
 
@@ -48,14 +50,15 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
     if (!(live > 0)) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: 'No live price' }); continue; }
     const bars = await dailyBars(p.asset, now);
     const s = scoreAsset(p.asset, bars, live, ctx.ranking);
-    if (!s || bars.length < RANK.sma200) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: `Only ${bars.length} daily sessions (needs ${RANK.sma200})` }); continue; }
+    if (!s) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: `Only ${bars.length} daily sessions (needs ${RANK.minSessions})` }); continue; }
     const { ind } = s;
+    const avg = `${ind.basis}-day SMA${ind.basis < RANK.sma200 ? ` (${ind.sessions} sessions listed: longest average available)` : ''}`;
     const value = p.positionSize * live;
     const equity = ctx.equityOf ? ctx.equityOf(p) : ctx.equity;
     const weight = equity > 0 ? value / equity : null;
     const base = { positionId: p.id, asset: p.asset, market: p.market, price: live, execution: p.execution || 'PAPER', adopted: !!p.adopted,
       levels: { sma200: round(ind.s200), sma50: round(ind.s50), sma20: round(ind.s20), atr: round(ind.atr) } };
-    const row = { positionId: p.id, asset: p.asset, weight, equity, buffer200: ind.buffer200, score: s.score, value, execution: p.execution || 'PAPER',
+    const row = { positionId: p.id, asset: p.asset, weight, equity, buffer200: ind.buffer200, basis: ind.basis, score: s.score, value, execution: p.execution || 'PAPER',
       external: p.external || null, broker: p.broker || null, adopted: !!p.adopted, core: CORE.has(p.asset) };
     const ext = CONFIG.extended[p.market] || CONFIG.extended.stocks;
 
@@ -63,17 +66,17 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
       const id = `pilot:SELL:${p.id}:${date}`;
       const to = leaders.find((r) => r.asset !== p.asset);
       const rotation = to ? { asset: to.asset, score: to.score, proceeds: Math.floor(value * 100) / 100 } : null;
-      out.actions.push({ ...base, id, action: 'SELL', fraction: 1, rotation, reason: `Below the 200-day average: sell${rotation ? ` and rotate into ${to.asset}` : ' (no leader to rotate into: cash)'}`,
-        detail: `${p.asset} closed at ${round(ind.lastClose)} and trades at ${round(live)}, under its 200-day SMA ${round(ind.s200)}. The long-term trend has broken.`
+      out.actions.push({ ...base, id, action: 'SELL', fraction: 1, rotation, reason: `Below the ${ind.basis}-day average: sell${rotation ? ` and rotate into ${to.asset}` : ' (no leader to rotate into: cash)'}`,
+        detail: `${p.asset} closed at ${round(ind.lastClose)} and trades at ${round(live)}, under its ${avg} ${round(ind.s200)}. The long-term trend has broken.`
           + `${rotation ? ` Proceeds (~$${rotation.proceeds.toFixed(2)}) go to ${to.asset}, the #1 ranked leader (score ${to.score}); that buy waits in Approvals as its own setup.` : ''}` });
       if (rotation) out.rotations.push({ actionId: id, from: p.asset, positionId: p.id, proceeds: rotation.proceeds, to: to.asset, price: to.price,
-        why: `Rotation: ${p.asset} fell under its 200-day SMA; its ~$${rotation.proceeds.toFixed(2)} is redeployed into the #1 ranked leader ${to.asset} (${to.reason}).` });
-      out.matrix.push({ ...row, action: 'SELL + ROTATE', reason: `Under the 200-day SMA ${round(ind.s200)}${rotation ? `; rotate into ${to.asset}` : ''}` });
+        why: `Rotation: ${p.asset} fell under its ${ind.basis}-day SMA; its ~$${rotation.proceeds.toFixed(2)} is redeployed into the #1 ranked leader ${to.asset} (${to.reason}).` });
+      out.matrix.push({ ...row, action: 'SELL + ROTATE', reason: `Under the ${avg} ${round(ind.s200)}${rotation ? `; rotate into ${to.asset}` : ''}` });
       continue;
     }
     const trims = [
       weight !== null && weight > CONFIG.maxWeight ? `${pct(weight)} of the account (over ${CONFIG.maxWeight * 100}%)` : null,
-      ind.buffer200 > CONFIG.overSma200 ? `${pct(ind.buffer200)} above the 200-day SMA (over ${CONFIG.overSma200 * 100}%)` : null,
+      ind.buffer200 > CONFIG.overSma200 ? `${pct(ind.buffer200)} above the ${ind.basis}-day SMA (over ${CONFIG.overSma200 * 100}%)` : null,
       live >= ind.s50 * (1 + ext.pct) && live - ind.s50 >= ext.atr * ind.atr ? `${pct(ind.ext50)} and ${((live - ind.s50) / ind.atr).toFixed(1)} ATR above the 50-day SMA` : null,
     ].filter(Boolean);
     if (trims.length) {
@@ -84,13 +87,13 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
     }
     const near = [ind.s20, ind.s50].some((m) => live >= m * 0.99 && live <= m * (1 + CONFIG.addNearPct));
     const amount = weight !== null ? Math.floor((CONFIG.addMaxWeight - weight) * equity * 100) / 100 : 0;
-    if (CORE.has(p.asset) && live > ind.s50 && ind.s50 > ind.s200 && s.score >= CONFIG.addMinScore && weight !== null && weight < CONFIG.addMaxWeight && near && amount >= CONFIG.minAdd) {
+    if (CORE.has(p.asset) && ind.basis === RANK.sma200 && live > ind.s50 && ind.s50 > ind.s200 && s.score >= CONFIG.addMinScore && weight !== null && weight < CONFIG.addMaxWeight && near && amount >= CONFIG.minAdd) {
       const why = `ADD: ${p.asset} is a winner (price > 50d > 200d SMA, trend score ${s.score}) pulled back near its 20/50-day SMA, at ${pct(weight)} of the account; this adds up to ${CONFIG.addMaxWeight * 100}%.`;
       out.adds.push({ asset: p.asset, positionId: p.id, amount, price: live, why });
       out.matrix.push({ ...row, action: 'ADD', reason: `Score ${s.score}, near the ${live <= ind.s20 * (1 + CONFIG.addNearPct) ? '20' : '50'}-day SMA; add ~$${amount.toFixed(2)}` });
       continue;
     }
-    out.matrix.push({ ...row, action: 'HOLD', reason: `${pct(ind.buffer200)} above the 200-day SMA ${round(ind.s200)}${weight !== null ? `, ${pct(weight)} of the account` : ''}; trend score ${s.score}`
+    out.matrix.push({ ...row, action: 'HOLD', reason: `${pct(ind.buffer200)} above the ${avg} ${round(ind.s200)}${weight !== null ? `, ${pct(weight)} of the account` : ''}; trend score ${s.score}`
       + `${CORE.has(p.asset) ? '' : ' (speculative: held or cut, never added to)'}` });
   }
   return out;

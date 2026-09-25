@@ -70,6 +70,14 @@ function realEquity(real) {
   return real.reduce((s, p) => s + valueOf(p), 0) + cash;
 }
 
+// The real book is complete once a configured Coinbase account has synced (startup
+// sync, Sync Broker). Before that its coins and cash are missing from real equity.
+function realBookKnown() {
+  if (!process.env.COINBASE_API_KEY || !process.env.COINBASE_API_SECRET) return true;
+  const cb = brokerSync.getSnapshot().coinbase;
+  return !!(cb && cb.ok);
+}
+
 // Holdings the allocator counts, by the client's venue filter.
 function holdingsFor(scope) {
   const paper = ledger.getActivePositions().filter((p) => p.execution !== 'LIVE' && !p.adopted);
@@ -143,8 +151,9 @@ async function reviewHoldings(broadcast, now = Date.now()) {
   const ext = external.positions();
   const positions = [...ledger.getActivePositions(), ...ext];
   const ranking = await ranker.rankUniverse(priceOf, now);
-  const books = { paper: paperEquity(), real: realEquity([...ledger.getActivePositions().filter(isReal), ...ext]) };
-  const r = await matrixRules.review(positions, markOf, { ranking, equityOf: (p) => (inRealBook(p) ? books.real : books.paper) }, now);
+  const books = { paper: paperEquity(), real: realEquity([...ledger.getActivePositions().filter(isReal), ...ext]), realComplete: realBookKnown() };
+  // Real weights only once the Coinbase account is known (no weight TRIM / ADD on half a book).
+  const r = await matrixRules.review(positions, markOf, { ranking, equityOf: (p) => (inRealBook(p) ? (books.realComplete ? books.real : null) : books.paper) }, now);
   const day = new Date(now).toISOString().slice(0, 10);
   const extById = new Map(ext.map((p) => [p.id, p]));
   // External holdings: stop / T1 / T2 alerts win over the matrix; every card gets its instruction.
@@ -181,7 +190,7 @@ async function reviewHoldings(broadcast, now = Date.now()) {
     }
   }
   if (staged) broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
-  const next = { rows: r.matrix, paperEquity: books.paper, realEquity: books.real, at: now };
+  const next = { rows: r.matrix, paperEquity: books.paper, realEquity: books.realComplete ? books.real : null, realPending: !books.realComplete, at: now };
   if (JSON.stringify(next.rows) !== JSON.stringify(matrix.rows)) broadcast('PILOT_MATRIX', next);
   matrix = next;
 }

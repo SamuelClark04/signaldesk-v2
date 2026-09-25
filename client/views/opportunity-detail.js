@@ -257,5 +257,9 @@
     ]);
   }
 
-  SD.oppDetail = { center, right, displaySymbol, hasLevels };
+  // iPhone sticky Approve / Track bar (opportunities-mobile.js): the SAME button and
+  // gates as the risk panel, at the chosen Trade Amount. null without a real setup.
+  const actionBar = (staged, ctx) => (hasLevels(staged) ? actions(staged, ctx, SD.tradeAmount.resolve(staged, venueLive(staged, ctx))) : null);
+
+  SD.oppDetail = { center, right, actionBar, displaySymbol, hasLevels };
 })();

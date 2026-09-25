@@ -134,17 +134,33 @@
     ]);
   }
 
-  // Real: the Approvals Queue (up to 3 cards), approvable ones only (no expired / blocked setup).
+  // Portfolio Pilot cards (TRIM / SELL / ADD on holdings) waiting in Approvals.
+  function actionCard(a) {
+    const open = el('button', { className: 'btn btn-primary', textContent: 'Open in Approvals', type: 'button' });
+    open.onclick = () => { SD.opportunities.openApprovals(); location.hash = 'opportunities?tab=approvals'; };
+    return el('article', { className: 'today-setup is-action' }, [
+      el('div', { className: 'today-setup-head' }, [el('span', { className: 'asset', textContent: a.asset.replace('-USD', '/USD') }),
+        el('span', { className: `badge-${a.action === 'ADD' ? 'long' : 'short'}`, textContent: a.action }),
+        el('span', { className: 'today-note', textContent: a.manual ? `do it in ${a.broker}` : a.external || a.execution === 'LIVE' ? `LIVE · ${a.broker || 'broker'}` : 'paper' })]),
+      el('p', { className: 'today-alert-detail', textContent: a.instruction || a.reason }),
+      el('div', { className: 'today-actions' }, [open]),
+    ]);
+  }
+
+  // Real: the Approvals Queue: Pilot cards first, then setups (approvable ones only:
+  // no expired / blocked setup). The count matches the Approvals tab badge.
   function readyForReview(state) {
+    const actions = state.pilotActions || [];
     const open = state.pending.filter((o) => !SD.scannerData.blockers(o, state).length);
     const real = open.slice(0, 3).map((o) => ({
       id: o.id, asset: o.asset, direction: o.direction, timeframe: o.timeframe, market: o.market, entryPrice: o.entryPrice,
       entryMin: o.entryZone.min, entryMax: o.entryZone.max, invalidation: o.invalidation, target: o.targets && o.targets[0] && o.targets[0].price,
     }));
-    const body = real.length
-      ? el('div', { className: 'today-setups' }, real.map(setupCard))
-      : el('p', { className: 'today-empty', textContent: 'No setups in the Approvals Queue. New ones appear here as the risk engine approves them.' });
-    return card('Ready for review', real.length ? `${open.length} approvable in the Approvals Queue` : 'Queue empty', body);
+    const body = actions.length || real.length // up to 3 cards, Pilot actions first
+      ? el('div', { className: 'today-setups' }, [...actions.map(actionCard), ...real.map(setupCard)].slice(0, 3))
+      : el('p', { className: 'today-empty', textContent: 'Nothing in the Approvals Queue. New setups and Pilot actions appear here the moment they are staged.' });
+    const n = actions.length + open.length;
+    return card('Ready for review', n ? `${n} in Approvals (${actions.length} Pilot action${actions.length === 1 ? '' : 's'}, ${open.length} setup${open.length === 1 ? '' : 's'})` : 'Queue empty', body);
   }
 
   function card(title, hint, body, extraClass = '') {
@@ -167,17 +183,30 @@
     crypto: (p) => p.execution === 'LIVE' || p.execution === 'EXTERNAL',
     combined: () => true,
   };
+  // External holdings only when something is actionable (Phase 55): a Pilot card
+  // (TRIM / SELL + ROTATE / ADD), or price at / near the stop or T1. A quiet HOLD stays in Portfolio.
+  const ACTIVE = new Set(['TRIM', 'SELL + ROTATE', 'ADD']);
+  const NEAR = /stop|target|T1/i;
+  function actionable(a, p, state) {
+    if (p.execution !== 'EXTERNAL') return true;
+    if ((state.pilotActions || []).some((x) => x.positionId === p.id)) return true;
+    const m = ((state.pilotMatrix && state.pilotMatrix.rows) || []).find((r) => r.positionId === p.id);
+    return !!(m && ACTIVE.has(m.action)) || NEAR.test(a.action);
+  }
   function attention(state) {
     const intel = state.intelligence;
     const venue = SD.venue.current(state);
     const byId = new Map([...(state.positions || []), ...((state.external && state.external.positions) || [])].map((p) => [p.id, p]));
-    const alerts = !intel ? [] : intel.attention.filter((a) => (a.positionId ? byId.has(a.positionId) && ALERT_VENUE[venue](byId.get(a.positionId)) : venue !== 'crypto'));
-    const empty = venue === 'crypto' ? 'No live or external holdings. Sync Broker, or add a holding from another broker in Portfolio.' : 'No alerts for this venue.';
+    const inVenue = !intel ? [] : intel.attention.filter((a) => (a.positionId ? byId.has(a.positionId) && ALERT_VENUE[venue](byId.get(a.positionId)) : venue !== 'crypto'));
+    const alerts = inVenue.filter((a) => !a.positionId || actionable(a, byId.get(a.positionId), state));
+    const quiet = inVenue.length - alerts.length;
+    const empty = venue === 'crypto' && !inVenue.length ? 'No live or external holdings. Sync Broker, or add a holding from another broker in Portfolio.'
+      : quiet ? `${quiet} external holding${quiet === 1 ? '' : 's'} on HOLD, none near a stop or T1: nothing needs attention.` : 'No alerts for this venue.';
     const body = !intel ? waiting() : !alerts.length ? el('p', { className: 'today-empty', textContent: empty }) : el('ul', { className: 'today-list' }, alerts.map((a) => el('li', { className: `today-alert is-${a.tone}` }, [
       el('div', {}, [el('span', { className: 'asset', textContent: `${a.asset}${a.execution === 'LIVE' ? ' · LIVE' : a.execution === 'EXTERNAL' ? ' · EXTERNAL' : ''}` }), el('span', { className: 'today-alert-action', textContent: a.action })]),
       el('div', { className: 'today-alert-detail', textContent: a.detail }),
     ])));
-    return card('Portfolio attention', updatedAt(intel), body);
+    return card('Portfolio attention', [updatedAt(intel), quiet && alerts.length ? `${quiet} quiet holding${quiet === 1 ? '' : 's'} hidden` : ''].filter(Boolean).join(' · '), body);
   }
 
   // Real: server watchlist (WATCHLIST_UPDATED). Each symbol's trigger is LIVE: the

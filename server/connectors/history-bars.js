@@ -3,6 +3,10 @@
 //   Stocks: Alpaca market data, IEX feed (the same feed as the bar stream).
 //   Crypto: Coinbase Advanced Trade public market endpoint (no auth needed).
 // Results are cached briefly, so repeated chart opens never become a poll loop.
+// Coinbase requests are PACED (Phase 55): one starts at most every PACE_MS and a
+// rate limit (HTTP 429), a 5xx or a timeout is retried with back-off, so a scan
+// burst (42 coins x 5m / 15m / 1h / 1d) never leaves a coin without candles.
+// Identical requests in flight are shared. Failures are never cached.
 //
 // Never throws: every outcome is { ok: true, ... } or { ok: false, status, error }.
 const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
@@ -22,8 +26,21 @@ const TIMEFRAMES = Object.freeze({
   '1d-long': { alpaca: '1Day', coinbase: 'ONE_DAY', sec: 86400, lookbackDays: 420, limit: 260 },
 });
 const COINBASE_MAX_CANDLES = 350;
+const PACE_MS = 120; // ~8 requests/s: under Coinbase's public 10/s
+const RETRY_MS = [600, 1800, 4000]; // back-off before attempts 2, 3 and 4
 
 const cache = new Map(); // `${symbol}|${tf}` -> { at, bars }
+const inflight = new Map(); // same key -> one shared request
+let nextSlot = 0;
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+// Reserve the next request slot (spaced PACE_MS apart) and wait for it.
+async function paced() {
+  const now = Date.now();
+  const at = Math.max(now, nextSlot);
+  nextSlot = at + PACE_MS;
+  if (at > now) await sleep(at - now);
+}
+const retryable = (r) => !r.ok && (r.code === 429 || r.code >= 500 || !r.code); // no code: network / timeout
 const isCrypto = (symbol) => symbol.includes('-');
 
 async function getJson(url, headers = {}) {
@@ -35,7 +52,7 @@ async function getJson(url, headers = {}) {
   }
   let json = null;
   try { json = await res.json(); } catch { /* non-JSON error page */ }
-  if (!res.ok) return { ok: false, status: 502, error: `HTTP ${res.status}: ${(json && (json.message || json.error)) || res.statusText}` };
+  if (!res.ok) return { ok: false, status: 502, code: res.status, error: `HTTP ${res.status}: ${(json && (json.message || json.error)) || res.statusText}` };
   return { ok: true, json };
 }
 
@@ -65,7 +82,13 @@ async function fetchCrypto(symbol, tf) {
   const count = Math.min((tf.limit || LIMIT) * group, COINBASE_MAX_CANDLES);
   const end = Math.floor(Date.now() / 1000);
   const query = `start=${end - count * baseSec}&end=${end}&granularity=${tf.coinbase}&limit=${count}`;
-  const r = await getJson(`${coinbaseBase()}/api/v3/brokerage/market/products/${encodeURIComponent(symbol)}/candles?${query}`);
+  let r;
+  for (let attempt = 0; attempt <= RETRY_MS.length; attempt += 1) {
+    if (attempt) await sleep(RETRY_MS[attempt - 1]);
+    await paced();
+    r = await getJson(`${coinbaseBase()}/api/v3/brokerage/market/products/${encodeURIComponent(symbol)}/candles?${query}`);
+    if (!retryable(r)) break;
+  }
   if (!r.ok) return r;
   const bars = (r.json.candles || []).map((c) => ({
     time: Number(c.start), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
@@ -103,11 +126,16 @@ async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
   const key = `${s}|${timeframe}`;
   const hit = cache.get(key);
   if (hit && now - hit.at < CACHE_MS) return { ok: true, bars: hit.bars.map((b) => ({ ...b })) };
-  const result = isCrypto(s) ? await fetchCrypto(s, tf) : await fetchStock(s, tf);
-  if (!result.ok) return result;
-  const bars = clean(result.bars, tf.limit || LIMIT);
-  cache.set(key, { at: now, bars });
-  return { ok: true, bars: bars.map((b) => ({ ...b })) };
+  if (!inflight.has(key)) {
+    inflight.set(key, (isCrypto(s) ? fetchCrypto(s, tf) : fetchStock(s, tf)).then((result) => {
+      if (!result.ok) return result;
+      const bars = clean(result.bars, tf.limit || LIMIT);
+      cache.set(key, { at: Date.now(), bars });
+      return { ok: true, bars };
+    }).finally(() => inflight.delete(key)));
+  }
+  const result = await inflight.get(key);
+  return result.ok ? { ok: true, bars: result.bars.map((b) => ({ ...b })) } : result;
 }
 
 // Last completed 1-minute bar per stock, in one request. A bar is stamped at its

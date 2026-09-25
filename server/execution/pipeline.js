@@ -28,8 +28,10 @@ const { legSymbols } = require('./option-marks');
 const macro = require('../connectors/macro-events');
 const { reviewHoldings } = require('./pilot-handler');
 const expirySweeper = require('./expiry-sweeper'); // expired setups leave the queue within 30 s
+const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RADAR: 100-point score, every coin
 
 const PIPELINE_INTERVAL_MS = 60000;
+const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
 
 let broadcast = () => {}; // set by startPipeline()
 let pipelineTimer = null;
@@ -114,6 +116,7 @@ async function pipelinePass() {
   for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['crypto-intraday', cryptoIntraday], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
     scanLog.scanned(id, mod.takeScan());
   }
+  try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
   // capital of the venue it would execute on: the paper bankroll, or the LIVE
@@ -176,7 +179,8 @@ async function pipelinePass() {
 
   // "Watching": each symbol's nearest live trigger level, from real bars.
   try {
-    watchlist.setTriggers(await computeTriggers(watchlist.getWatchlist(), prices.getLatestPrices(), alpacaStocks.getLatestBars()));
+    // Marks: a closed-market stock is measured from its last session close (never "Waiting for a price").
+    watchlist.setTriggers(await computeTriggers(watchlist.getWatchlist(), prices.getMarkPrices(), alpacaStocks.getLatestBars()));
   } catch (err) {
     console.error('[pipeline] watch triggers failed:', err.message);
   }
@@ -244,6 +248,7 @@ function startPipeline(options = {}) {
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));
   }, PIPELINE_INTERVAL_MS);
+  setTimeout(() => runPipeline({ trigger: 'startup' }).catch((err) => console.error('[pipeline] startup pass failed:', err)), STARTUP_PASS_MS).unref();
   const { bankroll, riskProfile, riskPct, stockMode, cryptoMode } = ledger.getSettings();
   console.log(`[pipeline] running every ${PIPELINE_INTERVAL_MS / 1000}s, bankroll $${bankroll}, risk ${riskProfile} ${(riskPct * 100).toFixed(1)}%/trade, `
     + `stocks/options ${String(stockMode).toUpperCase()}, crypto ${String(cryptoMode).toUpperCase()} `

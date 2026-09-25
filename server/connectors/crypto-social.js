@@ -111,7 +111,25 @@ async function getSocial(symbol, now = Date.now()) {
   };
 }
 
+// The Buzz strip (Moonshot Radar): CoinGecko's trending list and the monitored
+// coins the cached Reddit posts mention most. Sync, from cache only (getSocial refreshes).
+function snapshot(symbols, now = Date.now()) {
+  const posts = [...feeds.values()].flatMap((f) => f.posts);
+  const reddit = symbols.map((symbol) => {
+    const base = symbol.split('-')[0].toUpperCase();
+    const hits = posts.filter((p) => mentions(`${p.title} ${p.text}`, base, NAMES[symbol] || null));
+    return { symbol, mentions: hits.length, recent: hits.filter((p) => p.at && now - p.at <= RECENT_H * 3600000).length, title: hits[0] ? `r/${hits[0].sub}: ${hits[0].title.slice(0, 100)}` : null };
+  }).filter((r) => r.mentions > 0).sort((a, b) => b.recent - a.recent || b.mentions - a.mentions).slice(0, 10);
+  const listed = new Set(symbols.map((s) => s.split('-')[0].toUpperCase()));
+  const liveFeeds = [...feeds.values()].filter((f) => !f.error).length;
+  return {
+    trending: trending.coins.slice(0, 15).map((c) => ({ ...c, rank: c.rank + 1, monitored: listed.has(c.symbol) })), trendingAt: trending.at || null,
+    reddit, posts: posts.length, feeds: `${liveFeeds}/${FEEDS.length}`, redditAt: Math.max(0, ...[...feeds.values()].map((f) => f.at || 0)) || null,
+    errors: [...[...feeds.entries()].filter(([, f]) => f.error).map(([s, f]) => `r/${s}: ${f.error}`), ...(trending.error ? [`CoinGecko: ${trending.error}`] : [])],
+  };
+}
+
 // Test hook.
 function reset() { feeds.clear(); trending = { at: 0, coins: [], error: null }; redditWaitUntil = 0; }
 
-module.exports = { getSocial, mentions, parseAtom, reset, FEEDS, CACHE_MS };
+module.exports = { getSocial, snapshot, mentions, parseAtom, reset, FEEDS, CACHE_MS };

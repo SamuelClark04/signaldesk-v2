@@ -6,6 +6,11 @@
 .opp-scan-btn:hover { filter: brightness(1.12); }
 .btn-solid { border-color: var(--solid); background: var(--solid); color: #fff; font-weight: 600; }
 .btn-solid:hover:not(:disabled) { filter: brightness(1.12); }
+/* Disabled filled buttons ("Waiting for Setup", "Blocked: ..."): a muted surface with
+   legible light text, never the faint grey on bright blue / red of .btn:disabled. */
+.btn-solid:disabled, .btn-live:disabled, .opp-scan-btn:disabled {
+  border-color: var(--border-strong); background: var(--surface-2); color: var(--text-muted); opacity: 1; filter: none;
+}
 
 /* ---------- Grid ---------- */
 .opp-grid { grid-template-columns: 260px minmax(0, 1fr) 360px; }

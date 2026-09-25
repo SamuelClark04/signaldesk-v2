@@ -20,12 +20,15 @@ const referencePrices = require('../market/reference-prices');
 const external = require('./external-holdings');
 const prices = require('../market/latest-prices');
 const { getHistory } = require('../connectors/history-bars');
+const dailyBars = require('../connectors/daily-bars'); // held coins' daily history, warmed at startup + after a sync
+const brokerSync = require('../connectors/broker-sync');
 
 const POLL_MS = 60 * 1000;
 const BAR_MS = 60 * 1000;
 let broadcastRef = () => {};
 
-const snapshot = () => ({ holdings: external.list(), positions: external.positions(), at: Date.now() });
+// markPrice: live, else the last session close (a Robinhood stock after hours), for valuation only.
+const snapshot = () => ({ holdings: external.list(), positions: external.positions().map((p) => ({ ...p, markPrice: prices.getMarkPrice(p.asset) || null })), at: Date.now() });
 const publish = () => broadcastRef('EXTERNAL_HOLDINGS', snapshot());
 
 // Coinbase public product price for BASE-USD, falling back to BASE-USDC. null: unlisted.
@@ -91,14 +94,32 @@ function install(app, { broadcast }) {
     return { levels: external.setBrokerLevels(key, { customStop: b.customStop, customT1: b.customT1 }) };
   }));
   const poll = () => pollPrices().catch((err) => console.error('[external] price poll failed:', err.message));
-  setTimeout(poll, 5000).unref(); // held coins join the stream right after startup
+  setTimeout(() => startupSync().catch((err) => console.error('[external] startup sync failed:', err.message)), 3000).unref(); // before the first pipeline pass (8 s)
   setInterval(poll, POLL_MS).unref();
+}
+
+// Every held symbol's 200-day history (Pilot matrix) and 100-day bars, fetched now:
+// ETHFI-USD (else ETHFI-USDC), PYTH, POL, DOT... never wait for the first scan.
+function warmDaily() {
+  return dailyBars.warmHoldings(external.symbols())
+    .then((n) => console.log(`[external] daily bars: ${Object.entries(n).map(([s, k]) => `${s} ${k}`).join(', ') || 'no holdings'}`))
+    .catch((err) => console.error('[external] daily bars warm-up failed:', err.message));
+}
+
+// Startup (Phase 55): one read-only Sync Broker (balances GET, no orders), so the
+// Pilot never weighs the real book without its Coinbase coins (a lone Robinhood
+// NVDA read as 100% of real equity -> a false TRIM), then prices + daily bars.
+async function startupSync() {
+  const r = await brokerSync.syncPortfolio();
+  if (r.ok) broadcastRef('BROKER_HOLDINGS', r.snapshot);
+  await brokerSynced();
 }
 
 // After a Sync Broker: the new free balances now, their protective levels once computed.
 async function brokerSynced() {
   publish();
   await pollPrices().catch(() => {}); // newly synced coins: stream + a price now
+  await warmDaily();
   if (await external.refreshLevels()) publish();
 }
 

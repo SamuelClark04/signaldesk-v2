@@ -7,7 +7,7 @@
   const SD = window.SignalDesk;
   const { el, age, price, money, signed, pnlClass } = SD.ui;
 
-  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options']];
+  const RAIL_TOGGLE = [['all', 'All'], ['stocks', 'Stocks'], ['crypto', 'Crypto'], ['options', 'Options'], ['moonshots', 'Moonshots']];
   const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
 
   function segmented(options, current, className, onPick) {

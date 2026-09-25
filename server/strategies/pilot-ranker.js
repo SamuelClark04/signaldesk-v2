@@ -12,16 +12,13 @@
 //                 20, fading to 0 at 10% above (0-20)
 //                 more than 18% above the 50-day SMA: -25 (extended, no chasing)
 // Rankings are cached RANK_TTL_MS (the bars themselves for hours).
-const { getHistory } = require('../connectors/history-bars');
+const { getLongDailyBars } = require('../connectors/daily-bars');
 
 const UNIVERSE = Object.freeze(['SPY', 'QQQ', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'AVGO', 'TSLA', 'AMD', 'COST', 'LLY',
   'BTC-USD', 'ETH-USD', 'SOL-USD', 'LINK-USD', 'AVAX-USD']);
-const CONFIG = { sma200: 200, sma50: 50, sma20: 20, slopeDays: 20, rsDays: 60, atrDays: 20, fullSlope: 0.03, nearPct: 0.02, farPct: 0.10, extendedPct: 0.18, extendedPenalty: 25 };
-const BARS_TTL_MS = 6 * 60 * 60 * 1000;
+const CONFIG = { sma200: 200, sma50: 50, sma20: 20, minSessions: 30, slopeDays: 20, rsDays: 60, atrDays: 20, fullSlope: 0.03, nearPct: 0.02, farPct: 0.10, extendedPct: 0.18, extendedPenalty: 25 };
 const RANK_TTL_MS = 10 * 60 * 1000;
-const cache = new Map(); // symbol -> { at, bars }
 let ranked = { at: 0, list: [] };
-const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const sma = (bars, n, end = bars.length) => bars.slice(end - n, end).reduce((s, b) => s + b.close, 0) / n;
@@ -33,28 +30,29 @@ function atr(bars, n) {
 }
 const marketOf = (asset) => (asset.includes('-') ? 'crypto' : 'stocks');
 
-// Completed daily bars (today's forming bar dropped), cached for hours.
-async function dailyBars(symbol, now = Date.now()) {
-  const hit = cache.get(symbol);
-  if (!hit || now - hit.at >= BARS_TTL_MS) {
-    const r = await getHistory(symbol, '1d-long');
-    cache.set(symbol, { at: now, bars: r.ok ? r.bars : (hit ? hit.bars : []) });
-  }
-  const today = etDate.format(now);
-  const done = symbol.includes('-') ? (b) => (b.time + 86400) * 1000 <= now : (b) => etDate.format(b.time * 1000) < today;
-  return cache.get(symbol).bars.filter(done);
-}
+// Completed daily bars (today's forming bar dropped), cached for hours; a failed
+// fetch is retried within a minute (daily-bars.js: -USD, else the -USDC book).
+const dailyBars = (symbol, now = Date.now()) => getLongDailyBars(symbol, now);
 
-// Trend indicators at `price` (null: under 200 + 20 sessions of history).
+// The trend baseline a history supports (Phase 55): the 200-day SMA with 220+
+// sessions; a newer listing falls back to its longest available average, the
+// 50-day (70+ sessions) or the 20-day (30+), instead of waiting forever.
+const baseline = (n) => (n >= CONFIG.sma200 + CONFIG.slopeDays ? CONFIG.sma200 : n >= CONFIG.sma50 + CONFIG.slopeDays ? CONFIG.sma50 : n >= CONFIG.minSessions ? CONFIG.sma20 : null);
+
+// Trend indicators at `price` (null: under minSessions of history). `s200` is the
+// baseline average (`basis` days: 200, else 50 / 20 for a newer listing).
 function indicators(bars, price) {
   const n = bars.length;
-  if (n < CONFIG.sma200 + CONFIG.slopeDays || !(price > 0)) return null;
-  const s200 = sma(bars, CONFIG.sma200);
-  const s200prev = sma(bars, CONFIG.sma200, n - CONFIG.slopeDays);
-  const s50 = sma(bars, CONFIG.sma50);
+  const basis = baseline(n);
+  if (!basis || !(price > 0)) return null;
+  const slopeDays = Math.min(CONFIG.slopeDays, n - basis);
+  const s200 = sma(bars, basis);
+  const s200prev = sma(bars, basis, n - slopeDays);
+  const s50 = sma(bars, Math.min(CONFIG.sma50, n));
   const s20 = sma(bars, CONFIG.sma20);
-  return { price, lastClose: bars[n - 1].close, s200, s50, s20, slope200: s200 / s200prev - 1, atr: atr(bars, CONFIG.atrDays),
-    ret60: price / bars[n - 1 - CONFIG.rsDays].close - 1, ext50: price / s50 - 1, buffer200: price / s200 - 1 };
+  const back = Math.min(CONFIG.rsDays, n - 1);
+  return { price, lastClose: bars[n - 1].close, s200, s50, s20, basis, sessions: n, slope200: s200 / s200prev - 1, atr: atr(bars, Math.min(CONFIG.atrDays, n - 1)),
+    ret60: price / bars[n - 1 - back].close - 1, ext50: price / s50 - 1, buffer200: price / s200 - 1 };
 }
 
 // Score one asset's indicators; rets = the universe's 60-day returns (for the percentile).
@@ -70,7 +68,7 @@ function score(ind, rets) {
   return { total, parts: { slope: Math.round(slope), align, rs: Math.round(rs), pullback: Math.round(pullback) }, extended };
 }
 
-const why = (r) => `score ${r.score}: 200d slope ${(r.ind.slope200 * 100).toFixed(1)}% (${r.parts.slope}/30), 50d ${r.ind.s50 > r.ind.s200 ? '>' : '<'} 200d (${r.parts.align}/20), `
+const why = (r) => `score ${r.score}: ${r.ind.basis}d slope ${(r.ind.slope200 * 100).toFixed(1)}% (${r.parts.slope}/30), 50d ${r.ind.s50 > r.ind.s200 ? '>' : '<'} ${r.ind.basis}d (${r.parts.align}/20), `
   + `60d ${(r.ind.ret60 * 100).toFixed(1)}% (${r.parts.rs}/30), ${(Math.min(r.ind.price / r.ind.s20 - 1, r.ind.ext50) * 100).toFixed(1)}% over the 20/50d SMA (${r.parts.pullback}/20)`
   + `${r.extended ? `, ${(r.ind.ext50 * 100).toFixed(0)}% above the 50d: extended (-${CONFIG.extendedPenalty})` : ''}`;
 
@@ -100,13 +98,13 @@ async function rankUniverse(priceOf, now = Date.now()) {
     if (!r.ind) return { ...r, qualified: false, score: 0, reason: `Not enough daily history (${r.days} sessions)` };
     const s = score(r.ind, rets);
     const row = { ...r, score: s.total, parts: s.parts, extended: s.extended };
-    if (r.ind.price < r.ind.s200) return { ...row, qualified: false, reason: `Below its 200-day SMA ${r.ind.s200.toFixed(2)} (${(r.ind.buffer200 * 100).toFixed(1)}%): never bought` };
+    if (r.ind.price < r.ind.s200) return { ...row, qualified: false, reason: `Below its ${r.ind.basis}-day SMA ${r.ind.s200.toFixed(2)} (${(r.ind.buffer200 * 100).toFixed(1)}%): never bought` };
     return { ...row, qualified: true, reason: why(row) };
   }).sort((a, b) => b.qualified - a.qualified || b.score - a.score);
   ranked = { at: now, list };
   return list.map((r) => ({ ...r }));
 }
 
-function reset() { cache.clear(); ranked = { at: 0, list: [] }; }
+function reset() { ranked = { at: 0, list: [] }; }
 
 module.exports = { rankUniverse, scoreAsset, indicators, score, dailyBars, sma, atr, marketOf, why, reset, UNIVERSE, CONFIG };

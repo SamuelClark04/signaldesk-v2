@@ -103,4 +103,8 @@ function describe(sent) {
   return `News sentiment is ${sent.label} (${sent.score}/100, ${sent.source}).`;
 }
 
-module.exports = { getSentiment, describe, label, CACHE_MS };
+// Cached result only (no fetch): the Moonshot Radar scores 42 coins a minute without
+// spending news quota; null until a strategy / the chart has asked for the symbol.
+const peek = (symbol) => { const hit = cache.get(String(symbol || '').toUpperCase()); return hit ? { ...hit.result } : null; };
+
+module.exports = { getSentiment, peek, describe, label, CACHE_MS };

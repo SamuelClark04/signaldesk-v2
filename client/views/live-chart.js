@@ -10,7 +10,7 @@
   const SD = window.SignalDesk;
   const { el, price } = SD.ui;
 
-  const TIMEFRAMES = [['1m', '1m', 60], ['15m', '15m', 900], ['1h', '1h', 3600], ['4h', '4h', 14400], ['1d', '1D', 86400]];
+  const TIMEFRAMES = [['1m', '1m', 60], ['5m', '5m', 300], ['15m', '15m', 900], ['1h', '1h', 3600], ['4h', '4h', 14400], ['1d', '1D', 86400]];
   const TF_SEC = Object.fromEntries(TIMEFRAMES.map(([k, , s]) => [k, s]));
   const MAX_LIVE_BARS = 600;
   const REFETCH_MS = 5 * 60 * 1000; // history older than this is refetched when shown again
@@ -228,5 +228,8 @@
       first: data[0], last: data[data.length - 1] };
   }
 
-  SD.liveChart = { record, mount, stats };
+  // The Moonshot Radar opens a coin on its 5m candles (the user's toolbar pick wins afterwards).
+  function setTimeframe(frame) { if (TF_SEC[frame]) tf = frame; }
+
+  SD.liveChart = { record, mount, stats, setTimeframe };
 })();

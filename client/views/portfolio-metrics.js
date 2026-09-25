@@ -16,6 +16,10 @@
 
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`;
   const closeOf = (state, asset) => { const c = state.refPrices && state.refPrices[asset]; return c && c.price > 0 ? c.price : null; }; // latest session close
+  const markOf = (state, p) => { // the server's mark for an external holding (live, else its last session close)
+    const x = p.markPrice > 0 ? p : ((state.external && state.external.positions) || []).find((e) => e.asset === p.asset && e.markPrice > 0);
+    return x ? x.markPrice : null;
+  };
   const display = (p) => (p.market === 'crypto' ? p.asset.replace('-', '/') : p.asset);
   const costBasis = (p) => (p.market === 'options' && p.optionsData
     ? p.positionSize * p.optionsData.debit * p.optionsData.multiplier : p.positionSize * p.fillPrice);
@@ -136,7 +140,8 @@
     if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
     const rows = [...ledger, ...broker, ...manual].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
-      .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset], closeOf(state, r.p.asset)), alert: r.alert || alerts.get(r.p.id) || null }));
+      // No live price: the latest session close, else the server's markPrice (external holdings, Phase 55).
+      .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset], closeOf(state, r.p.asset) || markOf(state, r.p)), alert: r.alert || alerts.get(r.p.id) || null }));
 
     const paper = rows.filter((r) => r.key === 'paper');
     const cbRows = rows.filter((r) => r.key === 'coinbase');

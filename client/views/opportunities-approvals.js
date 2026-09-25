@@ -20,6 +20,27 @@
   const count = (state) => (state.pending || []).length + (state.pilotActions || []).length;
   const kv = (k, v, cls = '') => el('div', { className: 'apv-kv' }, [el('span', { textContent: k }), el('strong', { className: cls, textContent: v })]);
 
+  // Order-guard and broker reasons from the server, in plain words (ACTION_FAILED notices).
+  const FAIL_REASONS = {
+    EXPIRED: 'setup is older than 30 minutes and was discarded',
+    PRICE_ESCAPED: 'price moved past the entry zone and the setup was discarded',
+    INVALIDATED: 'price is already through the stop and the setup was discarded',
+    NO_LIVE_PRICE: 'no fresh price available; still pending, try again shortly',
+    LIVE_OPTIONS_UNSUPPORTED: 'live options orders are not wired to Alpaca yet (the contract and prices are real; the order routing is not). Nothing was sent; '
+      + 'the order is still pending (set Alpaca mode to Paper to fill it on paper)',
+    ORDER_BUSY: 'an action for this order is already in progress',
+    LIVE_CLOSE_UNSUPPORTED: 'it is a LIVE position: close it at the broker (its exits are orders there)',
+  };
+  function describeFailure(error) {
+    if (FAIL_REASONS[error]) return FAIL_REASONS[error];
+    const [code, ...rest] = String(error).split(': ');
+    if (code === 'LIVE_ORDER_FAILED') return `live order rejected, nothing was filled (${rest.join(': ')})`;
+    if (code === 'LIVE_UNRECORDED') return `CHECK YOUR BROKER NOW: ${rest.join(': ')}`;
+    if (code.startsWith('AMOUNT_')) return `trade amount not accepted, nothing was sent and the setup is still pending (${rest.join(': ')})`;
+    if (code === 'SIZED_FOR_OTHER_VENUE') return `nothing was sent: this setup was ${rest.join(': ')}. Dismiss it; the next scan re-proposes it sized from the live account`;
+    return error;
+  }
+
   function catalystChips(list) {
     return (list || []).length ? [el('div', { className: 'apv-cats' }, list.map((c) => el('span', { className: `apv-cat is-${String(c.type).toLowerCase()}`,
       textContent: `${c.type} ${c.daysAway === 0 ? 'today' : `in ${c.daysAway}d`}`, title: `${c.title} · ${c.date}${c.time ? ` ${c.time}` : ''} (${c.source})` })))] : [];
@@ -63,7 +84,7 @@
         kv('Risk', `${money(o.dollarRisk)} (${o.sizingBankroll > 0 ? ((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2) : '—'}%)`),
         kv('Reward : risk', rr),
       ]),
-      ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Speculative micro-size: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
+      ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Smart Investment Amount ${money(o.notional)}: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
       ...(o.smallAccountCap ? [el('p', { className: 'apv-note is-small-cap', textContent: `${o.smallAccountLabel}: 1 contract risks ${money(o.dollarRisk)} `
         + `(${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(1)}% of the bankroll) to its stop, above the ${money(o.budgetRisk)} profile budget; debit ${money(o.notional)}.` })] : []),
       ...(o.capitalCapped ? [el('p', { className: 'apv-note', textContent: `Capital cap: risking ${(o.actualRiskPct * 100).toFixed(2)}% instead of ${(o.riskPct * 100).toFixed(2)}%.` })] : []),
@@ -164,5 +185,5 @@
     ]);
   }
 
-  SD.oppApprovals = { render, count, catalystChips };
+  SD.oppApprovals = { render, count, catalystChips, setupCard, describeFailure };
 })();

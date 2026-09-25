@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- viewport-fit=cover: the iPhone tab bar pads itself by env(safe-area-inset-bottom). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1120">
   <title>SignalDesk</title>
   <!-- main.css first: view sheets build on its tokens and base rules. -->
   <link rel="stylesheet" href="styles/main.css">
@@ -13,6 +15,9 @@
   <link rel="stylesheet" href="styles/journal.css">
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/today.css">
+  <link rel="stylesheet" href="styles/moonshots.css">
+  <!-- Last: the iPhone layout (<= 768px) overrides the desktop sheets. -->
+  <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
   <div class="app">
@@ -40,6 +45,9 @@
       <header class="topbar">
         <h1 class="page-title" id="page-title">Opportunities</h1>
         <span class="mode-badge" id="mode-badge" title="Execution venue for approved orders">Paper</span>
+        <!-- iPhone status bar only (mobile.css): account value + Scan. -->
+        <strong class="m-account" id="m-account" title="Account value">—</strong>
+        <button class="btn m-scan" id="m-scan" type="button">Scan</button>
       </header>
 
       <section class="tab" id="tab-today" data-title="Today" hidden>
@@ -131,6 +139,7 @@
           </div>
 
           <p class="settings-facts" id="settings-facts"></p>
+          <a class="btn m-only m-journal-link" href="#journal">Open the trade journal →</a>
         </div>
 
         <div class="panel settings-mobile">
@@ -156,6 +165,8 @@
       </section>
     </main>
   </div>
+  <!-- iPhone bottom tab bar (lib/mobile.js; hidden on desktop). -->
+  <nav class="m-tabbar" id="m-tabbar" aria-label="Main"></nav>
 
   <!-- Chart library, pinned and integrity-checked. If it fails to load, the Setups
        chart falls back to the static level view. -->
@@ -183,6 +194,8 @@
   <script src="views/opportunities-saved.js"></script>
   <script src="views/opportunities-rail.js"></script>
   <script src="views/opportunities-approvals.js"></script>
+  <script src="views/opportunities-mobile.js"></script>
+  <script src="views/moonshots-panel.js"></script>
   <script src="views/opportunities.js"></script>
   <script src="views/portfolio-metrics.js"></script>
   <script src="views/portfolio-table.js"></script>
@@ -195,6 +208,7 @@
   <script src="views/settings.js"></script>
   <script src="views/settings-mobile.js"></script>
   <script src="views/today.js"></script>
+  <script src="lib/mobile.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

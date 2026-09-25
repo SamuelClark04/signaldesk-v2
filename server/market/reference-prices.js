@@ -47,6 +47,7 @@ async function refresh(baseSymbols, onChange) {
   const quiet = symbols.filter((s) => !fresh.has(s));
   if (!quiet.length) return;
   const seeded = await seedDaily(quiet);
+  watchlist.seedPrices(snapshot()); // Watching: a closed-market stock shows its last session close, never "Waiting for a price"
   if (seeded && onChange) onChange(snapshot());
   const rest = quiet.filter((s) => !prices.getReference(s)); // no daily bars: last 1-minute bar instead
   if (!rest.length) return;

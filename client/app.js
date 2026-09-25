@@ -57,6 +57,7 @@
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
     BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)
     EXTERNAL_HOLDINGS: (x) => { state.external = x; }, // manual (Robinhood / other) + broker-synced holdings with protective levels
+    MOONSHOT_RADAR: (r) => { state.moonshotRadar = r; }, // top 12 coins by the 100-point Moonshot score (Opportunities → Moonshots)
   };
 
   // State-driven views: rendered on entering their tab and on every state change
@@ -65,13 +66,17 @@
     if (currentTab === 'today') SD.today.renderToday($('today-root'), state);
     if (currentTab === 'opportunities') SD.opportunities.render($('opportunities-root'), state);
     if (currentTab === 'portfolio') SD.portfolio.render($('portfolio-root'), state);
+    SD.mobile.sync(currentTab, state); // iPhone tab bar (active tab, Approvals badge) + status bar
   }
 
   // ---------- Tab navigation (hash-based, so reload keeps the tab) ----------
-  // Accepts "opportunities" or a deep link "opportunities?tab=approvals" (alert emails).
+  // Accepts "opportunities" or a deep link "opportunities?tab=approvals" (alert emails)
+  // / "opportunities?tab=setups" (the iPhone tab bar).
   function showTab(hash) {
     const [name, query] = String(hash || '').split('?');
-    if (name === 'opportunities' && new URLSearchParams(query || '').get('tab') === 'approvals') SD.opportunities.openApprovals();
+    const sub = name === 'opportunities' && new URLSearchParams(query || '').get('tab');
+    if (sub === 'approvals') SD.opportunities.openApprovals();
+    if (sub === 'setups') SD.opportunities.openSetups();
     const tab = TABS.includes(name) ? name : DEFAULT_TAB;
     currentTab = tab;
     refreshView();
@@ -100,6 +105,7 @@
     isOnline,
     send: (msg) => { if (isOnline()) transport.send(msg); },
     refresh: () => refreshView(),
+    showTab: (hash) => showTab(hash), // the iPhone tab bar (lib/mobile.js)
     setVenue(v) {
       if (!SD.venue.KEYS.has(v)) return;
       state.activeVenue = v;

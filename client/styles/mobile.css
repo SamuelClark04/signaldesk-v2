@@ -1,0 +1,142 @@
+/* iPhone layout (Phase 55): 375-430px wide, iOS Safari. Loaded last, so it
+   overrides the desktop sheets at <= 768px; desktop only hides the mobile parts.
+     shell     fixed bottom tab bar (above the home indicator) + compact sticky
+               status bar (page, venue badge, account value, Scan)
+     Setups    sticky [Queue & Radar] | [Chart] | [Order & Risk] switcher, one pane
+               at a time, sticky Approve / Track bar (views/opportunities-mobile.js)
+     tables    every wide .data-table becomes stacked 2-column cards (labels from
+               lib/mobile.js), 44px tap targets, zero horizontal page scroll
+     inputs    16px text: iOS Safari never auto-zooms a focused field */
+
+/* ---------- Desktop: mobile-only parts hidden ---------- */
+.m-account, .m-scan, .m-tabbar, .m-only { display: none; }
+
+@media (max-width: 768px) {
+  :root { --m-tabbar-h: 58px; --m-top-h: 52px; }
+  html, body { overscroll-behavior-y: none; }
+
+  /* ---------- Shell ---------- */
+  .app { display: block; min-height: 100vh; }
+  .sidebar { display: none; }
+  .main { padding: 0 12px calc(var(--m-tabbar-h) + env(safe-area-inset-bottom) + 20px); }
+  .topbar {
+    position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 8px;
+    min-height: calc(var(--m-top-h) + env(safe-area-inset-top)); margin: 0 -12px 12px; padding: env(safe-area-inset-top) 12px 0;
+    border-bottom: 1px solid var(--border); background: rgba(11, 17, 32, 0.94); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  .page-title { flex: 1; min-width: 0; overflow: hidden; font-size: 17px; white-space: nowrap; text-overflow: ellipsis; }
+  .mode-badge { flex: none; }
+  .m-account { display: inline-block; flex: none; font: 600 14px var(--font-mono); font-variant-numeric: tabular-nums; }
+  .m-scan { display: inline-block; flex: none; min-height: 36px; padding: 0 14px; border-color: var(--solid); background: var(--solid); color: #fff; font-size: 14px; font-weight: 600; }
+  .m-scan:disabled { border-color: var(--border-strong); background: var(--surface-2); color: var(--text-muted); opacity: 1; }
+  .m-only { display: inline-flex; align-items: center; justify-content: center; }
+  .m-journal-link { margin-top: 12px; }
+
+  .m-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 0 4px env(safe-area-inset-bottom); border-top: 1px solid var(--border);
+    background: rgba(17, 24, 39, 0.96); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  .m-tab {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: var(--m-tabbar-h); padding: 6px 0; border: 0; background: transparent; color: var(--text-faint);
+    font: inherit; font-size: 11px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .m-tab svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .m-tab.is-active { color: var(--accent); }
+  .m-tab-badge {
+    position: absolute; top: 5px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    background: var(--short); color: #fff; font: 700 11px/18px var(--font-ui); text-align: center;
+  }
+
+  /* ---------- Touch targets + no iOS input zoom ---------- */
+  input, select, textarea { font-size: 16px !important; }
+  .btn, .opp-seg, .opp-subtab, .pf-venue-seg, .lwc-tf, .ta-pill, .scan-select, .scan-input, .opp-search { min-height: 44px; }
+  .btn { padding-left: 14px; padding-right: 14px; font-size: 14px; }
+
+  /* ---------- Opportunities toolbar ---------- */
+  .opp-toolbar { align-items: stretch; }
+  .opp-subnav { display: flex; width: 100%; }
+  .opp-subtab { flex: 1; padding: 0 4px; }
+  .opp-toolbar-right { width: 100%; }
+  .opp-rotate, .opp-scan-btn { display: none; } /* rotation is desktop-only; the status bar has Scan */
+  .opp-asset-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; gap: 6px; }
+  .opp-asset-tabs .opp-seg { padding: 0 4px; font-size: 13px; }
+  .opp-segmented { grid-auto-flow: row; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .opp-segmented .opp-seg { padding: 0 2px; font-size: 11px; }
+
+  /* ---------- Segmented panes (Setups + Moonshots) ---------- */
+  .m-switch {
+    position: sticky; top: calc(var(--m-top-h) + env(safe-area-inset-top)); z-index: 20; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px; margin: 0 0 12px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  }
+  .m-switch-btn { min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; }
+  .m-switch-btn.is-active { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .m-panes[data-pane="queue"] > [data-pane]:not([data-pane="queue"]),
+  .m-panes[data-pane="chart"] > [data-pane]:not([data-pane="chart"]),
+  .m-panes[data-pane="order"] > [data-pane]:not([data-pane="order"]) { display: none; }
+  .m-opp { padding-bottom: 96px; }
+  .opp-grid, .moon { display: flex; flex-direction: column; gap: 12px; }
+  .opp-rail, .opp-center, .opp-right, .opp-analysis { width: 100%; min-width: 0; }
+  .opp-queue, .opp-watchlist { max-height: none; }
+  .opp-lwc, .moon-chart .opp-lwc { height: 56vh; min-height: 300px; }
+  .trade-hud { position: static; width: auto; margin-top: 8px; }
+  .m-opp .opp-right .opp-actions { display: none; } /* the sticky bar carries them */
+  .opp-right-head { flex-wrap: wrap; }
+  .opp-right-head .opp-title { flex: 1 1 60%; min-width: 0; }
+  .m-actionbar {
+    position: fixed; left: 0; right: 0; bottom: calc(var(--m-tabbar-h) + env(safe-area-inset-bottom)); z-index: 35;
+    padding: 8px 12px; border-top: 1px solid var(--border); background: rgba(11, 17, 32, 0.96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  .m-actionbar .opp-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; margin: 0; }
+  .m-actionbar .opp-go { grid-column: 1; min-height: 46px; }
+  .m-actionbar .opp-actions-row { grid-column: 2; grid-row: 1; display: flex; }
+  .m-actionbar .opp-actions-row .btn:first-child { display: none; } /* "View full analysis": it lives in the Chart pane */
+  .m-actionbar .opp-venue { grid-column: 1 / -1; font-size: 11px; }
+  .moon-parts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .moon-head .scan-title { font-size: 18px; }
+  .moon-bar { margin-left: 0; }
+
+  /* ---------- Card tables (Holdings, Portfolio matrix, recommendations, Scanner, Watching, Radar) ---------- */
+  .table-wrap { overflow: visible; }
+  .data-table:not(.opp-scenarios) { display: block; white-space: normal; }
+  .data-table:not(.opp-scenarios) thead { display: none; }
+  .data-table:not(.opp-scenarios) tbody { display: flex; flex-direction: column; gap: 8px; }
+  .data-table:not(.opp-scenarios) tr {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; min-height: 44px;
+    padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  }
+  .data-table:not(.opp-scenarios) td { display: block; min-width: 0; padding: 0 !important; border: 0; text-align: left !important; overflow-wrap: anywhere; box-shadow: none !important; }
+  .data-table:not(.opp-scenarios) td::before {
+    content: attr(data-label); display: block; margin-bottom: 1px; color: var(--text-faint);
+    font: 500 10px var(--font-ui); letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .data-table:not(.opp-scenarios) td:first-child { grid-column: 1 / -1; }
+  .data-table:not(.opp-scenarios) td:first-child::before, .data-table td[colspan]::before, .data-table td[data-label=""]::before { display: none; }
+  .data-table:not(.opp-scenarios) td[colspan], .data-table td.pf-why, .data-table td.pf-actions { grid-column: 1 / -1; }
+  .data-table tr.row.is-selected { border-color: var(--solid); }
+  .data-table tr.row.is-selected td { background: transparent !important; }
+
+  /* ---------- Trade Amount: pills as a 3 x 2 touch grid ---------- */
+  .ta-pills { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .ta-pill { width: 100%; }
+  .ta-row { flex-wrap: wrap; }
+  .ta-wrap, .ta-input { width: 100%; }
+
+  /* ---------- Page grids to one column ---------- */
+  .pf-pilot-grid, .pf-grid, .scan-grid, .today-split, .today-support, .saved-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .pf-kpis, .today-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .pf-alloc-form { flex-wrap: wrap; }
+  .pf-alloc-input { width: 100%; }
+  .scan-header, .pf-header, .today-venue-bar { flex-wrap: wrap; }
+  .scan-run-wrap { align-items: stretch; width: 100%; }
+  .scan-pages { flex-wrap: wrap; width: 100%; }
+  .scan-page { min-width: 44px; height: 44px; }
+  .pf-venues-toggle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .pf-header-right, .pf-header-actions { width: 100%; }
+  .pf-header-actions { flex-wrap: wrap; }
+  .apv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apv-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .apv-actions .apv-approve { grid-column: 1 / -1; }
+  .input { width: 100%; }
+}
