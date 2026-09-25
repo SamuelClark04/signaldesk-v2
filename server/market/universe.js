@@ -48,6 +48,6 @@ const CORE_WATCHLIST = Object.freeze(['SPY', 'QQQ', 'AAPL', 'NVDA', 'MSFT', 'MET
   'BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD', 'LINK-USD', 'DOGE-USD', 'XRP-USD']);
 
 // Sent to clients on connect (UNIVERSE): lists, names, which stocks stream and which are REST-polled.
-const snapshot = () => ({ stocks: [...STOCKS], crypto: [...CRYPTO], streamedStocks: [...STREAMED_STOCKS], polledStocks: [...POLLED_STOCKS], pollSeconds: 60, names: { ...NAMES } });
+const snapshot = () => ({ stocks: [...STOCKS], crypto: [...CRYPTO], streamedStocks: [...STREAMED_STOCKS], polledStocks: [...POLLED_STOCKS], pollSeconds: 60, optionableStocks: [...OPTIONABLE_STOCKS], names: { ...NAMES } });
 
 module.exports = { STOCKS, CRYPTO, NAMES, OPTIONABLE_STOCKS, STREAMED_STOCKS, POLLED_STOCKS, STOCK_STREAM_LIMIT, CORE_WATCHLIST, snapshot };

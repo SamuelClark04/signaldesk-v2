@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="styles/today.css">
   <link rel="stylesheet" href="styles/moonshots.css">
   <!-- Last: the iPhone layout (<= 768px) overrides the desktop sheets. -->
+  <link rel="stylesheet" href="styles/manual-ticket.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
@@ -109,6 +110,10 @@
               <span class="field-label" id="settings-capital-label">Max Capital Per Trade (%) (automatic size cap, applies instantly, from the next scan)</span>
               <div class="settings-risk settings-capital" id="settings-capital" role="radiogroup" aria-labelledby="settings-capital-label"></div>
             </div>
+            <div class="field settings-risk-field">
+              <span class="field-label" id="settings-exitspread-label">Max Option Exit Spread ($) (per contract; applies instantly, from the next scan)</span>
+              <div class="settings-exitspread" id="settings-exitspread" aria-labelledby="settings-exitspread-label"></div>
+            </div>
             <label class="field">
               <span class="field-label">Paper trading bankroll</span>
               <span class="input-wrap">
@@ -179,6 +184,7 @@
   <script src="views/live-chart.js"></script>
   <script src="views/sentiment-badge.js"></script>
   <script src="views/news-panel.js"></script>
+  <script src="components/live-close.js"></script>
   <script src="views/trade-hud.js"></script>
   <script src="views/option-stats.js"></script>
   <script src="views/position-detail.js"></script>
@@ -186,6 +192,8 @@
   <script src="views/watch-heat.js"></script>
   <script src="views/level-chart.js"></script>
   <script src="views/trade-amount.js"></script>
+  <script src="components/manual-options-ticket.js"></script>
+  <script src="components/manual-trade-ticket.js"></script>
   <script src="views/opportunity-detail.js"></script>
   <script src="views/setup-analysis.js"></script>
   <script src="views/scanner-data.js"></script>

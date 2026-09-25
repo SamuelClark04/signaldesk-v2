@@ -78,6 +78,7 @@
         : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price',
     });
     exit.onclick = () => ctx.onClosePosition(p, m);
+    const exitBtn = SD.liveClose.can(p) ? SD.liveClose.button(p, m, ctx) : exit; // [Close at Coinbase] (Phase 60)
     return el('div', { className: 'hud-pos' }, [
       el('div', { className: 'hud-line' }, [el('span', { className: `hud-venue${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: venue }),
         el('span', { textContent: realOption ? `${p.optionsData.structure === 'vertical' ? (p.optionsData.type === 'put' ? 'BEAR PUT SPREAD' : 'BULL CALL SPREAD') : `LONG ${p.optionsData.type === 'put' ? 'PUT' : 'CALL'}`}` : `${p.direction.toUpperCase()} ${size(p)} @ ${price(p.fillPrice, p)}` })]),
@@ -87,7 +88,7 @@
       el('div', { className: 'hud-levels' }, [el('span', { className: 'text-short', textContent: `${realOption ? `${p.asset} stop` : 'Stop'} ${price(p.invalidation, p)}` }),
         el('span', { className: 'text-long', textContent: `T1 ${t1 ? price(t1, p) : '—'}` }),
         ...(m.net !== null && m.net !== undefined ? [el('span', { className: 'hud-muted', textContent: `after fees ${signed(m.net, money)}` })] : [])]),
-      exit,
+      exitBtn,
     ]);
   }
 

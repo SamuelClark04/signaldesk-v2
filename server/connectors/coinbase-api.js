@@ -193,15 +193,18 @@ async function fetchOrder(auth, orderId) {
 //     exit: { status, filledQty, avgFillPrice, kind: null, brokerExitId } | null }
 // kind is null: one trigger-bracket order serves both exits, so the caller infers
 // take-profit vs stop-loss from the fill price.
-async function getOrderStatus(brokerId) {
+// opts.exitId: a protective bracket re-placed on its own (coinbase-exit.js, Phase 60)
+// replaces the entry's attached order as "the exit".
+async function getOrderStatus(brokerId, opts = {}) {
   if (!brokerId) return { ok: false, error: 'missing broker order id' };
   const auth = loadAuth();
   if (auth.error) return { ok: false, error: auth.error };
   try {
     const entry = await fetchOrder(auth, brokerId);
     let exit = null;
-    if (entry.attached_order_id) {
-      const a = await fetchOrder(auth, entry.attached_order_id);
+    const exitId = opts.exitId || entry.attached_order_id;
+    if (exitId) {
+      const a = await fetchOrder(auth, exitId);
       const status = normStatus(a.status);
       exit = {
         status: TERMINAL.has(status) || numOrNull(a.filled_size) > 0 ? status : 'open',
@@ -209,7 +212,7 @@ async function getOrderStatus(brokerId) {
         avgFillPrice: numOrNull(a.average_filled_price),
         fees: numOrNull(a.total_fees) || 0,
         kind: null,
-        brokerExitId: a.order_id || entry.attached_order_id,
+        brokerExitId: a.order_id || exitId,
       };
     }
     const status = normStatus(entry.status);
@@ -227,6 +230,45 @@ async function getOrderStatus(brokerId) {
   }
 }
 
+// One order on its own (a manual market SELL): { ok, status, filledQty, avgFillPrice, fees, terminal }.
+async function getOrder(orderId) {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    const o = await fetchOrder(auth, orderId);
+    const status = normStatus(o.status);
+    return { ok: true, status, filledQty: numOrNull(o.filled_size) || 0, avgFillPrice: numOrNull(o.average_filled_price), fees: numOrNull(o.total_fees) || 0, terminal: TERMINAL.has(status) };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+// Available (not on hold) and held quantity of one currency, e.g. 'JTO'. Phase 60: a
+// canceled bracket's hold is released before a manual sell. { ok, available, hold }.
+async function getAvailable(currency) {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    let available = 0;
+    let hold = 0;
+    let cursor = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const body = await cbFetch(auth, 'GET', ACCOUNTS_PATH, { query: `?limit=250${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}` });
+      if (!body || !Array.isArray(body.accounts)) throw new Error('Coinbase: unexpected accounts response');
+      for (const a of body.accounts) {
+        if ((a.currency || (a.available_balance && a.available_balance.currency)) !== currency) continue;
+        available += Number((a.available_balance && a.available_balance.value) || 0);
+        hold += Number((a.hold && a.hold.value) || 0);
+      }
+      if (!body.has_next || !body.cursor) break;
+      cursor = body.cursor;
+    }
+    return { ok: true, available, hold };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
 const submitOrder = (...args) => require('./coinbase-orders').submitOrder(...args);
 
-module.exports = { getAccount, getPortfolioBreakdown, submitOrder, cancelOrder, getOrderStatus, productIncrements, buildJwt, loadSigningKey, cbFetch, loadAuth, failure, ORDERS_PATH };
+module.exports = { getAccount, getPortfolioBreakdown, submitOrder, cancelOrder, getOrderStatus, getOrder, getAvailable, productIncrements, buildJwt, loadSigningKey, cbFetch, loadAuth, failure, ORDERS_PATH };

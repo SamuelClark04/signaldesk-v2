@@ -37,6 +37,7 @@
     $('settings-risk').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     $('settings-strictness').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     $('settings-capital').querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    $('settings-exitspread').querySelectorAll('button, input').forEach((b) => { b.disabled = on; });
     clearTimeout(pendingTimer);
     if (on) {
       pendingTimer = setTimeout(() => {
@@ -123,6 +124,35 @@
     }));
   }
 
+  // Max Option Exit Spread (Phase 60): System 5 skips a spread whose projected exit
+  // slippage (0.15 x the combined leg bid/ask x 100, per contract) is over the cap.
+  // The toggle and the dollar value each save the moment they change.
+  function renderExitSpread() {
+    const box = $('settings-exitspread');
+    if (!saved) { box.replaceChildren(el('span', { className: 'settings-status', textContent: 'Waiting for the server…' })); return; }
+    const on = saved.optionExitSpreadOn !== false;
+    const cap = Number(saved.maxOptionExitSpread) || 0;
+    const input = $('settings-exitspread-input') || el('input', { id: 'settings-exitspread-input', className: 'input', type: 'number', min: '0', max: '500', step: '0.5', inputMode: 'decimal' });
+    if (document.activeElement !== input) input.value = cap.toFixed(2);
+    input.disabled = pending || !on;
+    const commit = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v) || v < 0 || v > 500) { setStatus('Exit spread cap must be $0-$500.', 'error'); input.value = cap.toFixed(2); return; }
+      if (Math.abs(v - cap) > 1e-9) request({ maxOptionExitSpread: v });
+    };
+    input.onchange = commit;
+    input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } };
+    const toggle = el('button', { type: 'button', id: 'settings-exitspread-toggle', className: `settings-toggle${on ? ' is-on' : ''}`, disabled: pending, textContent: on ? 'On' : 'Off',
+      title: on ? 'Filter on: wide option chains are skipped' : 'Filter off: every chain qualifies on the other rules' });
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', String(on));
+    toggle.onclick = () => request({ optionExitSpreadOn: !on });
+    const note = el('span', { className: 'settings-exitspread-note', textContent: on
+      ? `Skips spreads that would give up more than $${cap.toFixed(2)} per contract closing (0.15 × both legs' bid/ask × 100). 0 = no cap.`
+      : 'Off: spreads qualify whatever their exit spread (still costed in every net figure).' });
+    box.replaceChildren(toggle, el('span', { className: 'input-wrap settings-exitspread-wrap' }, [el('span', { className: 'input-prefix', textContent: '$' }), input]), note);
+  }
+
   // Going LIVE is the one change that needs an explicit confirmation.
   function changeMode(m) {
     const value = $(m.id).value;
@@ -185,6 +215,7 @@
     renderRisk();
     renderStrictness();
     renderCapital();
+    renderExitSpread();
     renderFacts();
   }
 
@@ -196,6 +227,7 @@
     renderRisk();
     renderStrictness();
     renderCapital();
+    renderExitSpread();
     renderFacts();
   }
 
@@ -225,6 +257,7 @@
   renderRisk();
   renderStrictness();
   renderCapital();
+  renderExitSpread();
 
   SD.settings = {
     init: (t) => { transport = t; },

@@ -107,6 +107,7 @@
   // Shared actions for lib/venue.js (the Today + Portfolio venue controls).
   SD.app = {
     isOnline,
+    state, // read-only use: the manual trade ticket (universe, settings)
     send: (msg) => { if (isOnline()) transport.send(msg); },
     refresh: () => refreshView(),
     showTab: (hash) => showTab(hash), // the iPhone tab bar (lib/mobile.js)
@@ -132,6 +133,12 @@
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
     LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
+    // Manual Trade Ticket + [Close at Coinbase] (Phase 60): answers to this client.
+    MANUAL_TRADE_DEFAULTS: (p) => SD.manualTicket.received('MANUAL_TRADE_DEFAULTS', p),
+    MANUAL_TRADE_PREVIEW: (p) => SD.manualTicket.received('MANUAL_TRADE_PREVIEW', p),
+    MANUAL_TRADE_RESULT: (p) => SD.manualTicket.received('MANUAL_TRADE_RESULT', p),
+    MANUAL_OPTIONS: (p) => SD.manualTicket.received('MANUAL_OPTIONS', p),
+    LIVE_CLOSE_RESULT: (p) => SD.liveClose.received(p),
   };
 
   function setConn(state, label) {

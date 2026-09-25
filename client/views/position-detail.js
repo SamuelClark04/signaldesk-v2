@@ -96,6 +96,7 @@
   // Same rules as the trade panel's button: paper positions close at the live price
   // (server re-checks); LIVE / adopted ones are closed at the broker.
   function exitButton(p, m, ctx) {
+    if (SD.liveClose.can(p)) return SD.liveClose.button(p, m, ctx); // [Close at Coinbase] (Phase 60)
     const atBroker = p.execution === 'LIVE' || p.execution === 'BROKER';
     const closing = !!(ctx.closing && ctx.closing.has(p.id));
     const b = el('button', { type: 'button', className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,

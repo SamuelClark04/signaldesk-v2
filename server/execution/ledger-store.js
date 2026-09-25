@@ -23,6 +23,10 @@ const SETTINGS_RULES = {
   riskProfile: { type: 'choice', default: DEFAULT_PROFILE, values: Object.keys(RISK_PROFILES) }, // % risked per new trade
   strictness: { type: 'choice', default: DEFAULT_STRICTNESS, values: Object.keys(STRICTNESS_LEVELS) }, // setup gates (risk/strictness.js)
   maxCapitalPct: { type: 'choice', default: DEFAULT_MAX_CAPITAL_PCT, values: [...CAPITAL_CHOICES] }, // Max Capital Per Trade (risk-engine.js)
+  // Phase 60: System 5 refuses a spread whose projected exit slippage (0.15 x the
+  // combined leg bid/ask x 100) is over this many dollars per contract, while on.
+  optionExitSpreadOn: { type: 'choice', default: true, values: [true, false] },
+  maxOptionExitSpread: { type: 'number', default: 8, min: 0, max: 500 },
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
 

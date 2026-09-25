@@ -103,8 +103,9 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const atm = main.contracts.filter((c) => c.iv > 0).sort((a, b) => Math.abs(a.strike - px) - Math.abs(b.strike - px) || Math.abs(a.dte - w.prefer) - Math.abs(b.dte - w.prefer))[0];
   const single = !!(atm && hv && atm.iv <= hv && bankroll >= builder.CONFIG.single.minBankroll);
   const ivText = atm && hv ? `${(atm.iv * 100).toFixed(0)}% ${atm.iv <= hv ? '<=' : '>'} 20-day HV ${(hv * 100).toFixed(0)}%` : 'vs HV unavailable';
-  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings });
-  if (!b.ok) return { id, reason: `OPTIONS_NO_STRUCTURE: ${b.error}` };
+  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings,
+    maxExitSpread: env.maxExitSpread });
+  if (!b.ok) return { id, reason: b.wide ? b.error : `OPTIONS_NO_STRUCTURE: ${b.error}` };
   const p = b.plan;
   const k = p.long;
   const vertical = p.structure === 'vertical';
@@ -118,7 +119,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const od = {
     underlying: symbol, type, structure: p.structure, fill: p.od.fill, label, contract: k.symbol, ...(vertical ? { shortContract: p.short.symbol, shortStrike: p.short.strike, width: p.width, maxProfit: p.maxProfit } : {}),
     strike: k.strike, expiration: k.expiration, dte: k.dte, feed: main.feed, multiplier: CONFIG.multiplier, iv: k.iv, delta: vertical ? k.delta - p.short.delta : k.delta,
-    bid: p.exitNow, ask: p.debit, debit: p.debit, netMid: p.netMid, spread: p.od.spread, combinedLegSpread: p.combined, refSpot: px, refMid: p.od.refMid, refAt: now, legs: p.legs,
+    bid: p.exitNow, ask: p.debit, debit: p.debit, netMid: p.netMid, spread: p.od.spread, combinedLegSpread: p.combined, exitSpread: Math.round(p.exitSpread * 100) / 100, refSpot: px, refMid: p.od.refMid, refAt: now, legs: p.legs,
     riskPerShare: p.riskPerShare, valueAtStop: p.stopValue, valueAtTarget: p.t1Value, exitRule: { stopValue: p.stopValue, targetValue: p.t1Value, ...(p.t2Value ? { t2Value: p.t2Value } : {}) },
     stopSharePct: Math.round(p.stopShare * 100), t1SharePct: Math.round(p.t1Share * 100), netRR: p.netRR, breakeven: p.breakeven, afterHours,
     quoteTime: Math.min(...[k, p.short].filter(Boolean).map((x) => x.quoteTime)), greeksSource: k.greeksSource, horizon: sig.horizon,
@@ -181,6 +182,9 @@ async function evaluate(symbol, px, env, bench) {
   return block(symbol, last.id, last.reason, { setupType: `${top.direction === 'call' ? 'Call' : 'Put'} spread · ${ARCH[top.archetype][top.direction === 'call' ? 0 : 1]}`, direction: top.direction === 'call' ? 'long' : 'short', timeframe: top.timeframe });
 }
 
+// Settings -> the exit-spread cap in dollars per contract, or null when off (Phase 60).
+const exitSpreadCap = (s) => (s && s.optionExitSpreadOn !== false && s.maxOptionExitSpread > 0 ? s.maxOptionExitSpread : null);
+
 // marks: live price, else the last session close (getMarkPrices); live: fresh prices only.
 async function generateCandidates(marks, { live = marks, bankroll = null } = {}, now = Date.now()) {
   blocks = [];
@@ -189,14 +193,16 @@ async function generateCandidates(marks, { live = marks, bankroll = null } = {},
   const spyPx = lookup(marks, 'SPY');
   const spyBars = spyPx > 0 ? await getDailyBars('SPY', now) : [];
   const bench = spyBars.length > 1 ? changeOf(spyBars, spyPx) : NaN;
-  const bank = bankroll || (() => { try { return require('../execution/ledger-store').getSettings().bankroll; } catch { return 0; } })();
+  const set = (() => { try { return require('../execution/ledger-store').getSettings(); } catch { return {}; } })();
+  const bank = bankroll || set.bankroll || 0;
+  const maxExitSpread = exitSpreadCap(set);
   const afterHours = !session.isEquityMarketOpen(now);
   for (const symbol of CONFIG.symbols) {
     tally.checked();
     const px = afterHours ? lookup(marks, symbol) : lookup(live, symbol);
     if (!(px > 0)) { tally.skip(symbol, afterHours ? 'No price (live or last close)' : 'Market open: no fresh price yet (next pass)'); continue; }
     try {
-      const cand = await evaluate(symbol, px, { now, afterHours, bankroll: bank }, bench);
+      const cand = await evaluate(symbol, px, { now, afterHours, bankroll: bank, maxExitSpread }, bench);
       if (cand) { out.push(cand); tally.setup(); }
     } catch (err) {
       console.error(`[options-system] ${symbol} failed: ${err.message}`);
@@ -221,5 +227,5 @@ function proximity(latestPricesMap) {
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 function reset() { coils.clear(); hourly.clear(); blocks = []; }
 
-module.exports = { generateCandidates, proximity, takeBlocks, takeScan: tally.take, reset, propose, evaluate, changeOf, STRATEGY_ID, CONFIG,
+module.exports = { generateCandidates, proximity, exitSpreadCap, takeBlocks, takeScan: tally.take, reset, propose, evaluate, changeOf, STRATEGY_ID, CONFIG,
   analyse: signals.dailySqueeze, squeezeAt: signals.squeezeAt };

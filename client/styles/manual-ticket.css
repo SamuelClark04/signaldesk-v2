@@ -1,0 +1,60 @@
+/* Manual Trade Ticket (Phase 60): a modal over Opportunities, and the [Close at Coinbase] toast. */
+.mt-launch { padding: 6px 12px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+.mt-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px 16px; background: rgba(2, 6, 17, 0.72); overflow-y: auto; }
+.mt-panel { width: min(640px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+.mt-head { display: flex; align-items: center; gap: 10px; }
+.mt-head strong { font-size: 16px; }
+.mt-asset { width: 130px; font-family: var(--font-mono); text-transform: uppercase; }
+.mt-x { margin-left: auto; padding: 2px 10px; font-size: 18px; line-height: 1; }
+
+.mt-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.mt-seg-btn { padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg); color: var(--text-muted); font: 600 12px var(--font-ui); cursor: pointer; }
+.mt-seg-btn.is-active { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+.mt-seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mt-dir .mt-seg-btn.is-active:first-child { border-color: var(--long); color: var(--long); background: var(--long-bg); }
+.mt-dir .mt-seg-btn.is-active:last-child { border-color: var(--short); color: var(--short); background: var(--short-bg); }
+
+.mt-body { display: flex; flex-direction: column; gap: 10px; }
+.mt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.mt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 12px; }
+.mt-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mt-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.mt-input, .mt-select { width: 100%; font-family: var(--font-mono); }
+.mt-select { padding: 6px 8px; }
+
+.mt-live { display: flex; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: 13px; }
+.mt-k { color: var(--text-faint); }
+.mt-out { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.mt-kv { display: flex; flex-direction: column; gap: 2px; }
+.mt-kv span { color: var(--text-faint); font-size: 11px; }
+.mt-kv strong { font-family: var(--font-mono); font-size: 13px; }
+
+.mt-finds { display: flex; flex-wrap: wrap; gap: 8px; }
+.mt-find { font-weight: 600; }
+.mt-plans { display: flex; flex-direction: column; gap: 6px; }
+.mt-plan { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.mt-plan span { grid-column: 1; color: var(--text-muted); font-size: 12px; }
+.mt-plan .mt-use { grid-column: 2; grid-row: 1 / span 2; }
+.mt-plan.is-wide { border-color: var(--warn); }
+
+.mt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mt-go { padding: 9px 16px; font-weight: 700; }
+.mt-go.is-live { background: var(--short); border-color: var(--short); }
+.mt-note { margin: 0; color: var(--text-muted); font-size: 12px; }
+.mt-note.is-warn { color: var(--warn); }
+.mt-error { margin: 0; color: var(--short); font-size: 12px; }
+.mt-ok { margin: 0; color: var(--long); font-size: 12px; }
+.mt-foot { margin: 0; color: var(--text-faint); font-size: 11px; }
+
+.hud-exit.is-live-close { border-color: var(--warn); background: var(--warn); color: #111827; }
+.lc-toast { position: fixed; right: 16px; bottom: 16px; z-index: 1100; max-width: min(460px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 13px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+.lc-toast.is-ok { border-color: var(--long); }
+.lc-toast.is-error { border-color: var(--short); }
+
+@media (max-width: 640px) {
+  .mt-overlay { padding: 0; align-items: flex-end; }
+  .mt-panel { width: 100%; max-height: 92vh; overflow-y: auto; border-radius: 12px 12px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .mt-grid { grid-template-columns: 1fr 1fr; }
+  .lc-toast { left: 16px; right: 16px; bottom: calc(72px + env(safe-area-inset-bottom)); }
+}

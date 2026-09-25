@@ -35,6 +35,11 @@
 //               (steeper gamma: about twice the net delta for the same debit), unless
 //               earnings falls on or before that expiration.
 //   Legs (Phase 58): bid/ask <= 12% of mid, and <= $0.35 when the debit is under $2.50.
+//   Exit spread (Phase 60): the projected cost of closing, (net mid - exit fill) x 100
+//               per contract (a package: 0.15 x the combined leg bid/ask x 100; a single:
+//               mid - bid), is capped at a.maxExitSpread dollars (Settings, default $8;
+//               null / 0 = off). A structure over it is WIDE_EXIT_SPREAD: no ticker is
+//               dropped, it qualifies again when its chain tightens or the cap is raised.
 const { packageQuote, OPTIONS_ROUND_TRIP_PER_CONTRACT } = require('../risk/cost-authority');
 const { exitValue } = require('../risk/option-pricing');
 const { expectedMove } = require('../risk/expected-move');
@@ -86,7 +91,11 @@ function levelFor(od, value, spot, now) {
 }
 
 // Exit plan for one structure (short null = single). { ok, ...plan } or { ok:false, error }.
-function planFrom({ long, short, type, spot, structuralStop, now, minNetDelta = CONFIG.netDelta.min }) {
+// Projected exit slippage per contract, in dollars: what closing gives up under the net mid.
+const exitSpreadOf = (q) => Math.max(0, q.mid - q.exit) * MULT;
+const wideWhy = (tag, x, cap) => `WIDE_EXIT_SPREAD: ${tag}: exit spread $${x.toFixed(2)} exceeds $${Number(cap).toFixed(2)} cap`;
+
+function planFrom({ long, short, type, spot, structuralStop, now, minNetDelta = CONFIG.netDelta.min, maxExitSpread = null }) {
   const sign = type === 'call' ? 1 : -1;
   const legs = [{ side: 'buy', type, strike: long.strike, ratio: 1, contract: long.symbol, iv: long.iv, bid: long.bid, ask: long.ask, delta: long.delta },
     ...(short ? [{ side: 'sell', type, strike: short.strike, ratio: 1, contract: short.symbol, iv: short.iv, bid: short.bid, ask: short.ask, delta: short.delta }] : [])];
@@ -129,7 +138,10 @@ function planFrom({ long, short, type, spot, structuralStop, now, minNetDelta = 
   const t1 = levelFor(od, t1Value, spot, hold);
   if (!t1 || sign * (t1 - spot) <= 0) return { ok: false, error: `${tag}: T1 ${t1Value} is not reachable by mid-hold (only near expiry)` };
   const t2Level = (v) => levelFor(od, v, spot, hold) || long.strike + sign * v;
+  const exitSpread = exitSpreadOf(q);
+  if (maxExitSpread > 0 && exitSpread > maxExitSpread + 1e-9) return { ok: false, wide: true, exitSpread, error: wideWhy(tag, exitSpread, maxExitSpread) };
   return {
+    exitSpread,
     ok: true, structure: short ? 'vertical' : 'single', type, long, short, legs, od, width, debit, netMid: cents(q.mid), exitNow: cents(q.exit), combined: cents(q.combined),
     slippage: cents(q.slippage), maxProfit: short ? cents(width - debit) : null, stopShare, stopValue, riskPerShare: cents(risk), t1Value, t2Value: t2Value > t1Value ? t2Value : null,
     t1Share: t1Value / debit - 1, netRR: rrAt(t1Value), costR, invalidation: cents(invalidation), t1: cents(t1), t2: t2Value > t1Value ? cents(t2Level(t2Value)) : null,
@@ -163,7 +175,10 @@ function build(a) {
   const minNetDelta = a.spot >= CONFIG.netDelta.priceyAt ? CONFIG.netDelta.minPricey : CONFIG.netDelta.min;
   if (!exps.length) return { ok: false, error: `no ${a.type}s listed ${CONFIG.windows[a.horizon].minDte}-${CONFIG.windows[a.horizon].maxDte} DTE` };
   const whys = [];
+  const wide = []; // exit spreads of structures that passed everything but the cap
   let tried = 0;
+  let first = null; // the best expiration's result; a.alternatives: keep collecting (up to 3 plans) across the next expirations
+  const found = [];
   for (const exp of exps) {
     const em = expectedMove(a.calls, a.puts, a.spot, exp);
     const list = a.chain.filter((c) => c.expiration === exp && c.type === a.type);
@@ -184,6 +199,8 @@ function build(a) {
         if (!p.ok) { whys.push(`${exp} ${p.error}`); continue; }
         if (tooClose && sign * (level - p.breakeven) <= 0) { whys.push(`${exp} ${long.strike}: breakeven ${p.breakeven} is past the ${sign > 0 ? 'resistance' : 'support'} ${cents(level)} (< 0.5 ATR away)`); continue; }
         if (caps && (p.debit > caps.debit || p.riskPerShare > caps.risk)) { whys.push(`${exp} ${long.strike}${short ? `/${short.strike}` : ''}: $${Math.round(p.debit * MULT)} debit over the small-account 1-contract cap`); continue; }
+        // The exit-spread cap last: WIDE_EXIT_SPREAD only when it is the sole reason.
+        if (a.maxExitSpread > 0 && p.exitSpread > a.maxExitSpread + 1e-9) { wide.push(p.exitSpread); whys.push(`${exp} ${wideWhy(`${long.strike}${short ? `/${short.strike}` : ''}`, p.exitSpread, a.maxExitSpread)}`); continue; }
         plans.push({ ...p, anchored: !!anchor && short === anchor });
       }
     }
@@ -192,9 +209,14 @@ function build(a) {
     const deltaMiss = (p) => (p.short ? Math.max(0, lo - p.netDelta, p.netDelta - hi) : 0);
     const score = (p) => [p.anchored ? 0 : 1, deltaMiss(p), p.width ? Math.abs(p.debit / p.width - CONFIG.idealShare) : 0, Math.abs(Math.abs(p.long.delta) - CONFIG.longDelta[2]), p.debit];
     plans.sort((x, y) => { const sx = score(x); const sy = score(y); for (let i = 0; i < sx.length; i += 1) if (sx[i] !== sy[i]) return sx[i] - sy[i]; return 0; });
-    return { ok: true, plan: plans[0], em: em.ok ? em : null, level, anchored: plans[0].anchored, tried, expiration: exp };
+    if (!first) first = { em: em.ok ? em : null, expiration: exp };
+    found.push(...plans);
+    if (!a.alternatives || found.length >= 3) break;
   }
-  return { ok: false, error: `${tried} structure(s) tried over ${exps.join(', ')}: ${[...new Set(whys)].slice(0, 4).join(' | ') || 'none tradeable'}` };
+  if (found.length) return { ok: true, plan: found[0], alternatives: found.slice(1, 3), em: first.em, level, anchored: found[0].anchored, tried, expiration: first.expiration };
+  const list = `${tried} structure(s) tried over ${exps.join(', ')}: ${[...new Set(whys)].slice(0, 4).join(' | ') || 'none tradeable'}`;
+  if (wide.length) return { ok: false, wide: true, error: `WIDE_EXIT_SPREAD: exit spread $${Math.min(...wide).toFixed(2)} exceeds $${Number(a.maxExitSpread).toFixed(2)} cap (the tightest of ${wide.length} otherwise-valid structure(s)); ${list}` };
+  return { ok: false, error: list };
 }
 
-module.exports = { build, planFrom, levelFor, levelTarget, legWhy, expirationsFor, CONFIG };
+module.exports = { build, planFrom, levelFor, levelTarget, legWhy, expirationsFor, exitSpreadOf, CONFIG };

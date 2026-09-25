@@ -146,6 +146,20 @@ function reducePosition(candidateId, fraction, exitPrice, exitReason) {
   return closePosition(part.id, exitPrice, exitReason);
 }
 
+// Split `qty` off an open position into its own record "<id>:part:<ms>" (dollar risk
+// pro rata), e.g. the filled part of a partially filled broker sell (coinbase-exit.js).
+function splitPosition(candidateId, qty) {
+  const pos = activePositions.find((p) => p.id === candidateId);
+  if (!pos) throw new Error(`paper-ledger: no open position ${candidateId}`);
+  if (!(qty > 0 && qty < pos.positionSize)) throw new Error('paper-ledger: split quantity must be inside the position');
+  const part = { ...pos, id: `${pos.id}:part:${Date.now()}`, parentId: pos.id, positionSize: qty, dollarRisk: pos.dollarRisk * (qty / pos.positionSize) };
+  pos.positionSize -= qty;
+  pos.dollarRisk -= part.dollarRisk;
+  activePositions.push(part);
+  store.save();
+  return { ...part };
+}
+
 // Exit checks (stop, T1 partial, T2 runner, option values): exit-monitor.js.
 const monitorPositions = (latestPricesMap) => exits.monitorPositions(latestPricesMap);
 
@@ -243,6 +257,7 @@ module.exports = {
   discardOrder,
   closePosition,
   reducePosition,
+  splitPosition,
   monitorPositions,
   syncLiveFill,
   voidLivePosition,

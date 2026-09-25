@@ -108,4 +108,26 @@ async function sellMarket(product, size, clientOrderId) {
   return orderId ? { ok: true, brokerId: orderId, qty: Number(qty), environment: 'coinbase-live' } : { ok: false, error: 'Coinbase: order response had no order_id' };
 }
 
-module.exports = { submitOrder, sellMarket, routeProduct };
+// A stand-alone protective SELL bracket (take-profit limit + stop trigger) for `size`
+// already held: re-arms a position whose attached bracket was canceled for a manual
+// close that then could not sell (coinbase-exit.js, Phase 60), so it is never left bare.
+async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
+  if (!/^[A-Z0-9]{1,10}-USDC?$/.test(String(product)) || !(size > 0) || !(stop > 0) || !(takeProfit > stop)) return { ok: false, error: `Coinbase bracket not sent: invalid ${product} ${size} ${stop}/${takeProfit}` };
+  const inc = await productIncrements(product);
+  const qty = inc ? fmtStep(size, inc.base, 'down') : base8(size);
+  const px = (x) => (inc ? fmtStep(x, inc.quote) : quotePx(x));
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  let body;
+  try {
+    body = await cbFetch(auth, 'POST', ORDERS_PATH, { body: { client_order_id: String(clientOrderId), product_id: product, side: 'SELL',
+      order_configuration: { trigger_bracket_gtc: { base_size: qty, limit_price: px(takeProfit), stop_trigger_price: px(stop) } } } });
+  } catch (err) {
+    return failure(err);
+  }
+  if (!body || body.success !== true) return rejection(body, 'bracket');
+  const orderId = body.success_response && body.success_response.order_id;
+  return orderId ? { ok: true, brokerId: orderId } : { ok: false, error: 'Coinbase: bracket response had no order_id' };
+}
+
+module.exports = { submitOrder, sellMarket, placeBracket, routeProduct };

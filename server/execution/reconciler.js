@@ -35,7 +35,11 @@ async function reconcileOne(pos, ledger) {
   const api = APIS[pos.broker];
   if (!api) return { id: pos.id, action: 'error', detail: `unknown broker "${pos.broker}"` };
 
-  const s = await api.getOrderStatus(pos.brokerId);
+  // A manual [Close at Coinbase] sell still working when it returned (coinbase-exit.js).
+  if (pos.brokerManualExitId && pos.broker === 'Coinbase') return require('./coinbase-exit').settle(pos, ledger);
+  if (pos.adopted) return { id: pos.id, action: 'unchanged' };
+
+  const s = await api.getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId }); // a re-armed stand-alone bracket, if any
   if (!s.ok) {
     console.warn(`[reconcile] ${pos.id}: ${pos.broker} status unavailable (${s.error}); unchanged`);
     return { id: pos.id, action: 'error', detail: s.error };
@@ -91,8 +95,10 @@ async function reconcileOne(pos, ledger) {
 // Returns one result per LIVE position: { id, action: closed|voided|synced|unchanged|waiting|error, ... }.
 // Positions are checked concurrently so one slow broker call can't stall the loop.
 async function reconcileLivePositions(activePositions, ledger) {
-  // Adopted holdings have no broker order to poll (they are watched, not traded).
-  const live = (activePositions || []).filter((p) => p.execution === 'LIVE' && !p.adopted);
+  // Adopted holdings have no broker order to poll (they are watched, not traded) unless a
+  // manual sell of one is working; a position mid-[Close at Coinbase] is left to that close.
+  const closing = require('./coinbase-exit').isClosing;
+  const live = (activePositions || []).filter((p) => p.execution === 'LIVE' && (!p.adopted || p.brokerManualExitId) && !closing(p.id));
   return Promise.all(live.map((pos) => reconcileOne(pos, ledger).catch((err) => {
     console.error(`[reconcile] ${pos.id} failed: ${err.message}`);
     return { id: pos.id, action: 'error', detail: err.message };

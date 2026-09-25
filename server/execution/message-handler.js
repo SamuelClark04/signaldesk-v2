@@ -42,7 +42,7 @@ async function routeApproved(order, livePrice) {
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
   const settings = ledger.getSettings();
   const resized = order.amountOverride ? order : null;
-  if (settings[venue.modeKey] === 'paper') return ledger.executeOrder(order.id, livePrice, {}, resized);
+  if (settings[venue.modeKey] === 'paper' || order.forcePaper) return ledger.executeOrder(order.id, livePrice, {}, resized); // forcePaper: a manual PAPER ticket (manual-trade.js)
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
   // A LIVE order must have been sized from that live account. One staged while
   // the venue was on paper (or before this check existed) is refused, never sent.
@@ -221,6 +221,9 @@ function createMessageHandler({ send, broadcast }) {
 
   // Portfolio Pilot: deposit -> staged BUY setups; SELL / TRIM approvals (pilot-handler.js).
   const handlePilot = createPilotHandler({ send, broadcast });
+  // Manual Trade Ticket + [Close at Coinbase] (Phase 60: manual-trade.js, coinbase-exit.js).
+  const handleManual = require('./manual-trade').createHandler({ send, broadcast, approve: approveWithGuard,
+    publish: () => { try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); } publishBrokerState(broadcast, { force: true }).catch(() => {}); } });
 
   // Settings: the ledger validates and persists; every client sees the new values.
   function handleSettings(ws, { payload }) {
@@ -275,7 +278,7 @@ function createMessageHandler({ send, broadcast }) {
     if (QUEUE_ACTIONS[msg.type]) {
       return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
     }
-    if (handlePilot(ws, msg)) return undefined;
+    if (handlePilot(ws, msg) || handleManual(ws, msg)) return undefined;
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'RESET_LEDGER') return handleReset(ws, msg);

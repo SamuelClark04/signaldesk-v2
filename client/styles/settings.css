@@ -74,3 +74,12 @@
 .settings-tunnel-url { color: var(--accent); font-family: var(--font-mono); word-break: break-all; }
 .btn-danger { border-color: var(--short); background: var(--short); color: #fff; font-weight: 700; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* Max Option Exit Spread (Phase 60): On/Off switch + dollar cap */
+.settings-exitspread { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: 560px; }
+.settings-toggle { min-width: 56px; padding: 7px 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg); color: var(--text-muted); font: 600 13px var(--font-ui); cursor: pointer; }
+.settings-toggle.is-on { border-color: var(--long); background: var(--long-bg); color: var(--long); }
+.settings-toggle:disabled { opacity: 0.6; cursor: default; }
+.settings-exitspread-wrap { width: 120px; }
+.settings-exitspread-wrap .input:disabled { opacity: 0.5; }
+.settings-exitspread-note { flex-basis: 100%; color: var(--text-faint); font-size: 12px; }

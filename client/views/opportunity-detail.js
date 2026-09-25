@@ -56,6 +56,7 @@
         // Symbol picker over the whole universe once it has arrived; plain title until then.
         el('div', { className: 'opp-title' }, ctx.state && ctx.state.universe && ctx.onPickSymbol ? [SD.symbolPicker.build(o, ctx)]
           : [el('h2', { className: 'opp-symbol', textContent: displaySymbol(o) }), el('span', { className: 'opp-name', textContent: SD.scannerData.nameOf(o.asset) })]),
+        SD.manualTicket.button(o.asset), // [+ Manual Trade] (Phase 60)
         el('div', { className: 'opp-price' }, [
           el('strong', { className: 'opp-price-big', textContent: shown ? px(shown, { ...o, entryPrice: o.entryPrice || shown }) : '—' }),
           ...(change === null ? [] : [el('span', { className: `opp-price-chg ${pnlClass(change)}`, textContent: `${change >= 0 ? '+' : '−'}${Math.abs(change * 100).toFixed(2)}%` }),
