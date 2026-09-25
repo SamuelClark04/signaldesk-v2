@@ -87,6 +87,8 @@
 .scan-state.is-waiting { color: var(--warn); }
 .scan-state.is-waiting::before { background: var(--warn); }
 .scan-state.is-failed { color: var(--short); }
+.scan-state.is-planned { color: var(--warn); }
+.scan-state.is-planned::before { background: var(--warn); }
 .scan-state.is-failed::before { background: var(--short); }
 .scan-stale { color: var(--text-faint); }
 .scan-action { text-align: right; }

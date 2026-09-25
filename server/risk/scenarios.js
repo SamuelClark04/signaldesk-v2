@@ -54,7 +54,7 @@ function priceScenarios(order) {
   // planned stop / T1 values ARE the exits, whatever the underlying does meanwhile.
   const od = order.market === 'options' ? order.optionsData : null;
   const rule = od && od.exitRule;
-  const ruleValue = rule ? { stop: rule.stopValue, t1: rule.targetValue } : {};
+  const ruleValue = rule ? { stop: rule.stopValue, t1: rule.targetValue, t2: rule.t2Value } : {}; // t2Value: the planned stretch value (Phase 57)
   for (const [name, price, kind] of levels) {
     if (!(price > 0) || !(entry > 0) || !(order.positionSize > 0)) continue;
     const gross = ruleValue[name] > 0 ? (ruleValue[name] - od.debit) * od.multiplier * order.positionSize : grossPnl(order, entry, price);

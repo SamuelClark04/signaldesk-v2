@@ -72,7 +72,8 @@
       el('header', { className: 'apv-head' }, [
         SD.scannerDetail.badge(o.asset),
         ...(o.speculative ? [el('span', { className: 'opp-moon', textContent: 'Speculative Moonshot' })] : []),
-        el('div', { className: 'apv-title' }, [el('strong', { textContent: `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),
+        // An options setup is always BOUGHT (a put spread is the bearish one), so it reads BUY + its contract label.
+        el('div', { className: 'apv-title' }, [el('strong', { textContent: o.market === 'options' && od && od.label ? `BUY ${od.label}` : `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
         el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
       ]),
@@ -80,7 +81,7 @@
         kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
         kv('Entry', `${price(o.entryZone.min, o)} – ${price(o.entryZone.max, o)}`),
         kv('Stop', price(o.invalidation, o), 'text-short'),
-        kv(o.targets && o.targets[1] ? 'T1 (50%) / T2' : 'Target 1', t1 ? `${price(t1, o)}${o.targets[1] ? ` / ${price(o.targets[1].price, o)}` : ''}` : '—', 'text-long'),
+        kv(o.targets && o.targets[1] ? (o.market === 'options' ? 'T1 / T2 (stretch)' : 'T1 (50%) / T2') : 'Target 1', t1 ? `${price(t1, o)}${o.targets[1] ? ` / ${price(o.targets[1].price, o)}` : ''}` : '—', 'text-long'),
         kv('Risk', `${money(o.dollarRisk)} (${o.sizingBankroll > 0 ? ((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2) : '—'}%)`),
         kv('Reward : risk', rr),
       ]),
@@ -174,12 +175,14 @@
   function render(state, ctx) {
     const orders = [...(state.pending || [])].filter((o) => ctx.matchesAsset(o.market)).sort((a, b) => b.stagedAt - a.stagedAt);
     const actions = (state.pilotActions || []).filter((a) => ctx.matchesAsset(a.market));
-    const empty = !orders.length && !actions.length;
+    const plans = SD.optionsPlans.section(state, ctx); // after-hours options plans (not approvable until the open)
+    const empty = !orders.length && !actions.length && !plans.length;
     return el('div', { className: 'apv' }, [
       el('div', { className: 'apv-bar' }, [el('h3', { className: 'scan-h', textContent: `Approvals (${orders.length + actions.length})` }),
         el('span', { className: 'slog-muted', textContent: 'Every item here passed the risk engine or a Pilot rule. Nothing executes until you approve it.' })]),
       ...(actions.length ? [el('h4', { className: 'opp-section', textContent: 'Portfolio Pilot: protect open positions' }), ...actions.map((a) => actionCard(a, ctx))] : []),
       ...(orders.length ? [el('h4', { className: 'opp-section', textContent: 'New trades' }), ...orders.map((o) => setupCard(o, ctx))] : []),
+      ...plans,
       ...(empty ? [el('p', { className: 'opp-muted', textContent: 'Nothing is waiting for approval. New setups appear here the moment a strategy stages one; '
         + 'enter a deposit in Portfolio → Pilot to generate buy setups.' })] : []),
     ]);

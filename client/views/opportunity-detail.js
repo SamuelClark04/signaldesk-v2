@@ -95,13 +95,16 @@
   function optionRows(od) {
     if (!od.contract) return [kv('Structure', `${(od.legs || []).map((l) => `${l.side} ${l.strike}${l.type === 'put' ? 'P' : 'C'}`).join(' / ')} · ${od.debit} debit`)];
     const exp = new Date(`${od.expiration}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-    const em = od.expectedMove ? [kv('Expected Move', `±${od.expectedMove.value} (${(od.expectedMove.pct * 100).toFixed(1)}%) · T1 at ${od.expectedMove.t1Share.toFixed(2)} x EM${od.ivPercentile ? ` · IVP ${od.ivPercentile.pct} (proxy)` : ''}`)] : [];
+    const em = od.expectedMove ? [kv('Expected Move', `±${od.expectedMove.value} (${(od.expectedMove.pct * 100).toFixed(1)}%)${Number.isFinite(od.expectedMove.t1Share) ? ` · T1 at ${od.expectedMove.t1Share.toFixed(2)} x EM` : ''}${od.ivPercentile ? ` · IVP ${od.ivPercentile.pct} (proxy)` : ''}`)] : [];
+    // Phase 57 plans carry their own exit shares (stop -45..50%, T1 +65..85% of the debit, T2 stretch).
+    const exits = od.stopSharePct ? `stop ${od.exitRule.stopValue} (-${od.stopSharePct}%) · T1 ${od.exitRule.targetValue} (+${od.t1SharePct}%)${od.exitRule.t2Value ? ` · T2 ${od.exitRule.t2Value}` : ''}`
+      : `stop ${od.exitRule.stopValue} (-50%) · T1 ${od.exitRule.targetValue} (80% of max)`;
     if (od.structure === 'vertical') {
       return [kv('Spread', `${od.label} · buy ${od.contract} / sell ${od.shortContract}`), kv('Net debit · max profit', `${od.debit} ($${(od.debit * od.multiplier).toFixed(0)}) · ${od.maxProfit} of ${od.width}`),
-        kv('Exit on spread value', `stop ${od.exitRule.stopValue} (-50%) · T1 ${od.exitRule.targetValue} (80% of max)`), ...em, kv('Why a spread', od.spreadReason)];
+        kv('Exit on spread value', exits), ...(od.fill === 'package' ? [kv('Package fill', `net mid ${od.netMid} + 0.15 x ${od.combinedLegSpread} combined bid/ask = ${od.debit}`)] : []), ...em, kv('Why a spread', od.spreadReason)];
     }
     return [
-      kv('Contract', `${od.contract} (${exp} ${od.strike}C)`),
+      kv('Contract', `${od.contract} (${exp} ${od.strike}${od.type === 'put' ? 'P' : 'C'})`),
       kv('Premium (ask / bid)', `${od.ask} / ${od.bid} · $${(od.ask * od.multiplier).toFixed(0)} per contract`),
       kv('DTE · delta · IV', `${od.dte} days · ${Number(od.delta).toFixed(2)} · ${(od.iv * 100).toFixed(1)}%${od.greeksSource === 'model' ? ' (modelled)' : ''}`),
       kv('Option at stop / T1 (bid)', `${od.valueAtStop} / ${od.valueAtTarget}${od.stopLossPct ? ` · stop -${Math.round(od.stopLossPct * 100)}% of premium` : ' (modelled)'}`), ...em,

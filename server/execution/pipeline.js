@@ -30,6 +30,7 @@ const { reviewHoldings } = require('./pilot-handler');
 const expirySweeper = require('./expiry-sweeper'); // expired setups leave the queue within 30 s
 const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RADAR: 100-point score, every watchlist gem
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
+const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -54,7 +55,8 @@ const STRATEGIES = [
   ['crypto-intraday', () => cryptoIntraday.generateCandidates(prices.getLatestPrices())],
   // Marks: live, else the last session close (after hours / weekends the scan still runs; see the staging loop).
   ['equity-swing', () => equitySwing.generateCandidates(prices.getMarkPrices())],
-  ['options-system', () => optionsSystem.generateCandidates(prices.getLatestPrices())],
+  // Options plan on marks too (after hours: last close + the chain's last quotes); they stage only on live prices.
+  ['options-system', () => optionsSystem.generateCandidates(prices.getMarkPrices(), { live: prices.getLatestPrices() })],
   ['speculative-crypto', () => speculativeCrypto.generateCandidates(prices.getLatestPrices())],
 ];
 
@@ -128,11 +130,14 @@ async function pipelinePass() {
   const { riskPct, maxCapitalPct } = settings;
   counts.generated = candidates.length;
 
+  afterHours.begin();
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
     // Found on a last close (market closed): never staged; re-checked on live prices at the open.
+    // An options plan still goes through the risk engine and is shown as a reviewable plan.
     if (!(prices.getLatestPrice(candidate.asset) > 0)) {
-      recordRejection(candidate.id, 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
+      const plan = candidate.market === 'options' ? await afterHours.review(candidate, settings) : null;
+      recordRejection(candidate.id, plan ? plan.reason : 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
       continue;
     }
     const capital = await sizingBankroll(candidate.market, settings);
@@ -237,6 +242,7 @@ async function pipelinePass() {
     console.error('[pipeline] dashboard intelligence failed:', err.message);
   }
 
+  afterHours.publish(broadcast); // OPTIONS_PLANS (after-hours options plans that cleared the risk engine)
   scanLog.publish(); // SCAN_LOG to every client (server.js)
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);
   return counts;

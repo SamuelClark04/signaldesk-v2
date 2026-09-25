@@ -1,7 +1,9 @@
 // Option marks: what a held option position would sell for right now, per share
 // of the whole position (every leg). Real quotes first: with a fresh quote for
 // EVERY leg (options-data.js; the pipeline re-quotes held contracts every pass),
-// long legs sell at their BID and short legs are bought back at their ASK. Else
+// long legs sell at their BID and short legs are bought back at their ASK; a
+// Phase 57 PACKAGE spread (optionsData.fill 'package') sells as one net-limit
+// order: net mid - 0.15 x the combined leg bid/ask (cost-authority.js). Else
 // the Black-Scholes value at the live underlying price (option-pricing.js,
 // anchored to the entry quote, sold at the bid side), else null (no quote and no
 // live underlying price: nothing honest to show).
@@ -12,6 +14,7 @@
 const { freshQuote } = require('../connectors/options-data');
 const { getLatestPrice } = require('../market/latest-prices');
 const { optionsSaleValue } = require('../risk/scenarios');
+const { packageQuote } = require('../risk/cost-authority');
 
 // Contract symbol of each leg (single-leg positions keep theirs on optionsData.contract).
 const legSymbols = (od) => {
@@ -26,7 +29,9 @@ function saleValue(p, S, at = Date.now()) {
   if (symbols.length && symbols.every(Boolean)) {
     const quotes = symbols.map((s) => freshQuote(s));
     if (quotes.every(Boolean)) {
-      const value = od.legs.reduce((v, leg, i) => v + (leg.side === 'sell' ? -quotes[i].ask : quotes[i].bid) * (leg.ratio || 1), 0);
+      const value = od.fill === 'package' && od.legs.length > 1
+        ? packageQuote(od.legs.map((leg, i) => ({ side: leg.side, ratio: leg.ratio, bid: quotes[i].bid, ask: quotes[i].ask }))).exit
+        : od.legs.reduce((v, leg, i) => v + (leg.side === 'sell' ? -quotes[i].ask : quotes[i].bid) * (leg.ratio || 1), 0);
       return { value: Math.max(0, value), basis: 'bid', quotes };
     }
   }

@@ -119,7 +119,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
   send(ws, 'PILOT_MATRIX', pilotHandler.getMatrix());
-  for (const [type, payload] of require('./intelligence/moonshot-radar').snapshots()) send(ws, type, payload); // MOONSHOT_RADAR + GEM_CATALOG
+  for (const [type, payload] of require('./execution/client-snapshots').snapshots()) send(ws, type, payload); // MOONSHOT_RADAR, GEM_CATALOG, OPTIONS_PLANS
   send(ws, 'EXTERNAL_HOLDINGS', externalApi.snapshot());
   send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());

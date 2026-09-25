@@ -41,12 +41,28 @@ const LEG_RATE = {
   stocks: { maker: 0.0005, taker: 0.0005 }, // slippage per leg (no commission)
 };
 
-// Options are costed per contract. Alpaca charges no options commission; this
-// covers the pass-through regulatory/clearing fees, both legs (conservative),
-// per option leg (a vertical spread has two). The bid/ask spread is NOT in here:
-// contracts are bought at the ask and valued at the bid (option-pricing.js), so
-// the spread is already in P/L. The cost gate adds it on top (evaluateCosts).
-const OPTIONS_ROUND_TRIP_PER_CONTRACT = 0.20;
+// Options are costed per contract (Phase 57): OPTIONS_COMMISSION_PER_LEG ($0.65,
+// the common retail rate; Alpaca itself charges $0 + pass-through fees, so this
+// errs high) per contract, per leg, per fill: a round trip of one vertical spread
+// = 2 legs x 2 fills x $0.65 = $2.60. The bid/ask spread is NOT in here: it is in
+// the fill prices (option-pricing.js) and the cost gate adds it on top (evaluateCosts).
+// Multi-leg PACKAGES (Phase 57 vertical spreads, optionsData.fill 'package') trade
+// as one net-limit order near the net mid, not two legs crossing their full
+// quotes: PACKAGE_SLIPPAGE (0.30) x the combined leg bid/ask is the round trip,
+// half paid entering (debit = net mid + 0.15 x combined) and half exiting.
+const OPTIONS_COMMISSION_PER_LEG = feeFromEnv('OPTIONS_COMMISSION_PER_LEG', 0.65, 5);
+const OPTIONS_ROUND_TRIP_PER_CONTRACT = 2 * OPTIONS_COMMISSION_PER_LEG; // per leg, entry + exit
+const PACKAGE_SLIPPAGE = 0.30;
+
+// A multi-leg package's quote from its legs' real quotes ({ side, bid, ask, ratio }):
+// { mid, combined (sum of the legs' bid/ask), debit (buy fill), exit (sell fill), slippage (round trip) }.
+function packageQuote(legs) {
+  const sign = (l) => (l.side === 'sell' ? -1 : 1) * (l.ratio || 1);
+  const mid = legs.reduce((s, l) => s + sign(l) * (l.bid + l.ask) / 2, 0);
+  const combined = legs.reduce((s, l) => s + Math.abs(l.ratio || 1) * (l.ask - l.bid), 0);
+  const half = (PACKAGE_SLIPPAGE / 2) * combined;
+  return { mid, combined, debit: mid + half, exit: Math.max(0, mid - half), slippage: PACKAGE_SLIPPAGE * combined };
+}
 
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
 
@@ -90,7 +106,8 @@ function evaluateCosts(candidate, dollarRisk) {
   }
 
   // Options with a real quote: the round-trip spread cost (buy at the ask, sell
-  // at the bid; for a spread, the net ask less the net bid) counts against 1R.
+  // at the bid; for an older spread the net ask less the net bid; for a Phase 57
+  // package od.ask - od.bid = 0.30 x the combined leg bid/ask) counts against 1R.
   const od = candidate.market === 'options' ? candidate.optionsData : null;
   const spreadCost = od && od.ask > od.bid && od.bid > 0 ? (od.ask - od.bid) * od.multiplier * candidate.positionSize : 0;
   const estimatedFees = (od
@@ -116,4 +133,7 @@ module.exports = {
   COINBASE_TAKER_FEE,
   COINBASE_SPREAD_BUFFER,
   OPTIONS_ROUND_TRIP_PER_CONTRACT,
+  OPTIONS_COMMISSION_PER_LEG,
+  PACKAGE_SLIPPAGE,
+  packageQuote,
 };

@@ -37,7 +37,7 @@
     const live = (x, entry, fmt) => (Number.isFinite(x) ? `${fmt(x)} (live)` : Number.isFinite(entry) ? `${fmt(entry)} (at entry)` : '—');
     return [
       kv('Contract', od.structure === 'vertical' ? `${od.contract} / −${od.shortContract}` : od.contract),
-      kv('Strike · expiry', `${od.structure === 'vertical' ? `${od.strike}/${od.shortStrike} call spread` : `${od.strike} ${od.type === 'put' ? 'put' : 'call'}`} · ${exp} (${daysLeft(od.expiration)} days left)`),
+      kv('Strike · expiry', `${od.structure === 'vertical' ? `${od.strike}/${od.shortStrike} ${od.type === 'put' ? 'put' : 'call'} spread` : `${od.strike} ${od.type === 'put' ? 'put' : 'call'}`} · ${exp} (${daysLeft(od.expiration)} days left)`),
       ...(od.exitRule ? [kv('Exits on its value', `stop ${od.exitRule.stopValue} · T1 ${od.exitRule.targetValue} (per share)`)] : []),
       kv('Premium now', premium),
       kv('Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),

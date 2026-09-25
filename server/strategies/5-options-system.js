@@ -1,275 +1,187 @@
-// Strategy 5: Options Swing, calls or call debit spreads on a daily
-// volatility-squeeze breakout.
-// PROPOSER ONLY: reads real daily bars, live prices and the real options chain;
-// returns Canonical Candidates. Never sizes, stages or executes.
-//
-// Trigger (real daily bars, connectors/daily-bars.js, + the live price):
-//   squeeze   within the last SQUEEZE_LOOKBACK completed days, the 20-day
-//             Bollinger Bands (2 sd) sat inside the Keltner Channel (1.5 ATR20)
-//   breakout  the live price clears the highest high of the last RANGE_DAYS
-//             completed days and trades above the 20-day average
-//   structure the underlying is invalid STOP_ATR x ATR20 under the broken range high
-// Expected Move (risk/expected-move.js): (ATM call + ATM put mid) x 0.85 at the
-// contract's expiration, from the real chain. Every T1 sits INSIDE it.
-// Structure (strategies/options-plan.js):
-//   single call        the 30-45 DTE call nearest 0.35 delta; option stop from
-//                      the structural level by Delta-Gamma, clamped to a 30-38%
-//                      premium loss; T1 at 0.75-0.85 x EM where the call reaches
-//                      2.0-2.5R
-//   narrow spread      bankroll under $10,000 (Settings): always a $1-$2.50 wide
-//                      call debit spread costing $0.40-$1.10 (options-plan.js
-//                      planNarrow), so one spread risks $20-$55 at its 50% stop
-//   vertical spread    when the IV percentile (proxy, see expected-move.js) is
-//                      above 80 or an earnings / macro catalyst falls inside the
-//                      hold: long ~0.55 delta + short ~0.30 delta near the EM
-//                      edge; stop 50% of the debit, T1 80% of the max profit
-// Positions exit on their own value (optionsData.exitRule; the ledger marks every
-// leg at its real bid/ask, else the model). Greeks the indicative feed omits are
-// modelled from the quote (options-data.js). Resistance (risk/target-plan.js):
-// a squeeze breakout is not blocked by the base it breaks out of; higher daily
-// resistance under T1 snaps T1 below it if the reward survives, else no trade.
+// Strategy 5: Options, CALL and PUT debit spreads (Phase 57).
+// PROPOSER ONLY: reads real daily + 1h bars, today's session, the live (or last-close)
+// price and the real Alpaca options chain; returns Canonical Candidates. Never sizes,
+// stages or executes.
+//   Universe   15 liquid optionables: SPY QQQ IWM NVDA AAPL MSFT META AMZN GOOGL TSLA AMD
+//              NFLX COIN PLTR INTC
+//   Signals    options-signals.js: TREND (call), BREAKDOWN (put), SQUEEZE (call / put),
+//              RELATIVE strength / weakness vs SPY (call / put), on 1D and 1h
+//   Structure  options-spread-builder.js: bull call / bear put debit spreads at 10-24
+//              DTE (intraday / momentum signals) or 21-45 DTE (daily swings), short
+//              strike at the 30- / 100-day high / low when it sits 0.5-2.5 ATR away;
+//              singles only with ATM IV <= 20-day realized vol and a $10,000+ bankroll
+//   Exits      the position's own value (exitRule): stop -45..-50% of the debit, T1
+//              +65..+85% (nets >= 1.25 : 1), T2 +100..+130% (a stretch level)
+// Direction: a put setup is 'short' the underlying (its stop sits ABOVE the price),
+// so the order guard, the entry zone and the stop all read the right way round.
+// After hours (no live price): the plan is built on the last close and the chain's
+// last quotes; the pipeline runs it through the risk engine and shows it as a
+// reviewable plan (after-hours-plans.js); it only stages on live quotes.
 // Shields: earnings unknown = blocked (fail closed). One idea per symbol per day.
-const { STREAMED_STOCKS } = require('../market/universe');
 const { getDailyBars } = require('../connectors/daily-bars');
 const { getHistory } = require('../connectors/history-bars');
+const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const { getEarningsStatus } = require('../connectors/corporate-calendar');
 const macro = require('../connectors/macro-events');
 const options = require('../connectors/options-data');
-const { expectedMove, ivPercentile } = require('../risk/expected-move');
-const { planTargets } = require('../risk/target-plan');
-const { deltaGamma } = require('../risk/option-greeks');
-const { planSingle, planVertical, planNarrow, SINGLE, VERTICAL, NARROW } = require('./options-plan');
+const { ivPercentile, realizedVols } = require('../risk/expected-move');
+const signals = require('./options-signals');
+const builder = require('./options-spread-builder');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'options-system';
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
-
 const CONFIG = {
-  tradeType: 'Options Swing',
-  expectedDuration: '5-15 trading days (exit well before expiry)',
-  symbols: [...STREAMED_STOCKS], // live-streamed stocks/ETFs (a live price is required)
-  period: 20, bbSd: 2, kcAtr: 1.5, squeezeLookback: 5, rangeDays: 10, stopAtr: 0.75, entryBufferPct: 0.002,
-  holdTradingDays: 15, // earnings inside this many trading days = a catalyst in the hold
-  ivpSpread: 80, // IV percentile above this = vertical spread
-  contract: { type: 'call', minDte: 30, maxDte: 45, minDelta: 0.30, maxDelta: 0.40, targetDelta: 0.35, minBid: 0.10, maxQuoteAgeMs: 15 * 60 * 1000 },
-  strikeWindow: [0.90, 1.25], // chain request: deep enough for the 0.55 delta spread leg and the ATM straddle
-  multiplier: 100,
+  tradeType: 'Options Swing', multiplier: 100, entryBufferPct: 0.002, hourTtlMs: 5 * 60 * 1000, maxTries: 2,
+  symbols: ['SPY', 'QQQ', 'IWM', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'TSLA', 'AMD', 'NFLX', 'COIN', 'PLTR', 'INTC'],
+  strikes: { call: [0.95, 1.18], put: [0.82, 1.05], atm: [0.97, 1.03] },
+  holdDays: { swing: 15, intraday: 5 },
+  duration: { swing: '5-15 trading days (exits on the spread value, well before expiry)', intraday: '1-5 trading days (exits on the spread value)' },
 };
+const ARCH = { TREND: ['Trend pullback / reclaim', 'Trend'], BREAKDOWN: ['Trend rejection', 'Breakdown'], SQUEEZE: ['Squeeze breakout', 'Squeeze breakdown'],
+  RELATIVE: ['Relative-strength leader', 'Relative-weakness laggard'] };
 
 const cents = (x) => Math.round(x * 100) / 100;
 const lookup = (src, key) => (src instanceof Map ? src.get(key) : src && src[key]);
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+const fmtExp = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const usd = (x) => `$${Math.round(x * CONFIG.multiplier)}`;
 
-const coils = new Map(); // symbol -> latest analysis (for proximity; cached bars only)
+const coils = new Map(); // symbol -> daily squeeze (proximity)
+const hourly = new Map(); // symbol -> { at, bars }
 let blocks = [];
-const tally = createTally(); // why each symbol produced no setup (scanner log)
+const tally = createTally();
 
-// Squeeze state at bar index i: BB(20, 2sd) inside KC(20, 1.5 ATR20).
-function squeezeAt(bars, i, p = CONFIG.period) {
-  const w = bars.slice(i - p + 1, i + 1);
-  const mean = w.reduce((s, b) => s + b.close, 0) / p;
-  const sd = Math.sqrt(w.reduce((s, b) => s + (b.close - mean) ** 2, 0) / p);
-  const atr = w.reduce((s, b, k) => {
-    const prev = bars[i - p + k].close;
-    return s + Math.max(b.high - b.low, Math.abs(b.high - prev), Math.abs(b.low - prev));
-  }, 0) / p;
-  return { mean, sd, atr, on: CONFIG.bbSd * sd < CONFIG.kcAtr * atr };
+async function hourBars(symbol, now) {
+  const hit = hourly.get(symbol);
+  if (hit && now - hit.at < CONFIG.hourTtlMs) return hit.bars;
+  const r = await getHistory(symbol, '1h');
+  const bars = r.ok ? r.bars.filter((b) => (b.time + 3600) * 1000 <= now) : (hit ? hit.bars : []);
+  if (r.ok) hourly.set(symbol, { at: now, bars });
+  return bars;
 }
 
-// { mean, atr, rangeHigh, squeezeDays } from completed bars, or null (too short / no coil).
-function analyse(bars) {
-  const n = bars.length;
-  if (n < CONFIG.period + CONFIG.squeezeLookback + 1) return null;
-  const now = squeezeAt(bars, n - 1);
-  let squeezeDays = 0;
-  for (let i = n - CONFIG.squeezeLookback; i < n; i += 1) if (squeezeAt(bars, i).on) squeezeDays += 1;
-  if (!squeezeDays) return null;
-  const rangeHigh = Math.max(...bars.slice(-CONFIG.rangeDays).map((b) => b.high));
-  return { mean: now.mean, atr: now.atr, rangeHigh, squeezeDays };
-}
+// The session's change vs the prior close. After hours the price IS the last bar's close: compare one bar back.
+const changeOf = (bars, px) => { const n = bars.length; const prev = n > 1 && Math.abs(px - bars[n - 1].close) < 1e-9 ? bars[n - 2].close : bars[n - 1].close; return px / prev - 1; };
 
-function block(symbol, date, reason) {
-  blocks.push({ id: `${STRATEGY_ID}:BREAKOUT:${symbol}:${date}`, reason,
-    candidate: { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Squeeze breakout call', direction: 'long', timeframe: '1D' } });
+function block(symbol, id, reason, cand = {}) {
+  blocks.push({ id, reason, candidate: { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Options spread', direction: 'long', timeframe: '1D', ...cand } });
   return tally.skip(symbol, `Rejected: ${reason.split(':')[0].replace(/_/g, ' ').toLowerCase()}`);
 }
 
-// Catalysts inside the hold: { ok, list, text } (earnings unknown = { ok:false }).
-async function catalysts(symbol, now) {
+async function catalysts(symbol, horizon, now) {
   const list = macro.catalystsFor({ asset: symbol, strategyId: STRATEGY_ID, market: 'options' }, now).map((c) => `${c.type} ${c.date}`);
   if (ETFS.has(symbol)) return { ok: true, list, text: 'Index ETF: no earnings.' };
   const e = await getEarningsStatus(symbol, now);
   if (!e.ok) return { ok: false, reason: `EARNINGS_UNKNOWN: ${e.error}` };
-  if (e.date && e.tradingDaysAway < CONFIG.holdTradingDays) list.unshift(`earnings ${e.date}`);
+  if (e.date && e.tradingDaysAway < CONFIG.holdDays[horizon]) list.unshift(`earnings ${e.date}`);
   return { ok: true, list, text: e.date ? `Next earnings ${e.date} (${e.tradingDaysAway} trading days away).` : 'No earnings in the next 60 days.' };
 }
 
-// ATM implied vol for the structure decision: the straddle nearest mid-window.
-function atmContext(calls, puts, live) {
-  const mid = (CONFIG.contract.minDte + CONFIG.contract.maxDte) / 2;
-  const exps = [...new Set(calls.map((c) => c.expiration))].sort((a, b) => Math.abs(calls.find((c) => c.expiration === a).dte - mid) - Math.abs(calls.find((c) => c.expiration === b).dte - mid));
-  for (const exp of exps) { const m = expectedMove(calls, puts, live, exp); if (m.ok) return m; }
-  return null;
-}
-
-// The single call nearest 0.35 delta, its Expected Move and plan.
-function singlePlan(calls, puts, live, structuralStop, now) {
-  const pick = options.selectContract(calls, CONFIG.contract, now, live);
-  if (!pick.ok) return { ok: false, reason: `OPTIONS_NO_CONTRACT: ${pick.error}` };
-  const em = expectedMove(calls, puts, live, pick.contract.expiration);
-  if (!em.ok) return { ok: false, reason: `OPTIONS_NO_EXPECTED_MOVE: ${em.error}` };
-  const plan = planSingle({ k: pick.contract, spot: live, structuralStop, em: em.em });
-  return plan.ok ? { ok: true, k: pick.contract, em, plan } : { ok: false, reason: `OPTIONS_REWARD_TOO_LOW: ${plan.error}` };
-}
-
-// The paper bankroll when it is a small account (narrow spreads), else null.
-const smallAccount = () => {
-  try { const b = require('../execution/ledger-store').getSettings().bankroll; return b > 0 && b < NARROW.maxBankroll ? b : null; } catch { return null; }
-};
-
-// Vertical: each expiration in the window (nearest mid-window first) until one
-// has a ~0.55 delta long, a short leg near the EM edge (or, narrow, 1-2 strikes
-// up) and a valid plan.
-function verticalPlan(calls, puts, live, now, narrow = false) {
-  const c = CONFIG.contract;
-  const mid = (c.minDte + c.maxDte) / 2;
-  const exps = [...new Map(calls.map((x) => [x.expiration, x.dte])).entries()].sort((a, b) => Math.abs(a[1] - mid) - Math.abs(b[1] - mid)).map(([e]) => e);
-  let why = `no calls expiring in ${c.minDte}-${c.maxDte} days`;
-  const whys = [];
-  for (const expiration of exps) {
-    const em = expectedMove(calls, puts, live, expiration);
-    if (!em.ok) { why = `OPTIONS_NO_EXPECTED_MOVE: ${em.error}`; continue; }
-    if (narrow) {
-      const plan = planNarrow({ chain: calls, expiration, spot: live, c, now, bankroll: narrow });
-      if (plan.ok) return { ok: true, k: plan.long, em, plan };
-      whys.push(plan.error.replace('small account, ', ''));
-      why = `OPTIONS_NO_CONTRACT: small account: ${whys.join(' | ')}`;
-      continue;
-    }
-    const pick = options.selectContract(calls, { ...c, expiration, minDelta: VERTICAL.longDelta[0], maxDelta: VERTICAL.longDelta[1], targetDelta: VERTICAL.longDelta[2] }, now, live);
-    if (!pick.ok) { why = `OPTIONS_NO_CONTRACT: ${expiration}: ${pick.error}`; continue; }
-    const plan = planVertical({ long: pick.contract, chain: calls, spot: live, em: em.em, c, now });
-    if (plan.ok) return { ok: true, k: pick.contract, em, plan };
-    why = `OPTIONS_REWARD_TOO_LOW: ${plan.error}`;
-  }
-  return { ok: false, reason: why };
-}
-
-const fmtExp = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-const etTime = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
-const perContract = (x) => `$${(x * CONFIG.multiplier).toFixed(0)}`;
-
-async function evaluate(symbol, live, now) {
-  const bars = await getDailyBars(symbol, now);
-  const s = analyse(bars);
-  if (s) coils.set(symbol, s); else coils.delete(symbol);
-  if (!s) return tally.skip(symbol, bars.length < CONFIG.period + CONFIG.squeezeLookback + 1 ? 'Not enough daily history' : 'No volatility squeeze');
-  if (!(live > s.rangeHigh)) return tally.skip(symbol, `In a squeeze, below the ${CONFIG.rangeDays}-day breakout level`);
-  if (!(live > s.mean)) return tally.skip(symbol, 'Below the 20-day average');
-  return propose(symbol, live, now, bars, s);
-}
-
-// The trade for a triggered breakout (s = analyse(bars)): contract(s), plan, candidate.
-async function propose(symbol, live, now, bars, s) {
-  const date = etDate.format(now);
-  const entryMax = cents(live * (1 + CONFIG.entryBufferPct));
-  const structuralStop = s.rangeHigh - CONFIG.stopAtr * s.atr;
-  const cat = await catalysts(symbol, now);
-  if (!cat.ok) return block(symbol, date, cat.reason);
-
-  const c = CONFIG.contract;
-  const window = { minDte: c.minDte, maxDte: c.maxDte, spot: live };
-  const chain = await options.getChain(symbol, { ...window, type: 'call', strikeMin: live * CONFIG.strikeWindow[0], strikeMax: live * CONFIG.strikeWindow[1] }, now);
-  if (!chain.ok) return block(symbol, date, `OPTIONS_CHAIN_UNAVAILABLE: ${chain.error}`);
-  const puts = await options.getChain(symbol, { ...window, type: 'put', strikeMin: live * 0.97, strikeMax: live * 1.03 }, now);
-  if (!puts.ok) return block(symbol, date, `OPTIONS_CHAIN_UNAVAILABLE: ${puts.error}`);
-  const atm = atmContext(chain.contracts, puts.contracts, live);
-  if (!atm) return block(symbol, date, 'OPTIONS_NO_EXPECTED_MOVE: no ATM call + put pair quoted in the window');
+// Signal -> { candidate } or { reason }.
+async function propose(symbol, px, sig, ctx, bars, env) {
+  const { now, afterHours, bankroll } = env;
+  const type = sig.direction;
+  const w = builder.CONFIG.windows[sig.horizon];
+  const id = `${STRATEGY_ID}:${sig.archetype}:${type.toUpperCase()}:${symbol}:${etDate.format(now)}`;
+  const cat = await catalysts(symbol, sig.horizon, now);
+  if (!cat.ok) return { id, reason: cat.reason };
+  const window = { minDte: w.minDte, maxDte: w.maxDte, spot: px };
+  const [lo, hi] = CONFIG.strikes[type];
+  const main = await options.getChain(symbol, { ...window, type, strikeMin: px * lo, strikeMax: px * hi }, now);
+  if (!main.ok) return { id, reason: `OPTIONS_CHAIN_UNAVAILABLE: ${main.error}` };
+  const other = await options.getChain(symbol, { ...window, type: type === 'call' ? 'put' : 'call', strikeMin: px * CONFIG.strikes.atm[0], strikeMax: px * CONFIG.strikes.atm[1] }, now);
+  const calls = type === 'call' ? main.contracts : (other.ok ? other.contracts : []);
+  const puts = type === 'put' ? main.contracts : (other.ok ? other.contracts : []);
+  const hv = realizedVols(bars).slice(-1)[0] || null;
+  const atm = main.contracts.filter((c) => c.iv > 0).sort((a, b) => Math.abs(a.strike - px) - Math.abs(b.strike - px) || Math.abs(a.dte - w.prefer) - Math.abs(b.dte - w.prefer))[0];
+  const single = !!(atm && hv && atm.iv <= hv && bankroll >= builder.CONFIG.single.minBankroll);
+  const ivText = atm && hv ? `${(atm.iv * 100).toFixed(0)}% ${atm.iv <= hv ? '<=' : '>'} 20-day HV ${(hv * 100).toFixed(0)}%` : 'vs HV unavailable';
+  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours });
+  if (!b.ok) return { id, reason: `OPTIONS_NO_STRUCTURE: ${b.error}` };
+  const p = b.plan;
+  const k = p.long;
+  const vertical = p.structure === 'vertical';
+  const name = vertical ? (type === 'call' ? 'Bull call spread' : 'Bear put spread') : (type === 'call' ? 'Long call' : 'Long put');
+  const label = vertical ? `${symbol} ${fmtExp(k.expiration)} ${k.strike}/${p.short.strike} ${type} spread` : `${symbol} ${fmtExp(k.expiration)} ${k.strike} ${type}`;
   const hist = await getHistory(symbol, '1d-long', now);
-  const ivp = ivPercentile(atm.iv, hist.ok ? hist.bars : []);
-  const spreadWhy = [...(ivp.ok && ivp.pct > CONFIG.ivpSpread ? [`IV percentile ${ivp.pct.toFixed(1)} > ${CONFIG.ivpSpread}`] : []), ...cat.list.map((x) => `${x} inside the hold`)];
-  const small = smallAccount();
-  if (small) spreadWhy.unshift(`small account ($${small} bankroll, under $${NARROW.maxBankroll}): narrow spread`);
-  const vertical = spreadWhy.length > 0;
-
-  const found = vertical ? verticalPlan(chain.contracts, puts.contracts, live, now, small) : singlePlan(chain.contracts, puts.contracts, live, structuralStop, now);
-  if (!found.ok) return block(symbol, date, found.reason);
-  const { k, em, plan } = found;
-  const t1Raw = plan.t1;
-
-  // Resistance under T1: the breakout's own base is exempt; higher tops snap T1 below them.
-  const tgt = planTargets({ bars, entry: entryMax, stop: plan.invalidation, market: 'options', fmt: cents, checkNetR: false,
-    breakout: { atr: s.atr }, targets: [{ level: 1, price: t1Raw, allocation: 1 }] });
-  if (!tgt.ok) return block(symbol, date, tgt.reason);
-  let { targetValue, optionR } = plan;
-  const t1 = tgt.snapped ? tgt.targets[0].price : t1Raw;
-  if (tgt.snapped) {
-    targetValue = cents(vertical ? Math.max(0, Math.min(plan.width, t1 - k.strike)) : k.mid + deltaGamma(k.delta, k.gamma, t1 - live) - (k.ask - k.bid) / 2);
-    optionR = (targetValue - (vertical ? plan.debit : k.ask)) / plan.riskPerShare;
-    const minR = vertical ? VERTICAL.minR : SINGLE.minR;
-    if (optionR < minR) return block(symbol, date, `RESISTANCE_BLOCKS_TARGET: ${tgt.text} The option then reaches only ${optionR.toFixed(2)}R (needs ${minR}R).`);
-  }
-
-  const common = { underlying: symbol, type: 'call', expiration: k.expiration, dte: k.dte, feed: chain.feed, multiplier: CONFIG.multiplier, refSpot: live, refAt: now,
-    riskPerShare: plan.riskPerShare, valueAtStop: plan.stopValue, valueAtTarget: targetValue, exitRule: { stopValue: plan.stopValue, targetValue },
-    expectedMove: { value: cents(em.em), pct: em.pct, atmStrike: em.strike, t1Share: (t1 - live) / em.em },
-    ivPercentile: ivp.ok ? { pct: Math.round(ivp.pct), proxy: 'ATM IV vs 1y of 20-day realized vol', atmIv: atm.iv } : null, greeksSource: k.greeksSource };
-  const label = vertical ? `${symbol} ${fmtExp(k.expiration)} ${k.strike}/${plan.short.strike} call spread` : `${symbol} ${fmtExp(k.expiration)} ${k.strike} call`;
-  const optionsData = vertical
-    ? { ...common, ...plan.od, structure: 'vertical', label, contract: k.symbol, shortContract: plan.short.symbol, strike: k.strike, shortStrike: plan.short.strike,
-      bid: plan.netBid, ask: plan.debit, debit: plan.debit, width: plan.width, maxProfit: plan.maxProfit, delta: k.delta - plan.short.delta,
-      quoteTime: Math.min(k.quoteTime, plan.short.quoteTime), spreadReason: spreadWhy.join('; ') }
-    : { ...common, structure: 'single', label, contract: k.symbol, strike: k.strike, bid: k.bid, ask: k.ask, spread: cents(k.ask - k.bid), iv: k.iv, delta: k.delta,
-      gamma: k.gamma, theta: k.theta, quoteTime: k.quoteTime, refMid: k.mid, debit: k.ask, legs: [{ side: 'buy', type: 'call', strike: k.strike, ratio: 1 }],
-      stopLossPct: plan.lossPct, structuralLossPct: plan.structuralLossPct };
-  const news = await sentiment.getSentiment(symbol, now);
-  const emText = `Expected Move to ${fmtExp(k.expiration)}: ±${cents(em.em)} (${(em.pct * 100).toFixed(1)}%, ATM ${em.strike} straddle x 0.85); T1 ${t1} is ${(common.expectedMove.t1Share).toFixed(2)} x EM.`;
-  const ivText = ivp.ok ? `IV percentile ${ivp.pct.toFixed(0)} (proxy: ATM IV ${(atm.iv * 100).toFixed(1)}% vs a year of realized vol).` : `IV percentile unavailable (${ivp.error}).`;
-  const planText = vertical
-    ? `Vertical debit spread because ${optionsData.spreadReason}: buy ${k.symbol} (delta ${k.delta.toFixed(2)}) at ${k.ask}, sell ${plan.short.symbol} (delta ${plan.short.delta.toFixed(2)}, ${plan.narrow ? `${plan.width} wide: a narrow spread` : 'near the EM edge'}) at ${plan.short.bid}. `
-      + `Net debit ${plan.debit} (${perContract(plan.debit)}), max profit ${plan.maxProfit} of the ${plan.width} width. Stop: spread worth ${plan.stopValue} (-50%, ${symbol} near ${plan.invalidation}); `
-      + `T1: worth ${targetValue} (80% of max profit${tgt.snapped ? ', trimmed under resistance' : ''}; ${symbol} ${t1} at expiry), ${optionR.toFixed(2)}R. It exits on the spread's value, not a date.`
-    : `Contract ${k.symbol} (${label}, ${k.dte} DTE): ask ${k.ask} / bid ${k.bid}, delta ${k.delta.toFixed(2)}, gamma ${k.gamma.toFixed(4)}, IV ${(k.iv * 100).toFixed(1)}%`
-      + `${k.greeksSource === 'model' ? ' (greeks modelled from the quote)' : ''}. Stop: the structural level ${cents(structuralStop)} would cost ${(plan.structuralLossPct * 100).toFixed(0)}% of the premium; `
-      + `clamped to ${(plan.lossPct * 100).toFixed(0)}%: exit when the call is worth ${plan.stopValue} (${symbol} near ${plan.invalidation}), ${perContract(plan.riskPerShare)} at risk per contract. `
-      + `T1: ${symbol} ${t1}, the call worth ~${targetValue} (Delta-Gamma), ${optionR.toFixed(2)}R.`;
-
-  return {
-    id: `${STRATEGY_ID}:BREAKOUT:${symbol}:${date}`,
-    asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: vertical ? 'Squeeze breakout call spread' : 'Squeeze breakout call', direction: 'long', timeframe: '1D',
-    tradeType: CONFIG.tradeType, expectedDuration: CONFIG.expectedDuration, resistance: tgt.resistance,
-    newsSentiment: news.ok ? { score: news.score, label: news.label, source: news.source } : null,
-    entryZone: { min: cents(live), max: entryMax },
-    invalidation: plan.invalidation,
-    targets: [{ level: 1, price: t1, allocation: 1 }],
-    catalyst: { type: 'volatility', headline: null, sentimentScore: 0 },
-    thesis: `${symbol} coiled in a daily squeeze (${s.squeezeDays} of the last ${CONFIG.squeezeLookback} days) and is breaking out at ${cents(live)}, above its `
-      + `${CONFIG.rangeDays}-day high ${cents(s.rangeHigh)} and 20-day average ${cents(s.mean)}. ${emText} ${ivText} ${planText} `
-      + `Quotes: ${chain.feed} feed, ${etTime(optionsData.quoteTime)} ET. A gap through the stop can lose more; the whole debit is the worst case. `
-      + `${tgt.text} ${cat.text} ${sentiment.describe(news)} Expected hold: ${CONFIG.expectedDuration}.`,
-    confirmationCriteria: [
-      `Squeeze on ${s.squeezeDays}/${CONFIG.squeezeLookback} recent days: 2 sd Bollinger width inside 1.5 ATR20 Keltner (ATR ${cents(s.atr)})`,
-      `Live price above the ${CONFIG.rangeDays}-day high ${cents(s.rangeHigh)} and the 20-day average`,
-      `T1 ${t1} inside the Expected Move ±${cents(em.em)} (${common.expectedMove.t1Share.toFixed(2)} x EM)`,
-      vertical ? `Spread: ${k.strike}/${plan.short.strike}, debit ${plan.debit}, exits on the spread's value (stop ${plan.stopValue}, T1 ${targetValue})`
-        : `${k.symbol}: spread ${(k.spreadPct * 100).toFixed(1)}% of mid (cap ${(options.maxSpreadFor(symbol) * 100).toFixed(1)}%), exits on the call's value (stop ${plan.stopValue}, T1 ${targetValue})`,
-    ],
-    timestamp: new Date(now).toISOString(),
-    optionsData,
+  const ivp = ivPercentile(atm ? atm.iv : null, hist.ok ? hist.bars : []);
+  const sign = type === 'call' ? 1 : -1;
+  const levelText = b.level ? `${sign > 0 ? 'Resistance' : 'Support'} ${cents(b.level)} (${(Math.abs(b.level - px) / ctx.atr).toFixed(1)} ATR away)${b.anchored ? ': the short strike sits at it' : ''}.` : `No 30- / 100-day ${sign > 0 ? 'high above' : 'low below'} the price.`;
+  const em = b.em ? `Expected Move to ${fmtExp(k.expiration)}: ±${cents(b.em.em)} (${(b.em.pct * 100).toFixed(1)}%).` : 'Expected Move unavailable at this expiration.';
+  const od = {
+    underlying: symbol, type, structure: p.structure, fill: p.od.fill, label, contract: k.symbol, ...(vertical ? { shortContract: p.short.symbol, shortStrike: p.short.strike, width: p.width, maxProfit: p.maxProfit } : {}),
+    strike: k.strike, expiration: k.expiration, dte: k.dte, feed: main.feed, multiplier: CONFIG.multiplier, iv: k.iv, delta: vertical ? k.delta - p.short.delta : k.delta,
+    bid: p.exitNow, ask: p.debit, debit: p.debit, netMid: p.netMid, spread: p.od.spread, combinedLegSpread: p.combined, refSpot: px, refMid: p.od.refMid, refAt: now, legs: p.legs,
+    riskPerShare: p.riskPerShare, valueAtStop: p.stopValue, valueAtTarget: p.t1Value, exitRule: { stopValue: p.stopValue, targetValue: p.t1Value, ...(p.t2Value ? { t2Value: p.t2Value } : {}) },
+    stopSharePct: Math.round(p.stopShare * 100), t1SharePct: Math.round(p.t1Share * 100), netRR: p.netRR, breakeven: p.breakeven, afterHours,
+    quoteTime: Math.min(...[k, p.short].filter(Boolean).map((x) => x.quoteTime)), greeksSource: k.greeksSource, horizon: sig.horizon,
+    expectedMove: b.em ? { value: cents(b.em.em), pct: b.em.pct, atmStrike: b.em.strike, t1Share: Math.abs(p.t1 - px) / b.em.em } : null, level: b.level ? cents(b.level) : null, levelAnchored: b.anchored,
+    ivPercentile: ivp.ok ? { pct: Math.round(ivp.pct), proxy: 'ATM IV vs 1y of 20-day realized vol', atmIv: atm.iv, hv20: hv } : null,
+    spreadReason: `${vertical ? (bankroll < builder.CONFIG.single.minBankroll ? `$${bankroll} bankroll (under $${builder.CONFIG.single.minBankroll})` : `ATM IV ${ivText}`) : `ATM IV ${ivText}`}: `
+      + `${vertical ? 'defined-risk debit spread' : `single ${type}`}`,
   };
+  const news = await sentiment.getSentiment(symbol, now);
+  const legsText = vertical ? `buy ${k.symbol} (delta ${k.delta.toFixed(2)}), sell ${p.short.symbol} (delta ${p.short.delta.toFixed(2)}), ${p.width} wide` : `buy ${k.symbol} (delta ${k.delta.toFixed(2)})`;
+  return { id, candidate: {
+    id, asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: `${name} · ${ARCH[sig.archetype][type === 'call' ? 0 : 1]}`, direction: type === 'call' ? 'long' : 'short',
+    timeframe: sig.timeframe, tradeType: sig.horizon === 'intraday' ? 'Options Momentum' : CONFIG.tradeType, expectedDuration: CONFIG.duration[sig.horizon],
+    newsSentiment: news.ok ? { score: news.score, label: news.label, source: news.source } : null,
+    entryZone: { min: cents(px * (1 - CONFIG.entryBufferPct)), max: cents(px * (1 + CONFIG.entryBufferPct)) },
+    invalidation: p.invalidation,
+    targets: [{ level: 1, price: p.t1, allocation: 1 }, ...(p.t2 ? [{ level: 2, price: p.t2, allocation: 0, stretch: true }] : [])],
+    catalyst: { type: 'technical', headline: sig.text, sentimentScore: 0 },
+    thesis: `${sig.text} (${sig.timeframe}). ${name} for a ${sig.horizon === 'intraday' ? '1-5 day move' : 'multi-week swing'}: ${legsText}, ${k.dte} DTE. `
+      + `One package limit near the net mid ${p.netMid}: debit ${p.debit} (${usd(p.debit)}${vertical ? `, ${Math.round((p.debit / p.width) * 100)}% of the width, max value ${usd(p.width)}` : ''}). `
+      + `Stop: worth ${p.stopValue} (-${od.stopSharePct}%, ${symbol} near ${p.invalidation}); T1: worth ${p.t1Value} (+${od.t1SharePct}%, ${symbol} ${p.t1}), ${p.netRR.toFixed(2)} : 1 net`
+      + `${p.t2Value ? `; T2 stretch: worth ${p.t2Value} (${symbol} ${p.t2})` : ''}. Breakeven ${p.breakeven}. ${levelText} ${em} `
+      + `${ivp.ok ? `IV percentile ${ivp.pct.toFixed(0)} (proxy). ` : ''}${afterHours ? 'MARKET CLOSED: priced on the last close and the chain\'s last quotes; re-priced live at the open. ' : ''}`
+      + `${cat.text}${cat.list.length ? ` Inside the hold: ${cat.list.join(', ')}.` : ''} ${sentiment.describe(news)}`,
+    confirmationCriteria: [sig.text, `${name}: ${label}, debit ${p.debit}${vertical ? ` of ${p.width} (30-53% band)` : ''}, slippage + fees ${p.costR.toFixed(2)}R`,
+      `Exits on its value: stop ${p.stopValue} / T1 ${p.t1Value}${p.t2Value ? ` / T2 ${p.t2Value}` : ''}; T1 nets ${p.netRR.toFixed(2)} : 1 after $0.65 / leg / fill`, levelText],
+    timestamp: new Date(now).toISOString(),
+    optionsData: od,
+  } };
 }
 
-async function generateCandidates(latestPricesMap, now = Date.now()) {
+async function evaluate(symbol, px, env, bench) {
+  const bars = await getDailyBars(symbol, env.now);
+  const sq = signals.dailySqueeze(bars);
+  if (sq) coils.set(symbol, sq); else coils.delete(symbol);
+  if (bars.length < 60) return tally.skip(symbol, 'Not enough daily history');
+  const hb = await hourBars(symbol, env.now);
+  const session1m = env.afterHours ? [] : lookup(alpacaStocks.getLatestBars(), symbol);
+  const d = signals.detect({ bars, live: px, hourlyBars: hb, session1m, change: changeOf(bars, px), benchChange: symbol === 'SPY' ? NaN : bench, now: env.now });
+  if (!d.ctx) return tally.skip(symbol, d.why);
+  const r = signals.rank(d.signals);
+  if (r.conflict) return tally.skip(symbol, 'Call and put signals conflict: no trade');
+  if (!r.list.length) return tally.skip(symbol, 'No call or put archetype fired');
+  let last = null;
+  for (const sig of r.list.slice(0, CONFIG.maxTries)) {
+    const out = await propose(symbol, px, sig, d.ctx, bars, env);
+    if (out.candidate) return out.candidate;
+    last = out;
+  }
+  const top = r.list[0];
+  return block(symbol, last.id, last.reason, { setupType: `${top.direction === 'call' ? 'Call' : 'Put'} spread · ${ARCH[top.archetype][top.direction === 'call' ? 0 : 1]}`, direction: top.direction === 'call' ? 'long' : 'short', timeframe: top.timeframe });
+}
+
+// marks: live price, else the last session close (getMarkPrices); live: fresh prices only.
+async function generateCandidates(marks, { live = marks, bankroll = null } = {}, now = Date.now()) {
   blocks = [];
   tally.start();
   const out = [];
+  const spyPx = lookup(marks, 'SPY');
+  const spyBars = spyPx > 0 ? await getDailyBars('SPY', now) : [];
+  const bench = spyBars.length > 1 ? changeOf(spyBars, spyPx) : NaN;
+  const bank = bankroll || (() => { try { return require('../execution/ledger-store').getSettings().bankroll; } catch { return 0; } })();
   for (const symbol of CONFIG.symbols) {
     tally.checked();
-    const live = lookup(latestPricesMap, symbol);
-    if (!(live > 0)) { tally.skip(symbol, 'No live price'); continue; }
+    const px = lookup(marks, symbol);
+    if (!(px > 0)) { tally.skip(symbol, 'No price (live or last close)'); continue; }
     try {
-      const cand = await evaluate(symbol, live, now);
+      const cand = await evaluate(symbol, px, { now, afterHours: !(lookup(live, symbol) > 0), bankroll: bank }, bench);
       if (cand) { out.push(cand); tally.setup(); }
     } catch (err) {
       console.error(`[options-system] ${symbol} failed: ${err.message}`);
@@ -278,19 +190,21 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
   return out;
 }
 
-// "Heating up": coiled symbols still under their breakout level (cached analyses only).
+// "Heating up": daily squeezes still inside their range (cached analyses only).
 function proximity(latestPricesMap) {
   const out = [];
   for (const [symbol, s] of coils) {
     const live = lookup(latestPricesMap, symbol);
-    if (!(live > 0) || live > s.rangeHigh) continue;
-    out.push({ symbol, strategyId: STRATEGY_ID, trigger: s.rangeHigh, distancePct: (s.rangeHigh - live) / live,
-      label: `Daily squeeze; call breakout above ${cents(s.rangeHigh)}` });
+    if (!(live > 0) || live > s.rangeHigh || live < s.rangeLow) continue;
+    const up = s.rangeHigh - live <= live - s.rangeLow;
+    out.push({ symbol, strategyId: STRATEGY_ID, trigger: up ? s.rangeHigh : s.rangeLow, distancePct: Math.abs((up ? s.rangeHigh : s.rangeLow) - live) / live, // unsigned: a put trigger sits below
+      label: `Daily squeeze; ${up ? `call breakout above ${cents(s.rangeHigh)}` : `put breakdown below ${cents(s.rangeLow)}`}` });
   }
   return out;
 }
 
 function takeBlocks() { const b = blocks; blocks = []; return b; }
-function reset() { coils.clear(); blocks = []; }
+function reset() { coils.clear(); hourly.clear(); blocks = []; }
 
-module.exports = { generateCandidates, proximity, takeBlocks, takeScan: tally.take, reset, analyse, squeezeAt, propose, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, takeBlocks, takeScan: tally.take, reset, propose, evaluate, changeOf, STRATEGY_ID, CONFIG,
+  analyse: signals.dailySqueeze, squeezeAt: signals.squeezeAt };

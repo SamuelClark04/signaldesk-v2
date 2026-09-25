@@ -20,6 +20,7 @@
 
   const STATES = {
     ready: { label: 'Ready', rank: 0 },
+    planned: { label: 'Plan (market closed)', rank: 0.5 },
     failed: { label: 'Rejected', rank: 1 },
     dismissed: { label: 'Dismissed', rank: 2 },
     watching: { label: 'Watching', rank: 3 },
@@ -75,6 +76,13 @@
       rows.push({ key: o.id, asset: o.asset, market: o.market, setup: o.setupType || 'Setup', side: o.direction, timeframe: o.timeframe,
         state: failing.length ? 'failed' : 'ready', label: failing.length ? `Blocked: ${failing[0]}` : 'Ready',
         sub: failing.length ? `${failing.join(', ')} failed` : 'Passed the risk engine', rr: netRR(o), data: dataAge(state, o.asset), action: 'review', order: o });
+    }
+    // After-hours options plans that cleared the risk engine (stage at the open).
+    for (const p of state.optionsPlans || []) {
+      covered.add(`options|${p.asset}`);
+      rows.push({ key: `plan:${p.id}`, asset: p.asset, market: 'options', setup: p.setupType, side: p.direction, timeframe: p.timeframe,
+        state: 'planned', label: 'Plan · stages at the open', sub: `${p.label} · debit $${Math.round(p.debit * 100)} · risk $${p.dollarRisk.toFixed(0)}`, rr: p.netRR,
+        data: dataAge(state, p.asset), action: 'reason', rejection: { asset: p.asset, market: 'options', reason: `PLAN (market closed): ${p.thesis}`, setupType: p.setupType } });
     }
     for (const r of (state.rejections && state.rejections.latest) || []) {
       const key = `${r.market}|${r.asset}`;

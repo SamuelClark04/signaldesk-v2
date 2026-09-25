@@ -59,6 +59,7 @@
     EXTERNAL_HOLDINGS: (x) => { state.external = x; }, // manual (Robinhood / other) + broker-synced holdings with protective levels
     MOONSHOT_RADAR: (r) => { state.moonshotRadar = r; }, // watchlist gems by the 100-point Moonshot score (Opportunities → Moonshots)
     GEM_CATALOG: (c) => { state.gemCatalog = c; SD.scannerData.setGemNames(c && c.names); }, // every tradable Coinbase spot coin (chart / picker)
+    OPTIONS_PLANS: (list) => { state.optionsPlans = list || []; }, // after-hours options plans (Approvals; stage at the open)
   };
 
   // State-driven views: rendered on entering their tab and on every state change

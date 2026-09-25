@@ -1,0 +1,174 @@
+// System 5 spread builder (Phase 57): a signal's direction + horizon -> the best
+// real contract structure, or why none fits. Pure: chains in, plan out.
+//   Expirations 10-45 DTE: 'intraday' / 2-5 day signals prefer 10-24 DTE weeklies
+//               (where AAPL, NVDA, AMD, TSLA... list $1 / $2 / $2.50 strikes; the
+//               30-45 DTE monthlies often list only $5), 'swing' prefers 21-45 DTE.
+//   Bull call / bear put DEBIT SPREADS: buy the ~0.52-0.60 |delta| leg, sell a
+//               ~0.28-0.38 |delta| leg further out (higher call / lower put).
+//               Short strike AT the level (Phase 57): when the 30- / 100-day high
+//               (calls) or low (puts) sits 0.5-2.5 daily ATR away, the short strike
+//               goes at or just inside it: the spread earns its max right up to the
+//               resistance instead of being vetoed by it. Closer than 0.5 ATR, the
+//               breakeven (long strike +/- debit) must still be short of the level.
+//               Small accounts (under $10,000) also try the next 1-3 strikes (the
+//               $1 / $2.50 weekly widths) so one spread fits the 1-contract cap.
+//   Singles:    one ~0.55 |delta| call / put when ATM IV <= 20-day realized vol and
+//               the bankroll is >= $10,000 (single.minBankroll).
+//   Pricing:    a spread is ONE net-limit package: debit = net mid + 0.15 x the
+//               combined leg bid/ask (cost-authority packageQuote); a leg is refused
+//               only with a zero bid or a bid/ask over 18% of its mid.
+//   Geometry:   net debit 30-53% of the width (max value 1.9-3.3x the debit).
+//   Exits (on the position's own value, exitRule): stop at -45% to -50% of the debit
+//               (the loss at the signal's structural invalidation, clamped), T1 +65%
+//               to +85% (the smallest that nets >= 1.30 : 1 after $0.65 / leg / fill
+//               and slippage; the risk engine needs 1.25 : 1), T2 +100% to +130%
+//               (<= 95% of the width). Underlying levels: where the model value (each
+//               leg at its IV, anchored to the real quote) reaches them today, else at expiry.
+const { packageQuote, OPTIONS_ROUND_TRIP_PER_CONTRACT } = require('../risk/cost-authority');
+const { exitValue } = require('../risk/option-pricing');
+const { expectedMove } = require('../risk/expected-move');
+const { MIN_T1_NET_RR } = require('../risk/reality-gate');
+
+const CONFIG = {
+  windows: { intraday: { minDte: 10, maxDte: 24, prefer: 14 }, swing: { minDte: 21, maxDte: 45, prefer: 30 } },
+  longDelta: [0.50, 0.62, 0.56], shortDelta: [0.26, 0.40, 0.33], levelDelta: [0.12, 0.48],
+  debitShare: [0.30, 0.53], idealShare: 0.42, stopShare: [0.45, 0.50], t1Share: [0.65, 0.85], t2Share: [1.00, 1.30, 1.15], t1MaxWidth: 0.90, t2MaxWidth: 0.95,
+  netRR: 1.30, maxCostR: 0.34, leg: { maxSpreadPct: 0.18, maxAgeMs: 20 * 60 * 1000, afterHoursAgeMs: 20 * 3600 * 1000 },
+  level: { minAtr: 0.5, maxAtr: 2.5, minEm: 0.8 }, maxExpirations: 4, narrowSteps: 3, single: { minBankroll: 10000 }, smallCap: { debitPct: 0.12, riskPct: 0.055 },
+};
+const MULT = 100;
+const cents = (x) => Math.round(x * 100) / 100;
+const up = (x) => Math.ceil(x * 100 - 1e-9) / 100;
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+// Leg check: null when tradeable, else why not.
+function legWhy(x, now, afterHours) {
+  if (!(x.bid > 0) || !(x.ask > x.bid)) return 'zero bid / no two-sided quote';
+  if (!(x.spreadPct <= CONFIG.leg.maxSpreadPct)) return `bid/ask ${(x.spreadPct * 100).toFixed(0)}% of mid (max 18%)`;
+  if (!x.quoteTime || now - x.quoteTime > (afterHours ? CONFIG.leg.afterHoursAgeMs : CONFIG.leg.maxAgeMs)) return 'stale quote';
+  if (!Number.isFinite(x.delta)) return 'no delta';
+  return null;
+}
+
+// The 30- / 100-day high (calls) or low (puts) beyond the price, or null.
+function levelTarget(ctx, spot, sign) {
+  const list = sign > 0 ? [ctx.high30, ctx.high100].filter((x) => x > spot * 1.005) : [ctx.low30, ctx.low100].filter((x) => x > 0 && x < spot * 0.995);
+  if (!list.length) return null;
+  return sign > 0 ? Math.min(...list) : Math.max(...list);
+}
+
+// Underlying price where the position's model sale value equals `value` today, or
+// null (out of reach). Bisection: calls / bull spreads gain as S rises, puts / bear spreads as it falls.
+function levelFor(od, value, spot, now) {
+  let lo = spot * 0.6;
+  let hi = spot * 1.4;
+  const vLo = exitValue(od, lo, now);
+  const vHi = exitValue(od, hi, now);
+  const inc = vHi > vLo;
+  if (value < Math.min(vLo, vHi) || value > Math.max(vLo, vHi)) return null;
+  for (let i = 0; i < 60; i += 1) {
+    const mid = (lo + hi) / 2;
+    if ((exitValue(od, mid, now) < value) === inc) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// Exit plan for one structure (short null = single). { ok, ...plan } or { ok:false, error }.
+function planFrom({ long, short, type, spot, structuralStop, now }) {
+  const sign = type === 'call' ? 1 : -1;
+  const legs = [{ side: 'buy', type, strike: long.strike, ratio: 1, contract: long.symbol, iv: long.iv, bid: long.bid, ask: long.ask, delta: long.delta },
+    ...(short ? [{ side: 'sell', type, strike: short.strike, ratio: 1, contract: short.symbol, iv: short.iv, bid: short.bid, ask: short.ask, delta: short.delta }] : [])];
+  const q = short ? packageQuote(legs) : { mid: long.mid, combined: long.ask - long.bid, debit: long.ask, exit: long.bid, slippage: long.ask - long.bid };
+  const debit = up(q.debit);
+  const width = short ? Math.abs(short.strike - long.strike) : null;
+  const tag = short ? `${long.strike}/${short.strike}` : `${long.strike}`;
+  if (short && (debit / width < CONFIG.debitShare[0] || debit / width > CONFIG.debitShare[1])) {
+    return { ok: false, error: `${tag}: debit ${debit} is ${Math.round((debit / width) * 100)}% of the ${width} width (needs 30-53%)` };
+  }
+  const od = { expiration: long.expiration, iv: long.iv, spread: cents(q.slippage), refSpot: spot, refMid: q.mid, refAt: now, legs, fill: short ? 'package' : 'single' };
+  const atStop = exitValue(od, structuralStop, now);
+  const stopShare = clamp(1 - atStop / debit, CONFIG.stopShare[0], CONFIG.stopShare[1]);
+  const stopValue = cents(debit * (1 - stopShare));
+  const risk = debit - stopValue;
+  const fees = (OPTIONS_ROUND_TRIP_PER_CONTRACT * legs.length) / MULT; // per share
+  const costR = (q.slippage + fees) / risk;
+  if (costR > CONFIG.maxCostR) return { ok: false, error: `${tag}: slippage + fees ${(costR).toFixed(2)}R of its ${cents(risk)} risk (max ${CONFIG.maxCostR}R)` };
+  const rrAt = (v) => ((v - debit) - fees) / (risk + fees);
+  let t1Value = null;
+  for (const need of [CONFIG.netRR, MIN_T1_NET_RR]) {
+    for (let s = CONFIG.t1Share[0]; s <= CONFIG.t1Share[1] + 1e-9 && t1Value === null; s += 0.05) {
+      const v = cents(debit * (1 + s));
+      if ((!short || v <= CONFIG.t1MaxWidth * width) && rrAt(v) >= need) t1Value = v;
+    }
+    if (t1Value !== null) break;
+  }
+  if (t1Value === null) return { ok: false, error: `${tag}: no T1 in +65% to +85% of the debit nets ${MIN_T1_NET_RR} : 1 (risk ${cents(risk)}, fees + slippage ${cents(q.slippage + fees)})` };
+  const t2Cap = short ? CONFIG.t2MaxWidth * width : Infinity;
+  const t2Value = cents(Math.min(debit * (1 + CONFIG.t2Share[2]), t2Cap));
+  const invalidation = levelFor(od, stopValue, spot, now);
+  if (!invalidation || sign * (invalidation - spot) >= 0) return { ok: false, error: `${tag}: no underlying level matches the ${cents(stopValue)} stop value` };
+  // Underlying level for a value: today's model or at expiry (long strike +/- value), whichever is nearer the price.
+  const toLevel = (v) => [levelFor(od, v, spot, now), long.strike + sign * v].filter((x) => x > 0 && sign * (x - spot) > 0)
+    .reduce((best, x) => (best === null || Math.abs(x - spot) < Math.abs(best - spot) ? x : best), null) || long.strike + sign * v;
+  return {
+    ok: true, structure: short ? 'vertical' : 'single', type, long, short, legs, od, width, debit, netMid: cents(q.mid), exitNow: cents(q.exit), combined: cents(q.combined),
+    slippage: cents(q.slippage), maxProfit: short ? cents(width - debit) : null, stopShare, stopValue, riskPerShare: cents(risk), t1Value, t2Value: t2Value > t1Value ? t2Value : null,
+    t1Share: t1Value / debit - 1, netRR: rrAt(t1Value), costR, invalidation: cents(invalidation), t1: cents(toLevel(t1Value)), t2: t2Value > t1Value ? cents(toLevel(t2Value)) : null,
+    breakeven: cents(long.strike + sign * debit),
+  };
+}
+
+// Expirations of `contracts` in the horizon's window, preferred first.
+function expirationsFor(contracts, horizon) {
+  const w = CONFIG.windows[horizon] || CONFIG.windows.swing;
+  const exps = [...new Map(contracts.filter((c) => c.dte >= w.minDte && c.dte <= w.maxDte).map((c) => [c.expiration, c.dte])).entries()];
+  return exps.sort((a, b) => Math.abs(a[1] - w.prefer) - Math.abs(b[1] - w.prefer)).slice(0, CONFIG.maxExpirations).map(([e]) => e);
+}
+
+// The best plan for a signal. args: { chain (main type), calls, puts (both, for the
+// Expected Move), type, horizon, spot, ctx (daily: atr, highs / lows), structuralStop,
+// bankroll, single, now, afterHours }. { ok, plan, em, level, anchored, tried } or { ok:false, error }.
+function build(a) {
+  const sign = a.type === 'call' ? 1 : -1;
+  const level = levelTarget(a.ctx, a.spot, sign);
+  const dist = level ? Math.abs(level - a.spot) : null;
+  const anchorable = level && dist >= CONFIG.level.minAtr * a.ctx.atr && dist <= CONFIG.level.maxAtr * a.ctx.atr;
+  const tooClose = level && dist < CONFIG.level.minAtr * a.ctx.atr;
+  const caps = a.bankroll > 0 && a.bankroll < CONFIG.single.minBankroll
+    ? { debit: (a.bankroll * CONFIG.smallCap.debitPct) / MULT, risk: (a.bankroll * CONFIG.smallCap.riskPct) / MULT } : null;
+  const exps = expirationsFor(a.chain, a.horizon);
+  if (!exps.length) return { ok: false, error: `no ${a.type}s listed ${CONFIG.windows[a.horizon].minDte}-${CONFIG.windows[a.horizon].maxDte} DTE` };
+  const whys = [];
+  let tried = 0;
+  for (const exp of exps) {
+    const em = expectedMove(a.calls, a.puts, a.spot, exp);
+    const list = a.chain.filter((c) => c.expiration === exp && c.type === a.type);
+    const ok = list.filter((c) => legWhy(c, a.now, a.afterHours) === null);
+    const longs = ok.filter((c) => Math.abs(c.delta) >= CONFIG.longDelta[0] && Math.abs(c.delta) <= CONFIG.longDelta[1]);
+    if (!longs.length) { whys.push(`${exp}: no tradeable ${CONFIG.longDelta[0]}-${CONFIG.longDelta[1]} delta ${a.type}`); continue; }
+    const plans = [];
+    for (const long of longs) {
+      const beyond = ok.filter((c) => sign * (c.strike - long.strike) > 0);
+      const atLevel = anchorable ? beyond.filter((c) => sign * (level - c.strike) >= 0 && Math.abs(c.delta) >= CONFIG.levelDelta[0] && Math.abs(c.delta) <= CONFIG.levelDelta[1]) : [];
+      const anchor = atLevel.length ? atLevel.reduce((b, c) => (Math.abs(level - c.strike) < Math.abs(level - b.strike) ? c : b)) : null;
+      const inBand = beyond.filter((c) => Math.abs(c.delta) >= CONFIG.shortDelta[0] && Math.abs(c.delta) <= CONFIG.shortDelta[1]);
+      const narrow = caps ? [...beyond].sort((x, y) => sign * (x.strike - y.strike)).slice(0, CONFIG.narrowSteps).filter((c) => !inBand.includes(c)) : [];
+      const shorts = a.single ? [null] : anchor ? [anchor, ...(caps ? narrow.filter((c) => sign * (anchor.strike - c.strike) > 0) : [])] : [...inBand, ...narrow];
+      for (const short of shorts) {
+        tried += 1;
+        const p = planFrom({ long, short, type: a.type, spot: a.spot, structuralStop: a.structuralStop, now: a.now });
+        if (!p.ok) { whys.push(`${exp} ${p.error}`); continue; }
+        if (tooClose && sign * (level - p.breakeven) <= 0) { whys.push(`${exp} ${long.strike}: breakeven ${p.breakeven} is past the ${sign > 0 ? 'resistance' : 'support'} ${cents(level)} (< 0.5 ATR away)`); continue; }
+        if (caps && (p.debit > caps.debit || p.riskPerShare > caps.risk)) { whys.push(`${exp} ${long.strike}${short ? `/${short.strike}` : ''}: $${Math.round(p.debit * MULT)} debit over the small-account 1-contract cap`); continue; }
+        plans.push({ ...p, anchored: !!anchor && short === anchor });
+      }
+    }
+    if (!plans.length) continue;
+    const score = (p) => [p.anchored ? 0 : 1, p.width ? Math.abs(p.debit / p.width - CONFIG.idealShare) : 0, Math.abs(Math.abs(p.long.delta) - CONFIG.longDelta[2]), p.debit];
+    plans.sort((x, y) => { const sx = score(x); const sy = score(y); for (let i = 0; i < sx.length; i += 1) if (sx[i] !== sy[i]) return sx[i] - sy[i]; return 0; });
+    return { ok: true, plan: plans[0], em: em.ok ? em : null, level, anchored: plans[0].anchored, tried, expiration: exp };
+  }
+  return { ok: false, error: `${tried} structure(s) tried over ${exps.join(', ')}: ${[...new Set(whys)].slice(0, 4).join(' | ') || 'none tradeable'}` };
+}
+
+module.exports = { build, planFrom, levelFor, levelTarget, legWhy, expirationsFor, CONFIG };
