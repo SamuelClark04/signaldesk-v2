@@ -12,9 +12,10 @@
 //                  weight under 18%, pulled back to within 3% of its 20- or
 //                  50-day SMA: buy up to the 18% weight
 //   HOLD           healthy: shown with its buffer over the 200-day SMA and weight
-// Weight = position value / account equity (paper bankroll + realized paper P&L +
-// open unrealized P&L, from the pilot handler); LIVE / adopted holdings have no
-// paper weight, so the weight rules (TRIM a, ADD) skip them.
+// Weight = position value / COMBINED equity (paper bankroll + realized and open
+// paper P&L + every real holding: SignalDesk's LIVE trades and the external ones,
+// manual Robinhood / other and broker-synced, + synced broker cash; from the
+// pilot handler), so paper and external holdings are judged together.
 const { dailyBars, scoreAsset, CONFIG: RANK } = require('./pilot-ranker');
 
 const CONFIG = {
@@ -37,17 +38,18 @@ async function review(positions, priceOf, ctx, now = Date.now()) {
   for (const p of positions) {
     if (p.market === 'options' || p.direction === 'short' || CONFIG.skipStrategies.has(p.strategyId)) continue;
     const live = priceOf(p.asset);
-    if (!(live > 0)) { out.matrix.push({ positionId: p.id, asset: p.asset, action: 'WAIT', reason: 'No live price' }); continue; }
+    const tag = { execution: p.execution || 'PAPER', external: p.external || null, broker: p.broker || null };
+    if (!(live > 0)) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: 'No live price' }); continue; }
     const bars = await dailyBars(p.asset, now);
     const s = scoreAsset(p.asset, bars, live, ctx.ranking);
-    if (!s || bars.length < RANK.sma200) { out.matrix.push({ positionId: p.id, asset: p.asset, action: 'WAIT', reason: `Only ${bars.length} daily sessions (needs ${RANK.sma200})` }); continue; }
+    if (!s || bars.length < RANK.sma200) { out.matrix.push({ positionId: p.id, asset: p.asset, ...tag, action: 'WAIT', reason: `Only ${bars.length} daily sessions (needs ${RANK.sma200})` }); continue; }
     const { ind } = s;
-    const paper = p.execution !== 'LIVE' && !p.adopted;
     const value = p.positionSize * live;
-    const weight = paper && ctx.equity > 0 ? value / ctx.equity : null;
+    const weight = ctx.equity > 0 ? value / ctx.equity : null;
     const base = { positionId: p.id, asset: p.asset, market: p.market, price: live, execution: p.execution || 'PAPER', adopted: !!p.adopted,
       levels: { sma200: round(ind.s200), sma50: round(ind.s50), sma20: round(ind.s20), atr: round(ind.atr) } };
-    const row = { positionId: p.id, asset: p.asset, weight, buffer200: ind.buffer200, score: s.score, value };
+    const row = { positionId: p.id, asset: p.asset, weight, buffer200: ind.buffer200, score: s.score, value, execution: p.execution || 'PAPER',
+      external: p.external || null, broker: p.broker || null, adopted: !!p.adopted };
     const ext = CONFIG.extended[p.market] || CONFIG.extended.stocks;
 
     if (ind.lastClose < ind.s200 && live < ind.s200) {

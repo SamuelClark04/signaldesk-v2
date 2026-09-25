@@ -1,7 +1,9 @@
 // Portfolio money maths shared by Portfolio, Pilot, Today and the Setups risk
 // panel: live P/L marks, per-venue totals, and the capital breakdown
-//   Total = Managed (SignalDesk positions) + External (broker coins SignalDesk
-//           does not manage) + Cash.
+//   Total = Managed (SignalDesk positions) + External (broker balances SignalDesk
+//           does not manage + manual holdings: Robinhood / other) + Cash.
+// Manual holdings and the protective levels of broker-synced ones come from the
+// server (EXTERNAL_HOLDINGS: execution/external-holdings.js).
 // P/L uses the ledger's own maths: gross = (price − fill) × size (× −1 short);
 // estimated exit fees use the position's fee model (sent by the server), exactly
 // as the ledger books a close. Real option contracts are marked at their live
@@ -73,30 +75,42 @@
   // a sync succeeds it falls back to the ledger's LIVE Coinbase positions. The
   // ledger's LIVE Coinbase trades are part of the synced balance, so they are
   // never added on top of it (they annotate the matching holding instead).
-  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase'], combined: ['paper', 'coinbase', 'alpaca-live'] };
+  // 'crypto' is the "Live / External" filter: synced broker accounts + manual holdings.
+  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase', 'alpaca', 'external'], combined: ['paper', 'coinbase', 'alpaca', 'external'] };
 
   function ledgerVenue(p) {
     if (p.execution !== 'LIVE') return 'paper';
-    return p.broker === 'Coinbase' ? 'coinbase-ledger' : 'alpaca-live';
+    return p.broker === 'Coinbase' ? 'coinbase-ledger' : 'alpaca-ledger';
+  }
+
+  // External rows' "Next step": a pending Pilot card for it, else its matrix verdict.
+  function externalAlert(state, positionId, asset) {
+    const a = (state.pilotActions || []).find((x) => x.positionId === positionId);
+    if (a) return { asset, tone: 'warn', action: a.manual ? `Do in ${a.broker}: ${a.action}` : `${a.action} waiting in Approvals`, detail: a.instruction || a.reason };
+    const m = ((state.pilotMatrix && state.pilotMatrix.rows) || []).find((r) => r.positionId === positionId);
+    return m ? { asset, tone: m.action === 'HOLD' ? 'info' : 'warn', action: `Pilot: ${m.action}`, detail: m.reason } : null;
   }
 
 
   // A synced Coinbase holding: which part SignalDesk manages (its LIVE trades +
   // adopted positions of that coin) and which part is external. Its alert is the
   // most urgent one of the managed positions inside it, else a plain info line.
-  function brokerRow(p, ledger, alerts) {
-    const tracked = ledger.filter((x) => x.key === 'coinbase-ledger' && x.p.asset === p.asset).map((x) => x.p);
+  function brokerRow(p, ledger, alerts, state) {
+    const venue = p.broker === 'Alpaca' ? 'alpaca' : 'coinbase';
+    const tracked = ledger.filter((x) => x.key === `${venue}-ledger` && x.p.asset === p.asset).map((x) => x.p);
+    const ext = ((state.external && state.external.positions) || []).find((x) => x.id === `ext:${venue}:${p.asset}`);
     const managedQty = Math.min(p.positionSize, tracked.reduce((s, t) => s + t.positionSize, 0));
     const freeQty = Math.max(0, Math.round((p.positionSize - managedQty) * 1e8) / 1e8); // 8 dp: no float noise
     const urgent = tracked.map((t) => alerts.get(t.id)).filter(Boolean).find((a) => a.tone === 'warn') || null;
     const adoptedOnly = tracked.length > 0 && tracked.every((t) => t.adopted);
     const info = !tracked.length
-      ? { action: 'External holding', detail: 'Held at Coinbase; not managed by SignalDesk. Adopt it to have SignalDesk watch a stop and target.' }
+      ? { action: 'External holding', detail: `Held at ${p.broker}; bought outside SignalDesk. It has protective Pilot levels (stop / T1 / T2) and is in the Pilot matrix.` }
       : adoptedOnly
-        ? { action: 'Adopted: watched by SignalDesk', detail: 'SignalDesk alerts at your stop and target; no orders are placed at Coinbase (you sell there)' }
-        : { action: 'SignalDesk bracket at Coinbase', detail: `${tracked.length} SignalDesk position(s) in this balance; SignalDesk's own trades have stop/target orders at Coinbase` };
-    return { p: { ...p, tracked, managedQty, freeQty: freeQty > QTY_DUST ? freeQty : 0 }, key: 'coinbase',
-      alert: urgent ? { ...urgent, asset: p.asset } : { asset: p.asset, tone: 'info', ...info } };
+        ? { action: 'Adopted: watched by SignalDesk', detail: `SignalDesk alerts at your stop and target; no orders are placed at ${p.broker} (you sell there)` }
+        : { action: `SignalDesk bracket at ${p.broker}`, detail: `${tracked.length} SignalDesk position(s) in this balance; SignalDesk's own trades have stop/target orders at ${p.broker}` };
+    const levels = ext && !tracked.length ? { invalidation: ext.invalidation, targets: ext.targets, extId: ext.id, levelsBasis: ext.levelsBasis, customLevels: ext.customLevels } : {};
+    return { p: { ...p, ...levels, tracked, managedQty, freeQty: freeQty > QTY_DUST ? freeQty : 0 }, key: venue,
+      alert: urgent ? { ...urgent, asset: p.asset } : (ext && externalAlert(state, ext.id, p.asset)) || { asset: p.asset, tone: 'info', ...info } };
   }
 
   // Rows + totals for the active venue. Paper KPIs use the configured bankroll;
@@ -105,20 +119,34 @@
   function metrics(state, venue = 'paper') {
     const alerts = new Map(((state.intelligence && state.intelligence.attention) || []).filter((a) => a.positionId).map((a) => [a.positionId, a]));
     const cb = state.holdings && state.holdings.coinbase;
+    const al = state.holdings && state.holdings.alpaca;
     const synced = !!(cb && cb.ok);
+    const alSynced = !!(al && al.ok);
     const ledger = (state.positions || []).map((p) => ({ p, key: ledgerVenue(p) }));
-    const broker = synced ? cb.positions.map((p) => brokerRow(p, ledger, alerts)) : [];
+    const broker = [...(synced ? cb.positions : []), ...(alSynced ? al.positions : [])].map((p) => brokerRow(p, ledger, alerts, state));
+    const manual = ((state.external && state.external.positions) || []).filter((p) => p.external === 'manual')
+      .map((p) => ({ p, key: 'external', alert: externalAlert(state, p.id, p.asset) }));
     const keys = new Set(VENUE_KEYS[venue] || VENUE_KEYS.paper);
     if (!synced && keys.has('coinbase')) keys.add('coinbase-ledger'); // no snapshot yet: show what the ledger knows
-    const rows = [...ledger, ...broker].filter((r) => keys.has(r.key))
+    if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
+    const rows = [...ledger, ...broker, ...manual].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
       .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset]), alert: r.alert || alerts.get(r.p.id) || null }));
 
     const paper = rows.filter((r) => r.key === 'paper');
     const cbRows = rows.filter((r) => r.key === 'coinbase');
-    const counted = [...paper, ...cbRows];
+    const alRows = rows.filter((r) => r.key === 'alpaca');
+    const extRows = rows.filter((r) => r.key === 'external');
+    const counted = [...paper, ...cbRows, ...alRows, ...extRows];
     const usePaper = keys.has('paper');
     const useCb = keys.has('coinbase') && synced;
+    const useAl = keys.has('alpaca') && alSynced;
+    const alCash = useAl ? al.cash || 0 : 0;
+    const sum = (list) => list.reduce((s, r) => s + r.m.marketValue, 0);
+    const managedOf = (list) => list.reduce((s, r) => s + (r.p.positionSize > 0 ? (r.m.marketValue * r.p.managedQty) / r.p.positionSize : 0), 0);
+    const alValue = sum(alRows);
+    const extValue = sum(extRows);
+    const outside = alValue - managedOf(alRows) + extValue; // Alpaca balances + manual holdings not managed by SignalDesk
     const bankroll = usePaper ? (state.settings && state.settings.bankroll) || 0 : 0;
     const realized = usePaper ? (state.journal || []).filter((t) => t.execution !== 'LIVE').reduce((s, t) => s + (t.netPnl || 0), 0) : 0;
     const cbCash = useCb ? cb.cash || 0 : 0;
@@ -126,17 +154,17 @@
     const paperValue = paper.reduce((s, r) => s + r.m.marketValue, 0);
     const cbValue = cbRows.reduce((s, r) => s + r.m.marketValue, 0);
     // Managed vs external split of the Coinbase holdings, by quantity.
-    const cbManaged = cbRows.reduce((s, r) => s + (r.p.positionSize > 0 ? (r.m.marketValue * r.p.managedQty) / r.p.positionSize : 0), 0);
+    const cbManaged = managedOf(cbRows);
     const unrealized = counted.reduce((s, r) => s + (r.m.gross || 0), 0);
     const committed = counted.reduce((s, r) => s + (r.m.noBasis ? 0 : r.m.cost), 0); // no cost basis: not in the P/L % base
     const paperCash = usePaper ? bankroll + realized - paperCost : 0;
     const totals = {
       venue, bankroll, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
-      holdingsValue: paperValue + cbValue,
-      managedValue: paperValue + cbManaged,
-      externalValue: cbValue - cbManaged,
-      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0),
-      cash: paperCash + cbCash,
+      holdingsValue: paperValue + cbValue + alValue + extValue,
+      managedValue: paperValue + cbManaged + managedOf(alRows),
+      externalValue: cbValue - cbManaged + outside,
+      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useAl ? alValue + alCash : 0) + extValue,
+      cash: paperCash + cbCash + alCash, alCash, extValue,
       unrealizedPct: committed > 0 ? unrealized / committed : null,
       exitFees: counted.reduce((s, r) => s + (r.m.fees || 0), 0),
       fresh: rows.filter((r) => r.m.live).length,

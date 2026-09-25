@@ -1,17 +1,18 @@
-// Venue filter shared by Today and Portfolio: the Combined / Live Crypto / Paper
+// Venue filter shared by Today and Portfolio: the Combined / Live / External / Paper
 // toggle, the Sync Broker button and its status line. The active venue lives in
 // the global client state (state.activeVenue, owned by app.js), so switching it
 // on one tab applies everywhere.
 //   'paper'    SignalDesk's paper ledger (all markets)
-//   'crypto'   the synced Coinbase account (Sync Broker)
-//   'combined' both, without counting SignalDesk's live Coinbase trades twice
+//   'crypto'   "Live / External": the synced Coinbase / Alpaca accounts (Sync
+//              Broker) + manual holdings at other brokers (Robinhood...)
+//   'combined' all of it, without counting SignalDesk's live trades twice
 // Exposes window.SignalDesk.venue.
 (() => {
   const SD = window.SignalDesk;
   const { el, money, clock } = SD.ui;
 
-  const VENUES = [['combined', 'Combined'], ['crypto', 'Live Crypto'], ['paper', 'Paper']];
-  const LABEL = { combined: 'Paper + Coinbase', crypto: 'Coinbase account', paper: 'Paper ledger' };
+  const VENUES = [['combined', 'Combined'], ['crypto', 'Live / External'], ['paper', 'Paper']];
+  const LABEL = { combined: 'Paper + live + external', crypto: 'Live broker + external holdings', paper: 'Paper ledger' };
   const KEYS = new Set(VENUES.map(([k]) => k));
 
   let syncRequested = false; // pressed, waiting for BROKER_HOLDINGS
@@ -37,7 +38,7 @@
     const online = SD.app.isOnline();
     const busy = !!syncRequested || h.syncing;
     const b = el('button', { type: 'button', className: 'btn pf-sync', textContent: busy ? 'Syncing…' : '⟳ Sync Broker', disabled: busy || !online,
-      title: online ? 'Fetch your Coinbase holdings (read-only)' : 'Offline' });
+      title: online ? 'Fetch your Coinbase and Alpaca holdings (read-only)' : 'Offline' });
     b.onclick = () => {
       syncRequested = true;
       SD.app.send({ type: 'SYNC_PORTFOLIO' });
@@ -52,9 +53,12 @@
     const h = state.holdings || {};
     const cb = h.coinbase;
     if (h.notice) return h.notice;
-    if (!cb || cb.status === 'never') return 'Coinbase not synced yet · paper prices are live';
-    if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}`;
-    return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash`;
+    const al = h.alpaca;
+    const manual = ((state.external && state.external.holdings) || []).length;
+    const extra = `${al && al.ok ? ` · Alpaca ${al.positions.length}` : al && al.status === 'error' ? ' · Alpaca sync failed' : ''}${manual ? ` · ${manual} manual` : ''}`;
+    if (!cb || cb.status === 'never') return `Coinbase not synced yet · paper prices are live${extra}`;
+    if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}${extra}`;
+    return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash${extra}`;
   }
 
   // Toggle + Sync Broker (+ optional extra buttons) with the status line under them.

@@ -11,9 +11,17 @@
 //     closes (or trims a third of) a PAPER position at the live price, booked by
 //     the ledger like any exit. LIVE / adopted holdings are sold at the broker.
 //   reviewHoldings(): once per pipeline pass, the 4-action matrix
-//     (pilot-matrix.js): SELL / TRIM proposals synced to the Approvals queue,
-//     each SELL's paired ROTATION buy and every ADD staged as a setup (once per
-//     day), and the full HOLD / ADD / TRIM / SELL + ROTATE table (PILOT_MATRIX).
+//     (pilot-matrix.js) over ALL holdings: paper, SignalDesk's LIVE trades and the
+//     EXTERNAL ones (external-holdings.js: manual Robinhood / other + broker-synced
+//     balances bought outside SignalDesk), weighted against the combined equity.
+//     SELL / TRIM proposals (and external stop / T1 / T2 alerts, which win) are
+//     synced to the Approvals queue; each SELL's paired ROTATION buy and every ADD
+//     are staged as setups (once per day), except a MANUAL holding's ADD, which is
+//     an instruction card (SignalDesk cannot buy at Robinhood). New external
+//     actions are emailed. The full table goes out as PILOT_MATRIX.
+//   Allocation scope (CALCULATE_ALLOCATION {scope}): 'paper' counts the Pilot's
+//     paper holdings, 'external' the real ones, 'combined' both, so an existing
+//     $600 of NVDA at Robinhood counts toward NVDA's 30% cap.
 const ledger = require('./paper-ledger');
 const prices = require('../market/latest-prices');
 const { calculateAllocation, PILOT_STRATEGY_ID } = require('../strategies/4-portfolio-pilot');
@@ -25,7 +33,11 @@ const { sizingBankroll } = require('../risk/venue-capital');
 const macro = require('../connectors/macro-events');
 const { recordRejection } = require('./rejection-stats');
 const scanLog = require('./scan-log');
-const { sendApprovalAlert } = require('./notifier');
+const { sendApprovalAlert, sendExternalActionAlert } = require('./notifier');
+const external = require('./external-holdings');
+const externalActions = require('./external-actions');
+const externalApi = require('./external-api');
+const brokerSync = require('../connectors/broker-sync');
 
 const priceOf = (asset) => prices.getLatestPrice(asset);
 let matrix = { rows: [], equity: null, at: null };
@@ -41,6 +53,25 @@ function paperEquity() {
     return s + (px > 0 && p.market !== 'options' ? ledger.unrealizedPnl(p, px) : 0);
   }, 0);
   return ledger.getSettings().bankroll + realized + open;
+}
+
+// Real money SignalDesk tracks: its LIVE trades (not options) + external holdings.
+const isReal = (p) => (p.execution === 'LIVE' || p.execution === 'EXTERNAL') && p.market !== 'options' && p.direction !== 'short';
+const valueOf = (p) => p.positionSize * (priceOf(p.asset) > 0 ? priceOf(p.asset) : p.fillPrice || 0);
+function realHoldings() { return [...ledger.getActivePositions().filter(isReal), ...external.positions()]; }
+
+// Combined equity for the matrix weights: paper equity + real holdings + synced cash.
+function combinedEquity(real) {
+  const snap = brokerSync.getSnapshot();
+  const cash = ['coinbase', 'alpaca'].reduce((s, v) => s + (snap[v] && snap[v].ok && snap[v].cash > 0 ? snap[v].cash : 0), 0);
+  return paperEquity() + real.reduce((s, p) => s + valueOf(p), 0) + cash;
+}
+
+// Holdings the allocator counts, by the client's venue filter.
+function holdingsFor(scope) {
+  const paper = ledger.getActivePositions().filter((p) => p.execution !== 'LIVE' && !p.adopted);
+  const real = realHoldings().map((p) => ({ ...p, countsAsHolding: true }));
+  return scope === 'paper' ? paper : scope === 'external' ? real : [...paper, ...real];
 }
 
 // One candidate through the venue bankroll, the risk engine and the ledger.
@@ -63,10 +94,10 @@ async function stageCandidate(c, broadcast) {
     targets: r.targets.map((t) => t.price), dollarRisk: r.dollarRisk, cappedByAmount: r.cappedByAmount, capitalCapped: r.capitalCapped };
 }
 
-async function stageBuys(amount, broadcast) {
+async function stageBuys(amount, broadcast, scope = 'combined') {
   const ranking = await ranker.rankUniverse(priceOf);
-  const exiting = new Set(ledger.getPilotActions().map((a) => a.asset));
-  const proposal = calculateAllocation(amount, ledger.getActivePositions(), prices.getLatestPrices(), ranking, ledger.getPendingOrders(), exiting);
+  const exiting = new Set(ledger.getPilotActions().filter((a) => a.action !== 'ADD').map((a) => a.asset));
+  const proposal = { ...calculateAllocation(amount, holdingsFor(scope), prices.getLatestPrices(), ranking, ledger.getPendingOrders(), exiting), scope };
   const replaced = ledger.getPendingOrders().filter((o) => o.strategyId === PILOT_STRATEGY_ID && (o.pilotKind || 'ALLOCATION') === 'ALLOCATION');
   for (const o of replaced) ledger.discardOrder(o.id); // a new deposit plan supersedes the old one
   const { candidates, skipped } = await pilot.buyCandidates(proposal);
@@ -79,9 +110,18 @@ async function stageBuys(amount, broadcast) {
   return { ...proposal, setups, replaced: replaced.length };
 }
 
-function executeAction(id) {
+async function executeAction(id) {
   const a = ledger.findPilotAction(id);
   if (!a) throw new Error('this Pilot action is no longer pending');
+  if (a.external) { // manual confirmation, or a LIVE broker sell (external-actions.js)
+    const p = external.positions().find((x) => x.id === a.positionId);
+    if (!p) { ledger.resolvePilotAction(id, 'expired'); throw new Error('the holding is no longer there (removed, sold or re-synced)'); }
+    const r = await externalActions.execute(a, p, ledger.getSettings());
+    ledger.resolvePilotAction(id, 'done', { exitPrice: r.exitPrice, executedQty: r.quantity, brokerId: r.brokerId || null });
+    console.log(`[pilot] ${a.action} ${p.asset} (${p.broker}): ${r.summary}`);
+    externalApi.publish();
+    return r;
+  }
   const pos = ledger.getActivePositions().find((p) => p.id === a.positionId);
   if (!pos) { ledger.resolvePilotAction(id, 'expired'); throw new Error('the position is already closed'); }
   if (pos.execution === 'LIVE') throw new Error('LIVE_CLOSE_UNSUPPORTED');
@@ -96,15 +136,29 @@ function executeAction(id) {
 
 // Pipeline hook: the 4-action matrix for the current open positions.
 async function reviewHoldings(broadcast, now = Date.now()) {
-  const positions = ledger.getActivePositions();
+  if (await external.refreshLevels(now)) externalApi.publish();
+  const ext = external.positions();
+  const positions = [...ledger.getActivePositions(), ...ext];
   const ranking = await ranker.rankUniverse(priceOf, now);
-  const equity = paperEquity();
+  const equity = combinedEquity([...ledger.getActivePositions().filter(isReal), ...ext]);
   const r = await matrixRules.review(positions, priceOf, { equity, ranking }, now);
-  if (ledger.syncPilotActions(r.actions, new Set(positions.map((p) => p.id)))) broadcast('PILOT_ACTIONS', ledger.getPilotActions());
   const day = new Date(now).toISOString().slice(0, 10);
+  const extById = new Map(ext.map((p) => [p.id, p]));
+  // External holdings: stop / T1 / T2 alerts win over the matrix; every card gets its instruction.
+  const alerts = externalActions.levelAlerts(ext, priceOf, day);
+  const alerted = new Set(alerts.map((a) => a.positionId));
+  const manualAdds = r.adds.filter((x) => extById.has(x.positionId) && extById.get(x.positionId).external === 'manual');
+  const actions = [...r.actions.filter((a) => !alerted.has(a.positionId)), ...alerts]
+    .map((a) => (extById.has(a.positionId) ? externalActions.decorate(a, extById.get(a.positionId)) : a))
+    .concat(manualAdds.filter((x) => !alerted.has(x.positionId)).map((x) => externalActions.manualAdd(x, extById.get(x.positionId), day)));
+  const sync = ledger.syncPilotActions(actions, new Set(positions.map((p) => p.id)));
+  if (sync.changed) broadcast('PILOT_ACTIONS', ledger.getPilotActions());
+  for (const a of sync.added.filter((x) => x.external)) {
+    Promise.resolve().then(() => sendExternalActionAlert(a)).catch((err) => console.error(`[notifier] ${a.id}: ${err.message}`));
+  }
   const buys = [
-    ...r.rotations.map((x) => ({ asset: x.to, price: x.price, amount: x.proceeds, kind: 'ROTATION', why: x.why, idTag: `${day}:from-${x.from}` })),
-    ...r.adds.map((x) => ({ asset: x.asset, price: x.price, amount: x.amount, kind: 'ADD', why: x.why, idTag: day })),
+    ...r.rotations.filter((x) => !alerted.has(x.positionId)).map((x) => ({ asset: x.to, price: x.price, amount: x.proceeds, kind: 'ROTATION', why: x.why, idTag: `${day}:from-${x.from}` })),
+    ...r.adds.filter((x) => !manualAdds.includes(x)).map((x) => ({ asset: x.asset, price: x.price, amount: x.amount, kind: 'ADD', why: x.why, idTag: day })),
   ];
   let staged = false;
   for (const spec of buys) {
@@ -132,7 +186,7 @@ function createPilotHandler({ send, broadcast }) {
   const busy = new Set();
   return function handlePilot(ws, msg) {
     if (msg.type === 'CALCULATE_ALLOCATION') {
-      stageBuys(msg.amount, broadcast)
+      stageBuys(msg.amount, broadcast, ['paper', 'external', 'combined'].includes(msg.scope) ? msg.scope : 'combined')
         .then((r) => send(ws, 'ALLOCATION_PROPOSAL', r))
         .catch((err) => send(ws, 'ALLOCATION_PROPOSAL', { error: err.message }));
       return true;
@@ -144,18 +198,18 @@ function createPilotHandler({ send, broadcast }) {
       return true;
     }
     busy.add(id);
-    try {
+    (async () => {
       if (msg.type === 'DISMISS_ACTION') ledger.resolvePilotAction(id, 'dismissed');
-      else executeAction(id);
+      else await executeAction(id);
       broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
       broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
-    } catch (err) {
+    })().catch((err) => {
       console.warn(`[pilot] ${msg.type} ${id} failed: ${err.message}`);
       send(ws, 'ACTION_FAILED', { type: msg.type, id, error: err.message });
-    } finally {
+    }).finally(() => {
       busy.delete(id);
       broadcast('PILOT_ACTIONS', ledger.getPilotActions());
-    }
+    });
     return true;
   };
 }

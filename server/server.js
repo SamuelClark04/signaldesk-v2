@@ -36,6 +36,7 @@ const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = r
 const authGate = require('./security/auth-gate');
 const tunnel = require('./security/tunnel-manager'); // Cloudflare quick tunnel (TUNNEL=off disables)
 const mobileLink = require('./security/mobile-link'); // Settings: live tunnel link + email re-send
+const externalApi = require('./execution/external-api'); // manual / broker-synced external holdings
 const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -94,6 +95,7 @@ function broadcast(type, payload) {
 }
 
 const handleMessage = createMessageHandler({ send, broadcast });
+externalApi.install(app, { broadcast }); // /api/portfolio/external (behind the sign-in gate)
 rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
 scanLog.onChange((log) => broadcast('SCAN_LOG', log)); // live scanner log, once per pass
 watchlist.onChange((items) => broadcast('WATCHLIST_UPDATED', items)); // "Watching"
@@ -116,6 +118,7 @@ wss.on('connection', (ws) => {
   send(ws, 'SCAN_LOG', scanLog.snapshot());
   send(ws, 'PILOT_ACTIONS', ledger.getPilotActions());
   send(ws, 'PILOT_MATRIX', pilotHandler.getMatrix());
+  send(ws, 'EXTERNAL_HOLDINGS', externalApi.snapshot());
   send(ws, 'MACRO_EVENTS', macro.upcoming());
   send(ws, 'UNIVERSE', universe.snapshot());
   send(ws, 'TRIGGER_PROXIMITY', getProximity());

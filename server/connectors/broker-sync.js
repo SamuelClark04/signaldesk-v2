@@ -1,4 +1,4 @@
-// Broker sync: real holdings from the live broker account (Coinbase for now),
+// Broker sync: real holdings from the live broker accounts (Coinbase, Alpaca),
 // mapped to the ledger's open-position shape so the Portfolio tab can list them
 // beside SignalDesk's own trades. A read-only SNAPSHOT: it is never written into
 // the ledger (the ledger only holds positions SignalDesk itself opened), and it
@@ -8,7 +8,10 @@
 //   venue: 'Live Crypto', execution: 'BROKER', costBasis (Coinbase's), brokerValue
 //   (USD value at sync), brokerUnrealizedPnl, syncedAt. No stop/targets: exits for
 //   these holdings are whatever orders exist at Coinbase.
+// Alpaca (stocks, when ALPACA_API_KEY is set): the same shape with broker
+// 'Alpaca', venue 'Live Stocks', id alpaca:<SYMBOL>; cash from the account.
 const coinbaseApi = require('./coinbase-api');
+const alpacaApi = require('./alpaca-api');
 const { feeModel } = require('../risk/scenarios');
 
 const MIN_GAP_MS = 10000; // manual syncs at most every 10 s
@@ -20,7 +23,8 @@ const num = (x) => {
   return Number.isFinite(n) ? n : null;
 };
 
-let snapshot = { coinbase: { ok: false, status: 'never', syncedAt: null, positions: [], cash: null, error: null } };
+const NEVER = { ok: false, status: 'never', syncedAt: null, positions: [], cash: null, error: null };
+let snapshot = { coinbase: NEVER, alpaca: NEVER };
 let running = null;
 let lastStart = 0;
 
@@ -58,6 +62,17 @@ async function fetchCoinbase(now) {
   return { ok: true, status: 'ok', syncedAt: now, portfolio: r.portfolio, positions, cash, error: null };
 }
 
+async function fetchAlpaca(now) {
+  if (!process.env.ALPACA_API_KEY || !process.env.ALPACA_API_SECRET) return { ...NEVER, status: 'not configured' };
+  const [pos, acct] = await Promise.all([alpacaApi.getPositions(), alpacaApi.getAccount()]).catch((err) => [{ ok: false, error: err.message }, {}]);
+  if (!pos.ok) return { ok: false, status: 'error', syncedAt: now, positions: [], cash: null, error: pos.error };
+  const positions = pos.positions.filter((p) => p.qty > 0 && (p.marketValue || 0) >= DUST_USD).map((p) => ({
+    id: `alpaca:${p.asset}`, asset: p.asset, market: 'stocks', direction: 'long', positionSize: p.qty, fillPrice: p.avgEntry > 0 ? p.avgEntry : null,
+    costBasis: p.costBasis, invalidation: null, targets: [], execution: 'BROKER', broker: 'Alpaca', venue: 'Live Stocks', brokerValue: p.marketValue,
+    brokerUnrealizedPnl: p.unrealizedPnl, syncedAt: now, openedAt: null, feeModel: feeModel('stocks') }));
+  return { ok: true, status: 'ok', syncedAt: now, environment: pos.environment, positions, cash: acct && acct.ok ? acct.cash : null, error: null };
+}
+
 const getSnapshot = () => JSON.parse(JSON.stringify(snapshot));
 
 // Fetches all venues (one sync at a time, at most every MIN_GAP_MS).
@@ -65,15 +80,18 @@ const getSnapshot = () => JSON.parse(JSON.stringify(snapshot));
 async function syncPortfolio(now = Date.now()) {
   if (running || now - lastStart < MIN_GAP_MS) return { ok: false, busy: true, snapshot: getSnapshot() };
   lastStart = now;
-  running = fetchCoinbase(now);
+  running = Promise.all([fetchCoinbase(now), fetchAlpaca(now)]);
   try {
-    snapshot = { coinbase: await running };
+    const [coinbase, alpaca] = await running;
+    snapshot = { coinbase, alpaca };
   } finally {
     running = null;
   }
-  const cb = snapshot.coinbase;
+  const { coinbase: cb, alpaca: al } = snapshot;
   if (cb.ok) console.log(`[broker-sync] Coinbase: ${cb.positions.length} holding(s), cash ${cb.cash.toFixed(2)}`);
   else console.warn(`[broker-sync] Coinbase sync failed: ${cb.error}`);
+  if (al.ok) console.log(`[broker-sync] Alpaca: ${al.positions.length} holding(s)`);
+  else if (al.status !== 'not configured') console.warn(`[broker-sync] Alpaca sync failed: ${al.error}`);
   return { ok: true, snapshot: getSnapshot() };
 }
 

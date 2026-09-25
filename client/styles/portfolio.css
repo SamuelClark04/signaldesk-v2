@@ -171,3 +171,16 @@
 .pf-auto.is-loading { color: var(--text-muted); }
 .pf-auto.is-edited { color: var(--text-muted); }
 .pf-auto.is-error { color: var(--warn); }
+
+/* External / manual holdings (Phase 53): external-holdings-form.js */
+.pf-venue.is-manual { border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.12); color: var(--warn); font-weight: 600; }
+.pf-ext-bar { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 12px 0; }
+.pf-ext-form { width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-2); }
+.pf-ext-title { color: var(--text); font-size: 14px; }
+.pf-ext-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.pf-ext-field .input { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); }
+.pf-ext-actions { display: flex; gap: 8px; }
+.pf-ext-error { margin: 0; color: var(--short); font-size: 13px; }
+.pf-ext-row td { padding: 0 !important; }
+.pf-action { white-space: nowrap; }
+.pf-action .btn + .btn { margin-left: 6px; }

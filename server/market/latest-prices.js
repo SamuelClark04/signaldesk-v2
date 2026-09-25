@@ -6,15 +6,22 @@ const coinbase = require('../connectors/coinbase-socket');
 
 const MAX_PRICE_AGE_MS = 5 * 60 * 1000;
 const BAR_MS = 60 * 1000; // an Alpaca bar is stamped at its start; its close is a minute later
+// Polled prices (REST, for symbols no stream carries: e.g. a manual Robinhood
+// holding outside the streamed universe; execution/external-api.js). Stamped with
+// the time of the bar they came from, so the same freshness rule applies.
+const polled = new Map(); // asset -> { price, time }
+function setPolled(asset, price, time) { if (price > 0 && Number.isFinite(time)) polled.set(asset, { price, time }); }
 
 function collect() {
-  const prices = new Map(); // asset -> { price, time }
+  const prices = new Map(polled); // asset -> { price, time }; stream prices win when newer
   for (const [symbol, bars] of alpacaStocks.getLatestBars()) {
     const last = bars[bars.length - 1];
-    if (last) prices.set(symbol, { price: last.close, time: Date.parse(last.time) + BAR_MS });
+    const time = last ? Date.parse(last.time) + BAR_MS : 0;
+    if (last && !(prices.has(symbol) && prices.get(symbol).time > time)) prices.set(symbol, { price: last.close, time });
   }
   for (const [symbol, tick] of Object.entries(coinbase.getLatest())) {
-    prices.set(symbol, { price: tick.price, time: Date.parse(tick.time) });
+    const time = Date.parse(tick.time);
+    if (!(prices.has(symbol) && prices.get(symbol).time > time)) prices.set(symbol, { price: tick.price, time });
   }
   return prices;
 }
@@ -41,4 +48,4 @@ function getLatestPrice(asset, now = Date.now()) {
   return getLatestPrices(now).get(asset);
 }
 
-module.exports = { getLatestPrices, getLatestPrice, getPriceTimes, MAX_PRICE_AGE_MS };
+module.exports = { getLatestPrices, getLatestPrice, getPriceTimes, setPolled, MAX_PRICE_AGE_MS };

@@ -27,8 +27,13 @@
     ]);
   }
 
-  // Venue badge in the Asset cell: green LIVE for broker money, grey PAPER for the ledger.
+  // Venue badge in the Asset cell: green LIVE for broker money, amber MANUAL for
+  // holdings at brokers SignalDesk cannot reach, grey PAPER for the ledger.
   function venueBadge(p) {
+    if (p.external === 'manual') {
+      return el('span', { className: 'pf-venue is-manual', textContent: `MANUAL · ${p.broker}`,
+        title: `Entered by hand; held at ${p.broker}. SignalDesk tracks it and proposes actions; you trade at ${p.broker} and confirm in Approvals.` });
+    }
     const live = p.execution === 'LIVE' || p.execution === 'BROKER';
     return el('span', { className: `pf-venue${live ? ' is-live' : ''}`, textContent: live ? `LIVE · ${p.broker}` : 'PAPER',
       title: p.execution === 'BROKER' ? `Synced from ${p.broker}${p.tracked && p.tracked.length ? '; includes SignalDesk trades' : ''}` : p.execution === 'LIVE' ? `Opened live by SignalDesk at ${p.broker}` : 'SignalDesk paper ledger' });
@@ -39,6 +44,7 @@
     const head = ['Asset', 'Direction', 'Size', 'Entry price', 'Stop loss', 'Target 1', 'Current price', 'Unrealized P/L', 'Next step', 'Action'];
     const numeric = new Set(['Size', 'Entry price', 'Stop loss', 'Target 1', 'Current price', 'Unrealized P/L']);
     const A = SD.portfolioAdopt;
+    const X = SD.externalForm;
     const body = data.rows.flatMap((row) => {
       const { p, m, alert } = row;
       // A synced holding with exactly one managed position shows that position's levels.
@@ -63,17 +69,19 @@
           [m.price ? price(m.price, p) : '—', ...(m.priceSource === 'sync' ? [el('span', { className: 'pf-pnl-pct pf-muted', textContent: 'at sync' })] : [])]),
         pnlCell(m, p),
         el('td', {}, alert ? el('span', { className: `pf-step is-${alert.tone}`, textContent: alert.action, title: alert.detail }) : el('span', { className: 'pf-muted', textContent: '—' })),
-        el('td', { className: 'pf-action' }, A.canAdopt(row) ? A.button(row, opts) : close),
+        el('td', { className: 'pf-action' }, p.external === 'manual' ? X.rowActions(p, opts)
+          : [...(A.canAdopt(row) ? [A.button(row, opts)] : [p.extId ? null : close]), ...(p.extId ? X.rowActions(p, opts) : [])].filter(Boolean)),
       ]);
       tr.onclick = () => opts.onSelect(p.id);
+      if (X.isEditing(p)) return [tr, X.formRow(head.length, opts)];
       return A.isOpen(row) ? [tr, A.formRow(row, head.length, opts)] : [tr];
     });
     return el('section', { className: 'pf-card pf-holdings' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Holdings' }),
-        el('span', { className: 'pf-sub', textContent: 'Open positions from the ledger · P/L marked on every live price update' })]),
+        el('span', { className: 'pf-sub', textContent: 'Ledger positions, synced broker balances and manual holdings · P/L marked on every live price update' })]),
       el('div', { className: 'table-wrap' }, el('table', { className: 'data-table pf-table' }, [
         el('thead', {}, el('tr', {}, head.map((h) => el('th', { textContent: h, className: numeric.has(h) ? 'num' : '' })))),
-        el('tbody', {}, body.length ? body : [el('tr', {}, el('td', { colSpan: head.length, className: 'pf-empty', textContent: 'No open positions. Approved setups appear here once filled.' }))]),
+        el('tbody', {}, body.length ? body : [el('tr', {}, el('td', { colSpan: head.length, className: 'pf-empty', textContent: 'No open positions. Approved setups appear here once filled; add holdings from other brokers with "+ Add External Holding".' }))]),
       ])),
     ]);
   }

@@ -21,14 +21,19 @@ function priceLookup(latestPricesMap) {
   return (asset) => (latestPricesMap instanceof Map ? latestPricesMap.get(asset) : latestPricesMap && latestPricesMap[asset]);
 }
 
-// Market value per asset of the pilot's OWN holdings (swing / day trades are not
-// the long-term portfolio). Longs only; no fresh price = valued at the fill.
+// Market value per asset of the long-term portfolio: the pilot's OWN paper
+// holdings (swing / day trades are not the long-term portfolio) plus, by the
+// venue scope the pilot handler passes, real holdings flagged countsAsHolding
+// (SignalDesk's LIVE trades, manual Robinhood / other and broker-synced ones).
+// Longs only; no fresh price = valued at the fill (average cost).
 function valueHoldings(activePositions, priceOf) {
   const values = new Map();
   const notes = [];
-  const own = activePositions.filter((p) => p.strategyId === PILOT_STRATEGY_ID && p.direction !== 'short');
+  const own = activePositions.filter((p) => (p.strategyId === PILOT_STRATEGY_ID || p.countsAsHolding) && p.direction !== 'short' && p.market !== 'options');
   const ignored = activePositions.length - own.length;
-  if (ignored) notes.push(`${ignored} position(s) from other strategies not counted (pilot holdings only)`);
+  if (ignored) notes.push(`${ignored} paper position(s) from other strategies not counted (long-term holdings only)`);
+  const outside = own.filter((p) => p.execution === 'EXTERNAL');
+  if (outside.length) notes.push(`Counted outside SignalDesk: ${outside.map((p) => `${p.asset} (${p.broker})`).join(', ')}`);
   for (const p of own) {
     let price = priceOf(p.asset);
     if (!(price > 0)) { price = p.fillPrice; notes.push(`${p.asset} has no fresh price; valued at its fill price ${p.fillPrice}`); }

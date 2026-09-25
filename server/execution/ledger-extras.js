@@ -46,12 +46,13 @@ const getPilotActions = () => need().pilotActions.filter((a) => a.status === 'pe
 
 // Reconcile with this pass's proposals: new ones are added (an id already seen
 // today, e.g. dismissed, is not re-added); pending ones whose condition no longer
-// holds, or whose position closed, expire. Returns true when the pending set changed.
+// holds, or whose position closed, expire. Returns { changed, added: [new actions] }.
 function syncPilotActions(proposals, openIds) {
   const { pilotActions, save } = need();
   const now = Date.now();
   const current = new Set(proposals.map((p) => p.id));
   let changed = false;
+  const added = [];
   for (const a of pilotActions) {
     if (a.status === 'pending' && (!current.has(a.id) || !openIds.has(a.positionId))) {
       Object.assign(a, { status: 'expired', resolvedAt: now });
@@ -60,12 +61,14 @@ function syncPilotActions(proposals, openIds) {
   }
   for (const p of proposals) {
     if (findIndex(pilotActions, p.id) !== -1) continue;
-    pilotActions.push({ ...p, status: 'pending', createdAt: now });
+    const a = { ...p, status: 'pending', createdAt: now };
+    pilotActions.push(a);
+    added.push({ ...a });
     changed = true;
   }
   if (pilotActions.length > MAX_ACTIONS) pilotActions.splice(0, pilotActions.length - MAX_ACTIONS);
   if (changed) save();
-  return changed;
+  return { changed, added };
 }
 
 function resolvePilotAction(id, status, extra = {}) {
@@ -89,7 +92,7 @@ const findPilotAction = (id) => {
 // journal entries are KEPT: they record real trades, not paper P&L. Settings
 // (bankroll, risk profile, strictness) and bookmarks stay. The state file is
 // copied first (backup path returned), so a reset can be undone by hand.
-const isLive = (x) => x.execution === 'LIVE' || x.execution === 'BROKER' || x.adopted;
+const isLive = (x) => x.execution === 'LIVE' || x.execution === 'BROKER' || x.execution === 'EXTERNAL' || x.adopted;
 
 function resetPaper() {
   const { pendingOrders, activePositions, tradeJournal, discardedOrders, pilotActions, save, backup } = need();
@@ -100,7 +103,7 @@ function resetPaper() {
     trades: keep(tradeJournal, isLive),
     pending: keep(pendingOrders, () => false),
     discarded: keep(discardedOrders, () => false),
-    pilotActions: keep(pilotActions, () => false),
+    pilotActions: keep(pilotActions, (a) => !!a.external), // external holdings are real: their proposals stay
   };
   save();
   return { removed, keptLive: { positions: activePositions.length, trades: tradeJournal.length }, backupPath };

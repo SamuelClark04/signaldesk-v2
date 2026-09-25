@@ -234,3 +234,8 @@
 /* 1-Contract Small-Account Cap (options above the profile budget) */
 .opp-moon.is-small-cap { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); color: var(--warn); }
 .apv-note.is-small-cap { border-left: 3px solid var(--warn); padding-left: 8px; }
+/* External holdings: [MANUAL · ROBINHOOD] / [LIVE · COINBASE] cards (Phase 53) */
+.apv-tag { margin-right: 6px; color: var(--long); font: 600 12px var(--font-mono); }
+.apv-tag.is-manual { color: var(--warn); }
+.apv-instruction { margin: 0; padding: 8px 10px; border-left: 3px solid var(--warn); background: rgba(251, 191, 36, 0.08); color: var(--text); font-weight: 600; }
+.apv-approve.is-manual { border-color: var(--warn); background: transparent; color: var(--warn); font-weight: 700; }

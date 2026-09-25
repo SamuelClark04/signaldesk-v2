@@ -70,9 +70,9 @@
   }
 
   function kpis(t) {
-    if (venueOf() === 'crypto' && !t.synced) {
-      return el('div', { className: 'pf-card pf-empty-venue' }, [el('strong', { textContent: 'Coinbase not synced' }),
-        el('span', { className: 'pf-sub', textContent: 'Press Sync Broker to load your real Coinbase holdings (read-only). Until then this view lists only the LIVE trades SignalDesk opened itself, without account totals.' })]);
+    if (venueOf() === 'crypto' && !t.synced && !(t.holdingsValue > 0)) {
+      return el('div', { className: 'pf-card pf-empty-venue' }, [el('strong', { textContent: 'No live or external holdings yet' }),
+        el('span', { className: 'pf-sub', textContent: 'Press Sync Broker to load your real Coinbase / Alpaca holdings (read-only), or add a holding from another broker (Robinhood...) with "+ Add External Holding".' })]);
     }
     const card = (label, value, sub, cls = '') => el('div', { className: 'pf-kpi' }, [el('span', { className: 'pf-kpi-label', textContent: label }),
       el('strong', { className: `pf-kpi-value ${cls}`, textContent: value }), el('span', { className: 'pf-kpi-sub', textContent: sub })]);
@@ -137,12 +137,14 @@
       return b;
     }));
     const body = subTab === 'pilot'
-      ? SD.portfolioPilot.pilotView(data, { state, venueLabel: SD.venue.LABEL[venueOf()], selectedId, onSelect, onClose, online, rerender,
-        onHoldings: (id) => { selectedId = id; subTab = 'holdings'; rerender(); }, send: (msg) => transport.send(msg) })
+      ? el('div', { className: 'pf-pilot-view' }, [SD.externalForm.bar({ rerender }),
+        SD.portfolioPilot.pilotView(data, { state, venueLabel: SD.venue.LABEL[venueOf()], selectedId, onSelect, onClose, online, rerender,
+          onHoldings: (id) => { selectedId = id; subTab = 'holdings'; rerender(); }, send: (msg) => transport.send(msg) })])
       : el('div', { className: 'pf-holdings-view' }, [
         kpis(data.totals),
+        SD.externalForm.bar({ rerender }),
         el('div', { className: 'pf-grid' }, [
-          T().holdingsTable(data, { selectedId, onSelect, onClose, closing, online, rerender, send, livePrice }),
+          T().holdingsTable(data, { selectedId, onSelect, onClose, closing, online, rerender, send, livePrice, state }),
           el('div', { className: 'pf-side' }, [T().exposure(data), T().attention(data, { onSelect, onPilot: () => { subTab = 'pilot'; rerender(); } })]),
         ]),
         T().details(data.rows.find((r) => r.p.id === selectedId), state, { online, send }),

@@ -139,7 +139,8 @@
       if (!Number.isFinite(amount) || amount <= 0) { alloc.error = 'Enter a deposit amount above $0.'; return opts.rerender(); }
       if (!opts.online) { alloc.error = 'Offline: cannot reach the server.'; return opts.rerender(); }
       Object.assign(alloc, { pending: true, error: '' });
-      opts.send({ type: 'CALCULATE_ALLOCATION', amount });
+      // Which holdings count toward the 30% cap: the venue filter (Live / External = real only).
+      opts.send({ type: 'CALCULATE_ALLOCATION', amount, scope: { paper: 'paper', crypto: 'external' }[SD.venue.current(opts.state)] || 'combined' });
       clearTimeout(timer);
       timer = setTimeout(() => { allocationResult({ error: 'No response from the server. Try again.' }); opts.rerender(); }, 30000);
       return opts.rerender();

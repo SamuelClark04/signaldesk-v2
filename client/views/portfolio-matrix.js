@@ -7,6 +7,9 @@
 //   ADD            a winner pulled back to its 20/50-day SMA, under 18% weight:
 //                  the add is staged as a buy setup (Approvals)
 //   HOLD           healthy: its buffer over the 200-day SMA and its weight
+// Every holding is judged together (paper, LIVE, broker-synced and manual
+// Robinhood / other), weighted against the combined equity; the venue filter
+// only chooses which rows are shown.
 // Exposes window.SignalDesk.portfolioMatrix: { card(state) }.
 (() => {
   const SD = window.SignalDesk;
@@ -15,9 +18,13 @@
   const TONE = { 'SELL + ROTATE': 'bad', TRIM: 'warn', ADD: 'info', HOLD: 'ok', WAIT: 'wait' };
   const pct = (x) => (Number.isFinite(x) ? `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%` : '—');
 
+  const isPaper = (r) => !r.execution || r.execution === 'PAPER';
+  const SHOW = { paper: isPaper, crypto: (r) => !isPaper(r), combined: () => true };
+  const where = (r) => (r.external === 'manual' ? `MANUAL · ${r.broker}` : r.external === 'broker' || r.execution === 'LIVE' ? `LIVE · ${r.broker}` : 'PAPER');
+
   function card(state) {
     const m = state.pilotMatrix;
-    const rows = (m && m.rows) || [];
+    const rows = ((m && m.rows) || []).filter(SHOW[SD.venue.current(state)] || SHOW.combined);
     const counts = {};
     for (const r of rows) counts[r.action] = (counts[r.action] || 0) + 1;
     const toApprovals = el('button', { type: 'button', className: 'btn', textContent: 'Open Approvals →' });
@@ -25,15 +32,16 @@
     const acting = rows.some((r) => r.action !== 'HOLD' && r.action !== 'WAIT');
     return el('section', { className: 'pf-card pf-matrix' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Portfolio matrix: hold · add · trim · sell + rotate' }),
-        el('span', { className: 'pf-sub', textContent: m && m.at ? `checked ${age(m.at)} ago · equity ${money(m.equity)}` : 'Waiting for the first pipeline pass' })]),
+        el('span', { className: 'pf-sub', textContent: m && m.at ? `checked ${age(m.at)} ago · combined equity ${money(m.equity)}` : 'Waiting for the first pipeline pass' })]),
       el('p', { className: 'pf-sub', textContent: 'Every holding against its 200/50/20-day averages and the trend ranker, once a minute. '
         + 'Sells, trims and the paired rotation / add buys wait in Approvals; nothing executes until you approve it.' }),
       rows.length ? el('div', { className: 'table-wrap' }, el('table', { className: 'data-table pf-table' }, [
         el('thead', {}, el('tr', {}, ['Asset', 'Action', 'Weight', 'vs 200d SMA', 'Trend score', 'Why'].map((h, i) => el('th', { textContent: h, className: i >= 2 && i <= 4 ? 'num' : '' })))),
         el('tbody', {}, rows.map((r) => el('tr', {}, [
-          el('td', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: r.asset, market: r.asset.includes('-') ? 'crypto' : 'stocks' }) }),
+          el('td', {}, [el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol({ asset: r.asset, market: r.asset.includes('-') ? 'crypto' : 'stocks' }) }),
+            el('span', { className: `pf-venue${r.external === 'manual' ? ' is-manual' : isPaper(r) ? '' : ' is-live'}`, textContent: where(r) })]),
           el('td', {}, el('span', { className: `pf-rec is-${TONE[r.action] || 'info'}`, textContent: r.action })),
-          el('td', { className: 'num', textContent: Number.isFinite(r.weight) ? `${(r.weight * 100).toFixed(1)}%` : 'broker', title: Number.isFinite(r.weight) ? '' : 'LIVE / adopted holding: no paper weight' }),
+          el('td', { className: 'num', textContent: Number.isFinite(r.weight) ? `${(r.weight * 100).toFixed(1)}%` : '—', title: 'Share of the combined equity (paper + live + external)' }),
           el('td', { className: `num ${r.buffer200 < 0 ? 'text-short' : 'text-long'}`, textContent: pct(r.buffer200) }),
           el('td', { className: 'num', textContent: Number.isFinite(r.score) ? String(r.score) : '—' }),
           el('td', { className: 'pf-why', textContent: r.reason }),

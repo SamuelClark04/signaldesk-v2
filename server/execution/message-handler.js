@@ -19,6 +19,7 @@ const brokerSync = require('../connectors/broker-sync');
 const adoption = require('./adoption');
 const { suggestLevels } = require('../risk/adoption-levels');
 const newsSentiment = require('../connectors/news-sentiment');
+const externalApi = require('./external-api');
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: the contract and
@@ -220,7 +221,8 @@ function createMessageHandler({ send, broadcast }) {
     send(ws, 'BROKER_HOLDINGS', { ...brokerSync.getSnapshot(), syncing: true });
     const result = await brokerSync.syncPortfolio();
     if (result.busy) return send(ws, 'BROKER_HOLDINGS', { ...result.snapshot, notice: 'A sync just ran. Try again in a few seconds.' });
-    return broadcast('BROKER_HOLDINGS', result.snapshot);
+    broadcast('BROKER_HOLDINGS', result.snapshot);
+    return externalApi.brokerSynced(); // balances bought outside SignalDesk are external holdings
   }
 
   // Portfolio Pilot: deposit -> staged BUY setups; SELL / TRIM approvals (pilot-handler.js).

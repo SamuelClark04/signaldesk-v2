@@ -56,6 +56,7 @@
     UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 83 monitored symbols + names
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch
     BROKER_HOLDINGS: (h) => { state.holdings = h; SD.venue.received(h); }, // last Sync Broker snapshot (read-only)
+    EXTERNAL_HOLDINGS: (x) => { state.external = x; }, // manual (Robinhood / other) + broker-synced holdings with protective levels
   };
 
   // State-driven views: rendered on entering their tab and on every state change

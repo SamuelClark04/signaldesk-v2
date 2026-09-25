@@ -202,6 +202,36 @@ async function sendTunnelReadyEmail(tunnelUrl, { force = false } = {}) {
   return result;
 }
 
+// A Portfolio Pilot action on an EXTERNAL holding (execution/external-actions.js):
+// the exact instruction, e.g. "Sell 1.15 shares of NVDA on Robinhood". Manual
+// ones are done by the user at that broker, then confirmed in Approvals.
+function buildExternalActionEmail(a) {
+  const tag = a.manual ? `MANUAL · ${String(a.broker).toUpperCase()}` : `LIVE · ${String(a.broker).toUpperCase()}`;
+  const subject = `[ACTION REQUIRED] [${tag}] SignalDesk: ${a.instruction}`.slice(0, 180);
+  const link = magic.create(baseUrl(), '/#opportunities?tab=approvals');
+  const next = a.manual ? `Place it in ${a.broker}, then open Approvals and press "Confirm Executed in ${a.broker}" so SignalDesk updates the holding.`
+    : `Approving it in SignalDesk sends a real market order to ${a.broker} (only when ${a.broker} is LIVE in Settings).`;
+  const rows = [['Action', a.action === 'SELL' && a.rotation ? 'SELL + ROTATE' : a.action], ['Why', a.reason], ['Live price', px(a.price)]];
+  const text = [a.instruction, '', ...rows.map(([k, v]) => `${k}: ${v}`), '', a.detail || '', '', next, `Open Approvals (one-tap sign-in, valid ${expiresText()}): ${link}`].join('\n');
+  const html = [
+    '<div style="background:#0b1220;padding:24px;font-family:system-ui,-apple-system,Segoe UI,sans-serif">',
+    '<div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:10px;padding:20px;color:#e5e7eb">',
+    `<p style="margin:0 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#fbbf24">${escapeHtml(tag)} · Portfolio Pilot</p>`,
+    `<h2 style="margin:0 0 12px;font-size:19px;color:#f8fafc">${escapeHtml(a.instruction)}</h2>`,
+    '<table cellpadding="6" style="border-collapse:collapse;width:100%;font-size:14px">',
+    ...rows.map(([k, v]) => `<tr><td style="color:#94a3b8;border-top:1px solid #1f2937;width:30%">${escapeHtml(k)}</td><td style="border-top:1px solid #1f2937"><strong>${escapeHtml(v)}</strong></td></tr>`),
+    '</table>',
+    `<p style="margin:14px 0;font-size:13px;line-height:1.5;color:#cbd5e1">${escapeHtml(a.detail || '')}</p>`,
+    `<p style="margin:0 0 18px;font-size:13px;color:#fbbf24">${escapeHtml(next)}</p>`,
+    `<a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#2f81f7;color:#ffffff;font-weight:700;text-decoration:none">Open Approvals &rarr;</a>`,
+    `<p style="margin:16px 0 0;font-size:11px;color:#64748b">The button signs this device in (valid ${expiresText()}); do not forward this email.</p>`,
+    '</div></div>',
+  ].join('\n');
+  return { subject, text, html, consoleText: text.replace(link, approvalsUrl()) };
+}
+const sendExternalActionAlert = async (a) => dispatch(buildExternalActionEmail(a));
+
 const emailConfigured = () => REQUIRED.every((k) => String(process.env[k] || '').trim());
 
-module.exports = { sendApprovalAlert, sendTunnelReadyEmail, buildAlert, buildTunnelEmail, approvalsUrl, emailConfigured, lastTunnelEmail: () => lastTunnelEmail };
+module.exports = { sendApprovalAlert, sendTunnelReadyEmail, sendExternalActionAlert, buildAlert, buildTunnelEmail, buildExternalActionEmail, approvalsUrl, emailConfigured,
+  lastTunnelEmail: () => lastTunnelEmail };

@@ -292,4 +292,4 @@ async function getOrderStatus(brokerId) {
   }
 }
 
-module.exports = { getAccount, getPortfolioBreakdown, submitOrder, cancelOrder, getOrderStatus, productIncrements, buildJwt, loadSigningKey };
+module.exports = { getAccount, getPortfolioBreakdown, submitOrder, cancelOrder, getOrderStatus, productIncrements, buildJwt, loadSigningKey, cbFetch, loadAuth, failure, ORDERS_PATH };

@@ -5,7 +5,10 @@
 //                  at the card's Trade Amount ($) (trade-amount.js)
 //   pilot actions  Portfolio Pilot SELL / TRIM proposals for open positions:
 //                  APPROVE_ACTION closes (or trims) the PAPER position at the live
-//                  price; LIVE / adopted holdings are sold at the broker instead
+//                  price; LIVE / adopted holdings are sold at the broker instead.
+//                  EXTERNAL holdings: [MANUAL · ROBINHOOD] cards carry the exact
+//                  instruction and "Confirm Executed" updates the holding; broker-
+//                  synced ones send a real market sell (Coinbase / Alpaca LIVE)
 // The server stays the source of truth: a card leaves only when its state does.
 // Exposes window.SignalDesk.oppApprovals: { render(state, ctx), count(state) }.
 (() => {
@@ -71,7 +74,9 @@
   }
 
   function actionCard(a, ctx) {
-    const pos = (ctx.state.positions || []).find((p) => p.id === a.positionId);
+    const pos = (ctx.state.positions || []).find((p) => p.id === a.positionId)
+      || ((ctx.state.external && ctx.state.external.positions) || []).find((p) => p.id === a.positionId);
+    if (a.external) return externalCard(a, pos, ctx);
     const atBroker = a.execution === 'LIVE' || a.adopted;
     const busy = ctx.inFlight.has(a.id);
     const qty = pos ? (a.action === 'SELL' ? pos.positionSize : pos.positionSize * a.fraction) : null;
@@ -102,6 +107,42 @@
         kv('50-day SMA', String(a.levels.sma50)),
       ]),
       el('p', { className: 'apv-thesis', textContent: a.detail }),
+      el('div', { className: 'apv-actions' }, [approve, dismiss]),
+    ]);
+  }
+
+  // An action on a holding SignalDesk did not open: the instruction first.
+  function externalCard(a, pos, ctx) {
+    const busy = ctx.inFlight.has(a.id);
+    const label = a.action === 'SELL' && a.rotation ? 'SELL + ROTATE' : a.action;
+    const tag = `${a.manual ? 'MANUAL' : 'LIVE'} · ${String(a.broker).toUpperCase()}`;
+    const approve = el('button', { type: 'button', className: `btn apv-approve ${a.manual ? 'is-manual' : 'is-sell'}`, disabled: busy || !ctx.online,
+      textContent: busy ? 'Sending…' : a.manual ? `Confirm Executed in ${a.broker}` : `Approve / ${a.action === 'ADD' ? 'BUY' : 'SELL'} LIVE at ${a.broker}` });
+    approve.onclick = () => {
+      const msg = a.manual ? `Confirm you did this in ${a.broker}?\n\n${a.instruction}\n\nSignalDesk updates the ${a.asset} holding (${a.action === 'ADD' ? 'adds' : 'deducts'} ${a.quantity}).`
+        : `Send a REAL market order to ${a.broker}?\n\n${a.instruction}\n\n${a.reason}. This uses real money.`;
+      if (window.confirm(msg)) ctx.sendAction('APPROVE_ACTION', a.id);
+    };
+    const dismiss = el('button', { type: 'button', className: 'btn apv-dismiss', textContent: 'Dismiss for today', disabled: busy || !ctx.online });
+    dismiss.onclick = () => ctx.sendAction('DISMISS_ACTION', a.id);
+    const lv = a.levels || {};
+    return el('article', { className: `apv-card is-${a.action.toLowerCase()} is-external` }, [
+      el('header', { className: 'apv-head' }, [
+        SD.scannerDetail.badge(a.asset),
+        el('div', { className: 'apv-title' }, [el('span', { className: `apv-tag${a.manual ? ' is-manual' : ''}`, textContent: `[${tag}]` }),
+          el('strong', { textContent: `${label} ${SD.oppDetail.displaySymbol({ asset: a.asset, market: a.market })}${a.rotation ? ` → ${a.rotation.asset}` : ''}` }),
+          el('span', { textContent: `Portfolio Pilot · ${a.reason}` })]),
+        el('span', { className: 'apv-expiry', textContent: `proposed ${age(a.createdAt)} ago` }),
+      ]),
+      el('p', { className: 'apv-instruction', textContent: a.instruction }),
+      el('div', { className: 'apv-grid' }, [
+        kv('Holding', pos ? `${size(pos)} @ ${price(pos.fillPrice, pos)} · ${pos.broker}` : '—'),
+        kv('Live price', price(a.price, { market: a.market, entryPrice: a.price })),
+        ...(lv.stop ? [kv('Stop / T1', `${price(lv.stop, { market: a.market, entryPrice: a.price })} / ${lv.t1 ? price(lv.t1, { market: a.market, entryPrice: a.price }) : '—'}`)] : []),
+        ...(lv.sma200 ? [kv('200-day SMA', String(lv.sma200))] : []),
+        ...(a.rotation ? [kv('Rotate into', `${a.rotation.asset} (#1 ranked, score ${a.rotation.score})`, 'text-long')] : []),
+      ]),
+      el('p', { className: 'apv-thesis', textContent: a.detail || '' }),
       el('div', { className: 'apv-actions' }, [approve, dismiss]),
     ]);
   }

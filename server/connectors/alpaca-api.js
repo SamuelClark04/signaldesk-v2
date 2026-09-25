@@ -117,6 +117,31 @@ async function submitOrder(candidate, size, entryPrice) {
   return { ok: true, brokerId: r.body.id, status: r.body.status, environment: environment() };
 }
 
+// Open stock positions (Sync Broker, read-only): [{ asset, qty, avgEntry, costBasis, marketValue, unrealizedPnl }].
+// US equities only (options / crypto classes are not synced).
+async function getPositions() {
+  const r = await alpacaFetch('/v2/positions');
+  if (!r.ok) return r;
+  if (!Array.isArray(r.body)) return { ok: false, error: 'Alpaca: unexpected positions response' };
+  return { ok: true, environment: environment(), positions: r.body.filter((p) => p.asset_class === 'us_equity' && p.side === 'long').map((p) => ({
+    asset: p.symbol, qty: num(p.qty), avgEntry: num(p.avg_entry_price), costBasis: num(p.cost_basis), marketValue: num(p.market_value), unrealizedPnl: num(p.unrealized_pl) })) };
+}
+
+// Plain market SELL of a holding bought outside SignalDesk (an approved Portfolio
+// Pilot sell / trim / stop). Fractional quantities are fine for day market
+// orders. Refused outside regular hours (a queued market order fills far from
+// the price it was approved at). client_order_id = the Pilot action id.
+async function sellMarket(symbol, qty, clientOrderId) {
+  if (!/^[A-Z][A-Z0-9.]{0,9}$/.test(String(symbol)) || !(qty > 0)) return { ok: false, error: `Alpaca sell not sent: invalid ${symbol} ${qty}` };
+  const clock = await alpacaFetch('/v2/clock');
+  if (!clock.ok) return clock;
+  if (!clock.body || clock.body.is_open !== true) return { ok: false, error: `MARKET_CLOSED: US equities market is closed (next open ${clock.body && clock.body.next_open})` };
+  const r = await alpacaFetch('/v2/orders', { method: 'POST', body: { symbol, qty: String(Math.floor(qty * 1e6) / 1e6), side: 'sell', type: 'market', time_in_force: 'day',
+    client_order_id: String(clientOrderId).slice(0, 128) } });
+  if (!r.ok) return r;
+  return r.body && r.body.id ? { ok: true, brokerId: r.body.id, status: r.body.status, environment: environment() } : { ok: false, error: 'Alpaca: order response had no id' };
+}
+
 // ---------- Order status (reconciliation) ----------
 const qtyOf = (o) => num(o.filled_qty) || 0;
 const TERMINAL = new Set(['filled', 'canceled', 'expired', 'rejected', 'done_for_day', 'replaced', 'stopped']);
@@ -163,4 +188,4 @@ async function getOrderStatus(brokerId) {
   };
 }
 
-module.exports = { getAccount, submitOrder, getOrderStatus, DEFAULT_BASE_URL };
+module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, DEFAULT_BASE_URL };
