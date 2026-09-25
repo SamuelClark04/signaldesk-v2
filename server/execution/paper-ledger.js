@@ -9,7 +9,9 @@ const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees } = require('../risk/cost-authority');
 const store = require('./ledger-store');
 const { grossPnl, priceScenarios, costBreakdown, feeModel, feeLegs } = require('../risk/scenarios');
-const { optionMark, saleValue } = require('./option-marks');
+const { optionMark } = require('./option-marks');
+const exitQuotes = require('./exit-quote'); // WYSIWYG: the one exit pricing for bookings and the screen (Phase 59)
+const prices = require('../market/latest-prices');
 const extras = require('./ledger-extras');
 const exits = require('./exit-monitor');
 
@@ -83,33 +85,27 @@ function discardOrder(candidateId) {
   return { ...discarded };
 }
 
-// Gross P/L before fees, plus the per-share option value at exit (options only).
-// The maths lives in risk/scenarios.js, shared with the Setups view's previews.
-// Options (option-marks.js): every leg at its fresh real quote (long legs at the
-// BID, short legs bought back at the ASK), else the model's bid side.
-function grossPnlAt(pos, exitPrice) {
-  if (pos.market !== 'options') return { grossPnl: grossPnl(pos, pos.fillPrice, exitPrice) };
-  const od = pos.optionsData;
-  const m = saleValue(pos, exitPrice);
-  return { grossPnl: (m.value - od.debit) * od.multiplier * pos.positionSize, optionsExitValue: m.value, optionsExitBasis: m.basis };
-}
-
 // exitPrice is always the UNDERLYING price (options are valued from their legs).
 // `extra` is merged into the journal entry (e.g. which broker leg filled).
-function closePosition(candidateId, exitPrice, exitReason, extra = {}) {
+// Gross P/L and fees come from exit-quote.js quote(): the SAME numbers the open
+// position showed as "Net if closed now" (Phase 59); `booked` is the exact quote a
+// manual close was shown (exit-quote.closeManually), booked to the cent.
+function closePosition(candidateId, exitPrice, exitReason, extra = {}, booked = null) {
   if (!(exitPrice > 0)) throw new Error('paper-ledger: exitPrice must be a positive number');
   const i = findIndex(activePositions, candidateId);
   if (i === -1) throw new Error(`paper-ledger: no open position ${candidateId}`);
 
   // Compute everything before removing the position, so a failure leaves it open.
   const pos = activePositions[i];
-  const { grossPnl, optionsExitValue: exitValue, optionsExitBasis } = grossPnlAt(pos, exitPrice);
+  const q = booked || exitQuotes.quote(pos, exitPrice, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop');
+  const grossPnl = q ? q.gross : grossPnlLinear(pos, exitPrice);
+  const exitValue = pos.market === 'options' && q ? q.exitValue : undefined;
+  const optionsExitBasis = q ? q.basis : null;
   // Broker-reconciled closes pass the broker's actual fees; real fill prices already
   // include slippage, so the estimate would double-count it.
-  const fees = Number.isFinite(extra.actualFees)
-    ? extra.actualFees
-    : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice, feeLegs(pos, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop'));
-  const netPnl = grossPnl - fees;
+  const fees = Number.isFinite(extra.actualFees) ? extra.actualFees
+    : q ? q.fees : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice, feeLegs(pos, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop'));
+  const netPnl = Number.isFinite(extra.actualFees) || !q ? grossPnl - fees : q.net;
 
   const entry = {
     ...pos,
@@ -220,7 +216,10 @@ function releaseAdopted(candidateId) {
 const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
 // and real option contracts their current value (optionMark, option-marks.js).
-const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p) }));
+// exitQuote: what a manual close would book right now ("Net if closed now"; paper only).
+const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
+  exitQuote: p.execution === 'LIVE' ? null : exitQuotes.issue(p, prices.getLatestPrice(p.asset)) }));
+const grossPnlLinear = (pos, exitPrice) => grossPnl(pos, pos.fillPrice, exitPrice);
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
 // Data migrations (e.g. options-migration.js): mutate(position) returns true when it
@@ -262,7 +261,7 @@ module.exports = {
   resetPaper: extras.resetPaper,
   // Settings live in the store; re-exported so callers keep one ledger API.
   // Mark-to-market for monitoring (same math as closePosition, before fees).
-  unrealizedPnl: (position, price) => grossPnlAt(position, price).grossPnl,
+  unrealizedPnl: (position, price) => { const q = exitQuotes.quote(position, price); return q ? q.gross : 0; },
   getSettings: store.getSettings,
   updateSettings: store.updateSettings,
 };

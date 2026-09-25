@@ -37,13 +37,15 @@
     if (!transport.isOnline()) return showNotice('Offline: cannot reach the server.');
     if (p.execution === 'LIVE') return showNotice(`${p.asset}: ${REASONS.LIVE_CLOSE_UNSUPPORTED}.`);
     if (!m.live) return showNotice(`${p.asset}: ${REASONS.NO_LIVE_PRICE}.`);
-    const est = m.gross === null ? 'Options are booked at the contract’s real bid when a fresh quote exists, otherwise at its modelled bid.'
-      : `Estimated P/L: ${signed(m.gross, money)} gross, ${m.net === null ? '—' : signed(m.net, money)} after estimated fees.`;
+    // WYSIWYG (Phase 59): the server's exit quote is what gets booked (its `at` goes with the close).
+    const q = p.exitQuote;
+    const est = q ? `Books ${signed(q.net, money)} net (mid P&L ${signed(q.midGross, money)}; the exit spread and fees are included).`
+      : `Mark: ${m.gross === null || m.gross === undefined ? '—' : `${signed(m.gross, money)} gross`}.`;
     const ok = window.confirm(`Close ${p.direction.toUpperCase()} ${p.asset} (paper) at the live price ${price(m.price, p)}?\n\n${est}\n\n`
-      + 'The server closes it at the freshest price it has, which may differ slightly.');
+      + 'That exact quote is booked if it is under 45 s old; otherwise it is re-quoted at the live price.');
     if (!ok) return undefined;
     closing.add(p.id);
-    transport.send({ type: 'CLOSE_POSITION', id: p.id });
+    transport.send({ type: 'CLOSE_POSITION', id: p.id, quoteAt: q ? q.at : null });
     return rerender();
   }
 

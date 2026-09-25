@@ -29,7 +29,13 @@
   // REFERENCE_PRICES; priceSource 'close', live false: closing still needs a
   // live price). Broker holdings fall back to their value from the last sync
   // (priceSource 'sync'); their cost is the broker's own cost basis.
+  // WYSIWYG (Phase 59): a paper position's net is the server's exit quote (what a
+  // close books: exit spread + fees), not the mid less fees.
   function mark(p, livePrice, close) {
+    const m = rawMark(p, livePrice, close);
+    return m && p.exitQuote && Number.isFinite(p.exitQuote.net) ? { ...m, net: p.exitQuote.net, netSource: 'exit quote' } : m;
+  }
+  function rawMark(p, livePrice, close) {
     if (p.execution === 'BROKER') return markBroker(p, livePrice > 0 ? livePrice : close, livePrice > 0);
     const cost = costBasis(p);
     const fm = p.feeModel || {};

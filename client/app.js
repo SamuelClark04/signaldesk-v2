@@ -38,6 +38,8 @@
     'order:staged': (order) => { if (order && order.id) state.pending = upsert(state.pending, order); },
     QUEUE_UPDATED: (orders) => { state.pending = orders || []; },
     POSITIONS_UPDATED: (positions) => { state.positions = positions || []; },
+    // Every 5 s: each paper position's exit quote ("Net if closed now", Phase 59).
+    POSITION_MARKS: (m) => { const q = (m && m.quotes) || {}; state.positions = state.positions.map((p) => (q[p.id] ? { ...p, exitQuote: q[p.id] } : p)); },
     JOURNAL_UPDATED: (trades) => { state.journal = trades || []; },
     SETTINGS_UPDATED: (settings) => { state.settings = settings; },
     BROKER_STATE: (broker) => { state.broker = broker; },

@@ -177,7 +177,9 @@ function selectContract(contracts, c, now = Date.now(), spot = null) {
 
 // Fresh quotes for held contracts (one request for all), cached QUOTE_TTL_MS.
 // Used to mark open option positions and to book paper exits at the real bid.
-async function refreshQuotes(symbols, now = Date.now()) {
+// spotOf(underlying) -> the underlying's price at quote time (kept as `spot`: option
+// marks move by net delta x the underlying's change until the next quote, Phase 59).
+async function refreshQuotes(symbols, now = Date.now(), spotOf = null) {
   const stale = [...new Set(symbols)].filter((s) => parseOcc(s) && !(quotes.has(s) && now - quotes.get(s).at < QUOTE_TTL_MS));
   if (!stale.length || !hasKeys()) return;
   try {
@@ -185,7 +187,7 @@ async function refreshQuotes(symbols, now = Date.now()) {
     for (const [sym, snap] of Object.entries(body.snapshots || {})) {
       const c = toContract(sym, snap, now);
       // bid 0 is a real quote too (a short leg far out of the money is bought back at the ask).
-      if (c && c.bid >= 0 && c.ask > 0) quotes.set(sym, { at: now, bid: c.bid, ask: c.ask, quoteTime: c.quoteTime, iv: c.iv, delta: c.delta });
+      if (c && c.bid >= 0 && c.ask > 0) quotes.set(sym, { at: now, bid: c.bid, ask: c.ask, quoteTime: c.quoteTime, iv: c.iv, delta: c.delta, spot: spotOf ? spotOf(c.underlying) || null : null });
     }
   } catch (err) {
     console.warn(`[options-data] quote refresh failed: ${err.message}`);

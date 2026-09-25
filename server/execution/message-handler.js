@@ -105,14 +105,8 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
 // price, booked by the ledger exactly like a stop/target exit (same fee model).
 // A LIVE position is closed at the broker (its bracket orders live there); the
 // reconciler then records the real fill.
-function closeManually(id) {
-  const pos = ledger.getActivePositions().find((p) => p.id === id);
-  if (!pos) throw new Error(`no open position ${id}`);
-  if (pos.execution === 'LIVE') throw new Error('LIVE_CLOSE_UNSUPPORTED');
-  const livePrice = prices.getLatestPrice(pos.asset);
-  if (!(livePrice > 0)) throw new Error('NO_LIVE_PRICE');
-  return ledger.closePosition(id, livePrice, 'MANUAL_CLOSE');
-}
+// Manual close: books the exact exit quote the user was shown (exit-quote.js, Phase 59).
+const closeManually = (id, quoteAt) => require('./exit-quote').closeManually(ledger, id, quoteAt);
 
 const QUEUE_ACTIONS = {
   APPROVE: (id, msg) => approveWithGuard(id, msg),
@@ -159,12 +153,12 @@ function createMessageHandler({ send, broadcast }) {
     broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
   }
 
-  function handleClose(ws, { id }) {
+  function handleClose(ws, { id, quoteAt }) {
     if (typeof id !== 'string' || !id) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'missing position id' });
     if (inFlight.has(id)) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'ORDER_BUSY' });
     inFlight.add(id);
     try {
-      const trade = closeManually(id);
+      const trade = closeManually(id, quoteAt);
       console.log(`[ledger] CLOSE_POSITION ${id} @ ${trade.exitPrice}: net ${trade.netPnl.toFixed(2)} (${trade.rMultiple.toFixed(2)}R)`);
       broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
       broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());

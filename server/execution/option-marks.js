@@ -32,19 +32,30 @@ const legSymbols = (od) => {
 
 const isPackage = (od) => od.fill === 'package' && (od.legs || []).length > 1;
 
-// { value (the sale fill), mid (package spreads), basis, quotes } for position p at underlying price S, or null.
+// Between chain quotes (about one a minute) the underlying keeps moving: the quoted
+// values move by net delta x (S now - S when quoted) until the next quote (Phase 59).
+function deltaShift(od, quotes, S, at) {
+  const anchor = quotes[0] && quotes[0].spot;
+  if (!(S > 0 && anchor > 0) || S === anchor || !od.expiration || !(od.legs || []).length) return 0;
+  const g = spreadStats.netGreeks(od, anchor, at);
+  return g ? g.delta * (S - anchor) : 0;
+}
+
+// { value (the sale fill), mid (package spreads), basis, quotes, interpolated } for position p at underlying price S, or null.
 function saleValue(p, S, at = Date.now()) {
   const od = p.optionsData;
   const symbols = legSymbols(od);
   if (symbols.length && symbols.every(Boolean)) {
     const quotes = symbols.map((s) => freshQuote(s));
     if (quotes.every(Boolean)) {
+      const shift = deltaShift(od, quotes, S, at);
+      const interpolated = shift !== 0;
       if (isPackage(od)) {
         const q = packageQuote(od.legs.map((leg, i) => ({ side: leg.side, ratio: leg.ratio, bid: quotes[i].bid, ask: quotes[i].ask })));
-        return { value: Math.max(0, q.exit), mid: Math.max(0, q.mid), basis: 'bid', quotes };
+        return { value: Math.max(0, q.exit + shift), mid: Math.max(0, q.mid + shift), basis: 'bid', quotes, interpolated };
       }
       const value = od.legs.reduce((v, leg, i) => v + (leg.side === 'sell' ? -quotes[i].ask : quotes[i].bid) * (leg.ratio || 1), 0);
-      return { value: Math.max(0, value), basis: 'bid', quotes };
+      return { value: Math.max(0, value + shift), basis: 'bid', quotes, interpolated };
     }
   }
   if (!(S > 0)) return null;

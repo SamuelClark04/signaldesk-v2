@@ -79,13 +79,27 @@
     ];
   }
 
+  // WYSIWYG (Phase 59): the server's exit quote (p.exitQuote, re-sent every 5 s as
+  // POSITION_MARKS) is exactly what a manual close books: the mid P&L, and the net
+  // after the exit spread and fees. The close button carries the net.
+  function exitRows(p) {
+    const q = p.exitQuote;
+    if (!q || p.execution === 'LIVE') return [];
+    const slip = q.gross - q.midGross;
+    return [
+      kv('Mid P&L (gross)', signed(q.midGross, money), pnlClass(q.midGross)),
+      kv('Net if closed now (after spread & fees)', `${signed(q.net, money)}${slip ? ` · exit spread ${signed(slip, money)}` : ''} · fees −${money(q.fees)}`, pnlClass(q.net)),
+    ];
+  }
+  const closeText = (p) => (p.exitQuote ? `Manual Exit / Close Now (${signed(p.exitQuote.net, money)} net)` : 'Manual Exit / Close Position');
+
   // Same rules as the trade panel's button: paper positions close at the live price
   // (server re-checks); LIVE / adopted ones are closed at the broker.
   function exitButton(p, m, ctx) {
     const atBroker = p.execution === 'LIVE' || p.execution === 'BROKER';
     const closing = !!(ctx.closing && ctx.closing.has(p.id));
     const b = el('button', { type: 'button', className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,
-      textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : 'Manual Exit / Close Position',
+      textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : closeText(p),
       disabled: atBroker || closing || !m.live || !ctx.online || !ctx.onClosePosition,
       title: atBroker ? 'LIVE / adopted position: close it at the broker' : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price' });
     b.onclick = () => ctx.onClosePosition(p, m);
@@ -100,6 +114,7 @@
     return el('div', { className: 'opp-kv-group' }, [
       el('h3', { className: 'opp-section', textContent: `${venueOf(p)} · ${p.direction === 'short' ? 'Short' : 'Long'} ${p.setupType || ''}` }),
       ...(isRealOption(p) ? realOptionRows(p, m) : opt ? legacyOptionRows(p) : linearRows(p, m)),
+      ...exitRows(p),
       ...(opt ? [kv(`Underlying ${p.asset}`, under)] : []),
       kv(opt ? `${p.asset} stop` : 'Stop', price(p.invalidation, p), 'text-short'),
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
@@ -135,5 +150,5 @@
     return held.length ? '' : fallback;
   }
 
-  SD.positionDetail = { lowDelta, panel, banner, isRealOption };
+  SD.positionDetail = { lowDelta, panel, banner, isRealOption, closeText };
 })();

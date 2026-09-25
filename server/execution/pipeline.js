@@ -199,7 +199,8 @@ async function pipelinePass() {
   // so marks and paper exits use the real bid. Re-sent every pass while held.
   const held = ledger.getActivePositions().filter((p) => p.market === 'options' && p.optionsData && p.optionsData.contract);
   if (held.length) {
-    await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean))); // every leg of a spread
+    // Every leg of a spread; each quote remembers the underlying price then (delta interpolation, option-marks.js).
+    await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), Date.now(), (u) => prices.getLatestPrice(u));
     positionsChanged = true;
   }
   const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `
@@ -254,6 +255,7 @@ function startPipeline(options = {}) {
   if (typeof options.broadcast === "function") broadcast = options.broadcast;
   expirySweeper.start(broadcast);
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
+  require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));

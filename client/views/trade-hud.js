@@ -72,7 +72,7 @@
     const exit = el('button', {
       type: 'button',
       className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,
-      textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : 'Manual Exit / Close Position',
+      textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : SD.positionDetail.closeText(p), // net if closed now (exit quote)
       disabled: atBroker || closing || !m.live || !ctx.online,
       title: atBroker ? (p.adopted ? 'Adopted holding: sell it at the broker (SignalDesk places no orders for it)' : 'LIVE position: its exits are orders at the broker; close it there')
         : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price',

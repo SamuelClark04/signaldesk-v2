@@ -67,13 +67,16 @@
   const onDismiss = (o) => send('REJECT', o.id);
 
   // HUD manual exit (paper only; the server refuses LIVE). Same confirm as Portfolio.
+  // WYSIWYG (Phase 59): the confirm shows the server's exit quote and the close sends its
+  // `at`, so the Journal books exactly that net (re-quoted only if it is over 45 s old).
   function onClosePosition(p, m) {
     if (!transport.isOnline() || closing.has(p.id)) return;
-    const est = m.gross === null ? 'Options are booked at the contract’s real bid when a fresh quote exists, otherwise at its modelled bid.'
-      : `Estimated P/L: ${m.gross >= 0 ? '+' : '−'}$${Math.abs(m.gross).toFixed(2)} gross${m.net === null ? '' : `, ${m.net >= 0 ? '+' : '−'}$${Math.abs(m.net).toFixed(2)} after fees`}.`;
+    const q = p.exitQuote;
+    const est = q ? `Books ${q.net >= 0 ? '+' : '−'}$${Math.abs(q.net).toFixed(2)} net (mid P&L ${q.midGross >= 0 ? '+' : '−'}$${Math.abs(q.midGross).toFixed(2)}, exit spread and fees included).`
+      : `Mark: ${m.gross === null || m.gross === undefined ? '—' : `${m.gross >= 0 ? '+' : '−'}$${Math.abs(m.gross).toFixed(2)} gross`}.`;
     if (!window.confirm(`Manual exit: close ${p.direction.toUpperCase()} ${p.asset} (paper) now at the live price ${price(m.price, p)}?\n\n${est}\n\nThis overrides the stop and targets.`)) return;
     closing.add(p.id);
-    transport.send({ type: 'CLOSE_POSITION', id: p.id });
+    transport.send({ type: 'CLOSE_POSITION', id: p.id, quoteAt: q ? q.at : null });
     rerender();
   }
 
