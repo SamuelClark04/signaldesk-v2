@@ -15,9 +15,11 @@
 //              +65..+85% (nets >= 1.25 : 1), T2 +100..+130% (a stretch level)
 // Direction: a put setup is 'short' the underlying (its stop sits ABOVE the price),
 // so the order guard, the entry zone and the stop all read the right way round.
-// After hours (no live price): the plan is built on the last close and the chain's
-// last quotes; the pipeline runs it through the risk engine and shows it as a
-// reviewable plan (after-hours-plans.js); it only stages on live quotes.
+// After hours (the US session is closed: market-session.js, never "no live price"):
+// the plan is built on the last close and the chain's last quotes; the pipeline runs
+// it through the risk engine and shows it as a reviewable plan (after-hours-plans.js);
+// it only stages on live quotes. In the session a symbol with no fresh price yet is
+// skipped until it has one (Phase 59B), never planned as "market closed".
 // Shields: earnings unknown = blocked (fail closed). One idea per symbol per day.
 const { getDailyBars } = require('../connectors/daily-bars');
 const { getHistory } = require('../connectors/history-bars');
@@ -31,13 +33,13 @@ const builder = require('./options-spread-builder');
 const spreadStats = require('../risk/spread-stats');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
+const session = require('../market/market-session');
 
 const STRATEGY_ID = 'options-system';
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
 const CONFIG = {
   tradeType: 'Options Swing', multiplier: 100, entryBufferPct: 0.002, hourTtlMs: 5 * 60 * 1000, maxTries: 2,
-  symbols: ['SPY', 'QQQ', 'IWM', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'TSLA', 'AMD', 'NFLX', 'COIN', 'PLTR', 'INTC',
-    'MU', 'UBER', 'ORCL', 'SOFI', 'BAC', 'JPM', 'WMT', 'XOM', 'DIS', 'PYPL'],
+  symbols: [...require('../market/universe').OPTIONABLE_STOCKS], // the first 25 WebSocket slots (Phase 59B)
   strikes: { call: [0.95, 1.18], put: [0.82, 1.05], atm: [0.97, 1.03] },
   holdDays: { swing: 15, intraday: 5 },
   duration: { swing: '5-15 trading days (exits on the spread value, well before expiry)', intraday: '1-5 trading days (exits on the spread value)' },
@@ -188,12 +190,13 @@ async function generateCandidates(marks, { live = marks, bankroll = null } = {},
   const spyBars = spyPx > 0 ? await getDailyBars('SPY', now) : [];
   const bench = spyBars.length > 1 ? changeOf(spyBars, spyPx) : NaN;
   const bank = bankroll || (() => { try { return require('../execution/ledger-store').getSettings().bankroll; } catch { return 0; } })();
+  const afterHours = !session.isEquityMarketOpen(now);
   for (const symbol of CONFIG.symbols) {
     tally.checked();
-    const px = lookup(marks, symbol);
-    if (!(px > 0)) { tally.skip(symbol, 'No price (live or last close)'); continue; }
+    const px = afterHours ? lookup(marks, symbol) : lookup(live, symbol);
+    if (!(px > 0)) { tally.skip(symbol, afterHours ? 'No price (live or last close)' : 'Market open: no fresh price yet (next pass)'); continue; }
     try {
-      const cand = await evaluate(symbol, px, { now, afterHours: !(lookup(live, symbol) > 0), bankroll: bank }, bench);
+      const cand = await evaluate(symbol, px, { now, afterHours, bankroll: bank }, bench);
       if (cand) { out.push(cand); tally.setup(); }
     } catch (err) {
       console.error(`[options-system] ${symbol} failed: ${err.message}`);

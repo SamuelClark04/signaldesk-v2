@@ -188,4 +188,12 @@ async function getOrderStatus(brokerId) {
   };
 }
 
-module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, DEFAULT_BASE_URL };
+// The market clock (read-only): { ok, isOpen, nextOpen, nextClose } in ms (market/market-session.js).
+async function getClock() {
+  const r = await alpacaFetch('/v2/clock');
+  if (!r.ok) return r;
+  const b = r.body || {};
+  return { ok: true, isOpen: b.is_open === true, nextOpen: Date.parse(b.next_open) || null, nextClose: Date.parse(b.next_close) || null };
+}
+
+module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, DEFAULT_BASE_URL };

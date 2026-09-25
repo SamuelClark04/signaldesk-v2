@@ -19,7 +19,10 @@
     return b;
   }
 
-  function card(p, ctx) {
+  // The US session per the server's clock (SCAN_STATUS.session), never "no live price".
+  const marketOpen = (state) => !!(state.scan && state.scan.session && state.scan.session.open);
+
+  function card(p, ctx, open) {
     const o = { market: 'stocks', entryPrice: p.refSpot };
     const bear = p.type === 'put';
     const legs = p.legs.map((l) => `${l.side === 'buy' ? 'Buy' : 'Sell'} ${l.strike}${l.type === 'put' ? 'P' : 'C'} (Δ ${Math.abs(l.delta).toFixed(2)})`).join(' · ');
@@ -41,8 +44,9 @@
       ...(p.stats ? [el('div', { className: 'apv-grid' }, SD.optionStats.rows({ asset: p.asset, optionsData: { type: p.type, midHoldAt: p.midHoldAt, exitRule: { targetValue: p.t1Value }, refSpot: p.refSpot },
         targets: [{ price: p.t1 }] }, p.stats, p.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
       el('p', { className: 'apv-thesis', textContent: p.thesis.split(/(?<=\.)\s/).slice(0, 3).join(' ') }),
-      el('div', { className: 'apv-actions' }, [el('button', { type: 'button', className: 'btn btn-solid', disabled: true, textContent: 'Stages on live quotes at the open',
-        title: 'Priced on the last close: nothing can be approved until the market is open' }), chartBtn(p, ctx)]),
+      el('div', { className: 'apv-actions' }, [el('button', { type: 'button', className: 'btn btn-solid', disabled: true, textContent: open ? 'Re-pricing on live quotes…' : 'Stages on live quotes at the open',
+        title: open ? 'The market is open: this plan is re-priced on live quotes this pass and staged in Approvals if it still qualifies'
+          : 'Priced on the last close: nothing can be approved until the market is open' }), chartBtn(p, ctx)]),
       el('p', { className: 'apv-note', textContent: `Planned ${age(p.plannedAt)} ago on the last close; cleared the risk engine. Re-priced live at 9:30 ET.` }),
     ]);
   }
@@ -51,7 +55,9 @@
   function section(state, ctx) {
     const list = (state.optionsPlans || []).filter(() => ctx.matchesAsset('options'));
     if (!list.length) return [];
-    return [el('h4', { className: 'opp-section', textContent: `Options plans for the open (${list.length}, market closed)` }), ...list.map((p) => card(p, ctx))];
+    const open = marketOpen(state);
+    return [el('h4', { className: 'opp-section', textContent: open ? `Options plans from the last close (${list.length}, market open: re-pricing live)` : `Options plans for the open (${list.length}, market closed)` }),
+      ...list.map((p) => card(p, ctx, open))];
   }
 
   SD.optionsPlans = { section };

@@ -31,6 +31,7 @@ const expirySweeper = require('./expiry-sweeper'); // expired setups leave the q
 const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RADAR: 100-point score, every watchlist gem
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
+const session = require('../market/market-session'); // is the US session open (Alpaca clock, else ET hours)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -78,7 +79,7 @@ async function collectCandidates() {
 // when a pass starts and ends. priceTimes gives each fresh price's real age.
 let pipelineRunning = false;
 const scanStatus = { running: false, trigger: null, startedAt: null, finishedAt: null, durationMs: null, counts: null, priceTimes: {}, intervalMs: PIPELINE_INTERVAL_MS };
-const getScanStatus = () => ({ ...scanStatus, counts: scanStatus.counts && { ...scanStatus.counts }, priceTimes: { ...scanStatus.priceTimes } });
+const getScanStatus = () => ({ ...scanStatus, counts: scanStatus.counts && { ...scanStatus.counts }, priceTimes: { ...scanStatus.priceTimes }, session: session.status() });
 
 async function runPipeline({ trigger = 'timer' } = {}) {
   if (pipelineRunning) return console.warn('[pipeline] previous pass still running; skipping this tick');
@@ -133,11 +134,15 @@ async function pipelinePass() {
   afterHours.begin();
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
-    // Found on a last close (market closed): never staged; re-checked on live prices at the open.
-    // An options plan still goes through the risk engine and is shown as a reviewable plan.
-    if (!(prices.getLatestPrice(candidate.asset) > 0)) {
-      const plan = candidate.market === 'options' ? await afterHours.review(candidate, settings) : null;
-      recordRejection(candidate.id, plan ? plan.reason : 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
+    // No live price, or an option with the US session closed (market-session.js: the
+    // clock, never a missing price, Phase 59B): never staged. With the market closed an
+    // options setup goes through the risk engine and is shown as a reviewable plan;
+    // in the session a missing price is just "not yet" (the REST poller fills it).
+    const open = session.isEquityMarketOpen();
+    if (!(prices.getLatestPrice(candidate.asset) > 0) || (candidate.market === 'options' && !open)) {
+      const plan = candidate.market === 'options' && !open ? await afterHours.review(candidate, settings) : null;
+      recordRejection(candidate.id, plan ? plan.reason : candidate.market !== 'crypto' && open ? 'NO_LIVE_PRICE: market open, no fresh price yet; re-checked next pass'
+        : 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
       continue;
     }
     const capital = await sizingBankroll(candidate.market, settings);
@@ -256,6 +261,7 @@ function startPipeline(options = {}) {
   expirySweeper.start(broadcast);
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
+  require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));

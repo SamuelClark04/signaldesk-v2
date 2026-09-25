@@ -30,7 +30,12 @@
 
   function build(o, ctx) {
     const u = ctx.state && ctx.state.universe;
-    const streamed = new Set((u && u.streamedStocks) || []);
+    // Phase 59B: stocks past the 30-symbol stream get live REST prices every 60 s in the
+    // session; after hours every stock is on its last close (no per-symbol label then).
+    const polled = new Set((u && u.polledStocks) || []);
+    const sc = ctx.state && ctx.state.scan;
+    const open = !!(sc && sc.session && sc.session.open);
+    const tag = (s) => (open && polled.has(s) ? ` (live · ${(u && u.pollSeconds) || 60} s poll)` : '');
     const inUniverse = new Set(u ? u.crypto : []);
     const gems = ((ctx.state && ctx.state.gemCatalog && ctx.state.gemCatalog.symbols) || []).filter((s) => !inUniverse.has(s));
     const groups = u ? [['Crypto', u.crypto], ['Stocks', u.stocks], ...(gems.length ? [['Coinbase spot', gems]] : [])] : [];
@@ -39,7 +44,7 @@
       // A charted symbol outside the universe (e.g. an options underlying) stays selectable.
       ...(known.has(o.asset) ? [] : [el('option', { value: o.asset, textContent: label(o.asset) })]),
       ...groups.map(([name, list]) => el('optgroup', { label: `${name} (${list.length})` }, list.map((s) => el('option', {
-        value: s, textContent: `${label(s)}${name === 'Stocks' && !streamed.has(s) ? ' (last close only)' : ''}`,
+        value: s, textContent: `${label(s)}${name === 'Stocks' ? tag(s) : ''}`,
       })))),
     ]);
     select.value = o.asset;

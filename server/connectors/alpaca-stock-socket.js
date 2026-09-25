@@ -1,4 +1,5 @@
-// Alpaca IEX market-data stream (free tier). WebSocket only, no REST polling.
+// Alpaca IEX market-data stream (free tier, 30 symbols). REST bars for the rest are
+// ingested by market/stock-poller.js.
 // Protocol: connect -> auth -> subscribe to minute bars. Auto-reconnects with
 // exponential backoff. The free tier allows one connection PER ENDPOINT, so this
 // stream (v2/iex) and the news stream (v1beta1/news) don't compete.
@@ -35,6 +36,7 @@ let reconnectTimer = null;
 let pingTimer = null;
 let stopped = false;
 const barsBySymbol = new Map(); // symbol -> 1m bars, oldest first
+const streamAt = new Map(); // symbol -> ms of its last bar FROM THE WEBSOCKET (not REST-ingested ones)
 
 function logBar(bar) {
   console.log(`[alpaca] ${bar.symbol} ${bar.time} O:${bar.open} H:${bar.high} L:${bar.low} C:${bar.close} V:${bar.volume}`);
@@ -113,6 +115,7 @@ function handleMessage(m) {
     case 'b': {
       const bar = normalizeBar(m);
       remember(bar);
+      streamAt.set(bar.symbol, Date.now());
       onBar(bar);
       break;
     }
@@ -176,6 +179,21 @@ function getLatestBars() {
   return new Map([...barsBySymbol].map(([s, list]) => [s, list.map((b) => ({ ...b }))]));
 }
 
+// REST 1-minute bars for symbols past the 30-symbol WebSocket cap (market/stock-poller.js,
+// Phase 59B), buffered with the streamed ones so every strategy reads one bar store.
+// Merged by bar time (a REST page can overlap bars already held), oldest first.
+function ingest(bars) {
+  const by = new Map();
+  for (const b of bars) { if (!by.has(b.symbol)) by.set(b.symbol, []); by.get(b.symbol).push(b); }
+  for (const [symbol, list] of by) {
+    const m = new Map((barsBySymbol.get(symbol) || []).map((b) => [Date.parse(b.time), b]));
+    for (const b of list) m.set(Date.parse(b.time), b);
+    barsBySymbol.set(symbol, [...m].sort((a, b) => a[0] - b[0]).map(([, b]) => b).slice(-MAX_BARS_PER_SYMBOL));
+  }
+}
+// symbol -> ms its last WebSocket bar arrived (the poller fills the ones that go quiet).
+const streamTimes = () => Object.fromEntries(streamAt);
+
 function stop() {
   stopped = true;
   clearTimeout(reconnectTimer);
@@ -185,4 +203,4 @@ function stop() {
   ws = null;
 }
 
-module.exports = { init, stop, getLatestBars };
+module.exports = { init, stop, getLatestBars, ingest, streamTimes };

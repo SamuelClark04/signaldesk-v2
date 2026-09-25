@@ -154,4 +154,52 @@ async function getLatestStockCloses(symbols) {
   return { ok: true, closes };
 }
 
-module.exports = { getHistory, getLatestStockCloses, TIMEFRAMES };
+// Phase 59B (market/stock-poller.js): a live price per stock from Alpaca's IEX
+// snapshots, in ONE request (the REST data API has no 30-symbol cap): the NEWER of
+// the latest trade (at its trade time) and the midpoint of the two-sided IEX quote
+// (at its quote time, only when the spread is <= QUOTE_MAX_SPREAD of the mid). A
+// thin IEX name (NIO) can go minutes without a trade while its quote stays live.
+const QUOTE_MAX_SPREAD = 0.01;
+const ms = (t) => Date.parse(String(t).replace(/(\.\d{3})\d+/, '$1')); // RFC 3339 with nanoseconds
+async function getLivePrices(symbols) {
+  const headers = alpacaHeaders();
+  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  const list = symbols.filter((s) => SYMBOL_RE.test(s) && !isCrypto(s));
+  if (!list.length) return { ok: true, prices: {} };
+  const r = await getJson(`${alpacaData()}/v2/stocks/snapshots?symbols=${list.map(encodeURIComponent).join(',')}&feed=iex`, headers);
+  if (!r.ok) return r;
+  const out = {};
+  for (const [symbol, x] of Object.entries(r.json || {})) {
+    const t = x && x.latestTrade;
+    const q = x && x.latestQuote;
+    const trade = t && t.p > 0 && Number.isFinite(ms(t.t)) ? { price: t.p, time: ms(t.t), source: 'trade' } : null;
+    const mid = q && q.bp > 0 && q.ap >= q.bp ? (q.bp + q.ap) / 2 : 0;
+    const quote = mid > 0 && (q.ap - q.bp) / mid <= QUOTE_MAX_SPREAD && Number.isFinite(ms(q.t)) ? { price: mid, time: ms(q.t), source: 'quote mid' } : null;
+    const best = trade && quote ? (quote.time > trade.time ? quote : trade) : trade || quote;
+    if (best) out[symbol] = best;
+  }
+  return { ok: true, prices: out };
+}
+
+// 1-minute IEX bars since `startMs` for many stocks (paged), shaped like the stream's
+// bars: { symbol, open, high, low, close, volume, vwap, time ISO }.
+async function getMinuteBarsSince(symbols, startMs) {
+  const headers = alpacaHeaders();
+  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  const list = symbols.filter((s) => SYMBOL_RE.test(s) && !isCrypto(s));
+  const out = {};
+  let token = null;
+  for (let page = 0; list.length && page < 8; page += 1) {
+    const q = `symbols=${list.map(encodeURIComponent).join(',')}&timeframe=1Min&start=${encodeURIComponent(new Date(startMs).toISOString())}&limit=10000&feed=iex&sort=asc`;
+    const r = await getJson(`${alpacaData()}/v2/stocks/bars?${q}${token ? `&page_token=${encodeURIComponent(token)}` : ''}`, headers);
+    if (!r.ok) return r;
+    for (const [symbol, bars] of Object.entries(r.json.bars || {})) {
+      (out[symbol] = out[symbol] || []).push(...bars.map((b) => ({ symbol, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v, vwap: b.vw, time: b.t })));
+    }
+    token = r.json.next_page_token;
+    if (!token) break;
+  }
+  return { ok: true, bars: out };
+}
+
+module.exports = { getHistory, getLatestStockCloses, getLivePrices, getMinuteBarsSince, TIMEFRAMES };
