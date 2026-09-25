@@ -37,6 +37,7 @@ const coinbaseExit = require('./coinbase-exit');
 const DEFAULT_AMOUNT = { stock: 300, crypto: 20 };
 const STOP_ATR = 1.5;
 const ZONE = 0.002; // entry zone +/- 0.2% around the live price
+const FLOOR_ROOM = 1.2; // pre-filled stops sit 20% beyond the fee gate's tightest
 const CRYPTO_RE = /^[A-Z0-9]{1,10}-USD$/;
 const MARKET = { stock: 'stocks', crypto: 'crypto', options: 'options' };
 const round = (x, px) => Number(x.toFixed(px >= 1000 ? 2 : px >= 1 ? 4 : 8).replace(/(\.\d*?[1-9])0+$/, '$1'));
@@ -64,22 +65,50 @@ function livePrice(mode, asset) {
 
 // Pre-filled levels: stop 1.5 x daily ATR against the direction (never under the fee
 // gate's minimum), T1 2R / T2 3R (crypto 2.5R / 3.5R: its fees need the room).
-async function defaults({ mode, asset, direction = 'long', venue = 'paper' }, now = Date.now()) {
+// Moonshot Radar context (Phase 60B): the ticket opened from a gem carries its radar
+// score, and is sized like System 6: speculative, conviction = (score - 60) / 40 ->
+// the Smart Investment Amount (10-25% of normal risk, risk-engine speculativeScale).
+function moonshotOf(t) {
+  if (!t || !t.moonshot || t.mode !== 'crypto') return null;
+  const score = Number(t.moonshot.score);
+  return { score: Number.isFinite(score) ? score : null, conviction: Number.isFinite(score) ? Math.round(Math.max(0, Math.min(1, (score - 60) / 40)) * 100) / 100 : 0 };
+}
+
+// The Smart Investment Amount for these levels: the risk engine's speculative size.
+async function smartAmount(t, now) {
+  try {
+    const b = await toCandidate({ ...t, amount: 1 }, now, { preview: true });
+    const r = processCandidate(b.candidate, b.capital.bankroll, { riskPct: b.settings.riskPct, maxCapitalPct: b.settings.maxCapitalPct, sizingBasis: b.capital.basis, cashCap: b.capital.cash });
+    return r.approved ? { amount: Math.floor(r.notional * 100) / 100, scale: r.speculativeScale, risk: r.dollarRisk, basis: b.capital.basis } : { error: r.reason };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+async function defaults({ mode, asset, direction = 'long', venue = 'paper', moonshot = null }, now = Date.now()) {
   checkAsset(mode, asset);
   const live = livePrice(mode, asset);
   const px = live || prices.getMarkPrice(asset);
   const bars = await getDailyBars(asset, now).catch(() => []);
   const a = bars.length > 15 ? atr(bars, 14) : null;
   const d = direction === 'short' ? -1 : 1;
-  // 1.5 x ATR, but never tighter than the stop the fee gate accepts (crypto: ~4.6% taker in and out).
-  const floor = px ? minStopPct(MARKET[mode] === 'options' ? 'stocks' : MARKET[mode], 'taker') * px : 0;
+  // 1.5 x ATR, but never tighter than the stop the fee gate accepts (crypto: ~4.6% taker in
+  // and out), with FLOOR_ROOM to spare so a normal tick before opening does not fail the gate.
+  const floor = px ? minStopPct(MARKET[mode] === 'options' ? 'stocks' : MARKET[mode], 'taker') * px * FLOOR_ROOM : 0;
   const risk = Math.max(a ? STOP_ATR * a : px * 0.03, floor);
   const settings = ledger.getSettings();
   const k1 = mode === 'crypto' ? 2.5 : 2; // crypto fees need 2.5R for T1 to net the 1.25 : 1 floor
-  return { ok: true, mode, asset, direction, price: px || null, live: !!live, atr: a, amount: DEFAULT_AMOUNT[mode] || null, stopBasis: floor > (a ? STOP_ATR * a : 0) ? 'fee floor' : '1.5 x ATR',
+  const out = { ok: true, mode, asset, direction, price: px || null, live: !!live, atr: a, amount: DEFAULT_AMOUNT[mode] || null, stopBasis: floor > (a ? STOP_ATR * a : 0) ? 'fee floor' : '1.5 x ATR',
     stop: px ? round(px - d * risk, px) : null, t1: px ? round(px + d * k1 * risk, px) : null, t2: px ? round(px + d * (k1 + 1) * risk, px) : null,
     liveAllowed: settings.cryptoMode === 'live', coinbaseCash: mode === 'crypto' && venue === 'live' ? await coinbaseCash() : null,
     optionsSession: session.isEquityMarketOpen(now), paperBankroll: settings.bankroll };
+  const moon = moonshotOf({ mode, moonshot });
+  if (moon && px) {
+    const smart = await smartAmount({ mode, asset, direction, venue, stop: out.stop, t1: out.t1, t2: out.t2, moonshot }, now);
+    out.moonshot = { ...moon, ...smart };
+    if (smart.amount > 0) out.amount = smart.amount;
+  }
+  return out;
 }
 
 // Ticket -> { candidate, capital, amount } (not sized yet). preview: a closed market
@@ -115,8 +144,10 @@ async function toCandidate(t, now, { preview = false } = {}) {
   const amount = num(t.amount);
   if (!(amount > 0)) throw new Error('AMOUNT_INVALID: enter a dollar amount');
   const kind = mode === 'stock' ? 'STOCK' : venue === 'live' ? 'CRYPTO-LIVE' : 'CRYPTO';
+  const moon = moonshotOf(t);
   const candidate = {
-    id: `manual:${kind}:${asset}:${now}`, asset, market, strategyId: 'manual', setupType: `Manual ${direction}`, direction, timeframe: 'manual',
+    id: `manual:${kind}:${asset}:${now}`, asset, market, strategyId: 'manual', setupType: moon ? `Manual · Moonshot ${direction}` : `Manual ${direction}`, direction, timeframe: 'manual',
+    ...(moon ? { speculative: true, tag: 'Speculative Moonshot', conviction: moon.conviction, convictionScore: moon.score } : {}),
     tradeType: 'Manual', expectedDuration: 'Your call (exits at the stop or targets)', manual: true, forcePaper: venue === 'paper', entryLiquidity: 'taker',
     entryZone: { min: round(px * (1 - ZONE), px), max: round(px * (1 + ZONE), px) }, invalidation: stop,
     targets: [{ level: 1, price: t1, allocation: hasT2 ? 0.5 : 1 }, ...(hasT2 ? [{ level: 2, price: t2, allocation: 0.5 }] : [])],

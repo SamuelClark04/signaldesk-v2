@@ -56,3 +56,11 @@ button.moon-chip:hover { color: var(--text); border-color: var(--accent); }
   .moon { grid-template-columns: 1fr; }
   .moon-chart { position: static; }
 }
+
+/* Manual trade from the radar (Phase 60B): [Trade] under the coin name, [+ Trade SYMBOL] on the chart card */
+.moon-trade { display: inline-block; margin-top: 5px; padding: 2px 12px; font-size: 12px; font-weight: 600; }
+.moon-trade:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.moon-chart-trade { margin-left: auto; padding: 5px 12px; font-size: 12px; font-weight: 700; }
+@media (max-width: 640px) {
+  .moon-trade { padding: 6px 16px; }
+}

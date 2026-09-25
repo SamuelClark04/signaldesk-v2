@@ -9,7 +9,12 @@
 //                            Amount (10-25% of normal risk) and Approve button
 //   Radar leaderboard        score /100, 5m-frame (15 min) and 15m-frame (30 min)
 //                            moves, relative volume, social /30, vs BTC + spread
-//                            /20, badge; clicking a coin charts it on 5m candles
+//                            /20, badge; clicking a coin charts it on 5m candles;
+//                            [Trade] opens the Manual Trade Ticket on it (Phase 60B)
+//   Chart card               [+ Trade SYMBOL]: the ticket for the charted coin
+//   Buzz strip               every Coinbase-listed trending / Reddit coin charts on a click
+// Tickets opened here carry the coin's radar score: Crypto mode, sized at System 6's
+// Smart Investment Amount (10-25% of normal risk), ATR / fee-floor stop, 2.5R / 3.5R.
 // iPhone: the panes follow the Opportunities switcher (opportunities-mobile.js).
 // Exposes window.SignalDesk.moonshots: { render(state, ctx) }.
 (() => {
@@ -30,6 +35,17 @@
     selected = symbol;
     M().setPane('chart');
     ctx.rerender();
+  }
+
+  // The Manual Trade Ticket on `symbol`, with its radar score when it has one.
+  function trade(symbol, row) {
+    SD.manualTicket.open(symbol, { moonshot: row ? { score: row.score } : null });
+  }
+  function tradeButton(symbol, row, label, cls) {
+    const b = el('button', { type: 'button', className: `btn ${cls}`, textContent: label,
+      title: `Manual trade ticket for ${symbol.replace('-', '/')}${row ? ` (Smart Investment Amount at ${row.score}/100)` : ''}: Paper or Live @ Coinbase` });
+    b.onclick = (e) => { e.stopPropagation(); trade(symbol, row); };
+    return b;
   }
 
   function header(r, ctx) {
@@ -81,9 +97,9 @@
       el('div', { className: 'moon-buzz-row' }, [el('span', { className: 'moon-buzz-label', textContent: 'CoinGecko trending' }),
         // A Coinbase gem is clickable (its product may differ: LIT -> LIGHTER-USD); a major is shown, never a gem.
         ...(z.trending.length ? z.trending.map((c) => {
-          const x = chip(`#${c.rank} ${c.symbol}${c.product && c.gem && c.product !== `${c.symbol}-USD` ? ` (${c.product.replace('-USD', '')})` : ''}`,
-            c.gem ? c.product : null, c.gem ? 'is-monitored' : c.product ? 'is-major' : 'is-offexchange');
-          x.title = c.gem ? `Chart ${c.product} (Coinbase gem)` : c.product ? `${c.product}: a mega-cap / pegged token (Systems 2 and 4, never the gem radar)` : 'Not tradable on Coinbase';
+          const x = chip(`#${c.rank} ${c.symbol}${c.product && c.product !== `${c.symbol}-USD` ? ` (${c.product.replace('-USD', '')})` : ''}`,
+            c.product || null, c.gem ? 'is-monitored' : c.product ? 'is-major' : 'is-offexchange');
+          x.title = c.gem ? `Chart ${c.product} (Coinbase gem) and trade it` : c.product ? `Chart ${c.product} and trade it (a mega-cap / pegged token: never on the gem radar)` : 'Not tradable on Coinbase';
           return x;
         })
           : [el('span', { className: 'slog-muted', textContent: 'No trending list yet' })])]),
@@ -101,7 +117,8 @@
       const tr = el('tr', { className: `row moon-row${x.symbol === selected ? ' is-selected' : ''}`, title: `${x.why}${x.nearest ? `\nNext: ${x.nearest}` : ''}` }, [
         el('td', {}, el('div', { className: 'scan-asset' }, [SD.scannerDetail.badge(x.symbol), el('div', {}, [
           el('strong', { textContent: `${i + 1}. ${x.symbol.replace('-', '/')}` }), el('span', { textContent: `${x.name} · ${px(x.price)}${x.live === false ? ' (last 5m close)' : ''}` }),
-          ...((x.reasons || []).length ? [el('span', { className: 'moon-why', textContent: x.reasons.slice(0, 2).join(' · ') })] : [])])])),
+          ...((x.reasons || []).length ? [el('span', { className: 'moon-why', textContent: x.reasons.slice(0, 2).join(' · ') })] : []),
+          tradeButton(x.symbol, x, 'Trade', 'moon-trade')])])), // in the coin cell: visible however narrow the table
         el('td', { className: 'num' }, [el('strong', { className: 'moon-score', textContent: `${x.score}` }), el('span', { className: 'slog-muted', textContent: '/100' }),
           el('span', { className: 'moon-bar' }, el('span', { style: `width:${Math.max(2, Math.min(100, x.score))}%` }))]),
         el('td', { className: 'num', title: '5m frame: last 15 minutes · 15m frame: last 30 minutes · coil: last hour' }, [el('span', { className: `moon-move ${moveCls(x.move5)}`, textContent: `${move(x.move5)} 5m` }),
@@ -119,7 +136,7 @@
     });
     return el('section', { className: 'moon-card moon-board' }, [
       el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: 'Live Moonshot Gem leaderboard (small / mid-caps)' }),
-        el('span', { className: 'slog-muted', textContent: 'Tap a coin for its live 5m / 15m chart' })]),
+        el('span', { className: 'slog-muted', textContent: 'Tap a coin for its live 5m / 15m chart · [Trade] for a ticket' })]),
       el('div', { className: 'table-wrap' }, el('table', { className: 'data-table moon-table' }, [
         el('thead', {}, el('tr', {}, ['Coin', 'Score', '5m / 15m move', 'Rel vol', 'Social /30', 'vs BTC /20', 'Badge']
           .map((h, i) => el('th', { textContent: h, className: i >= 1 && i <= 5 ? 'num' : '' })))),
@@ -138,7 +155,8 @@
     const part = (label, v, max) => el('div', { className: 'moon-part' }, [el('span', { textContent: label }), el('strong', { textContent: `${v}/${max}` })]);
     return el('section', { className: 'moon-card moon-chart' }, [
       el('div', { className: 'moon-card-head' }, [el('h3', { className: 'opp-section', textContent: selected ? `${selected.replace('-', '/')} · live chart` : 'Chart' }),
-        ...(row ? [el('span', { className: `moon-badge ${BADGE[row.badge] || ''}`, textContent: `${row.score}/100 ${row.badge}` })] : [])]),
+        ...(row ? [el('span', { className: `moon-badge ${BADGE[row.badge] || ''}`, textContent: `${row.score}/100 ${row.badge}` })] : []),
+        ...(selected ? [tradeButton(selected, row, `+ Trade ${selected.replace('-', '/')}`, 'btn-solid moon-chart-trade')] : [])]),
       ...(row && row.nearest ? [el('p', { className: 'slog-muted', textContent: `Next: ${row.nearest}` })] : []),
       ...(row ? [el('div', { className: 'moon-parts' }, [part(row.kind === 'COIL' ? 'Coil pattern' : 'Velocity', row.parts.velocity, 25), part('Rel volume', row.parts.volume, 25),
         part('Social / trending', row.parts.buzz, 30), part('vs BTC', row.parts.rs, 12), part('Spread', row.parts.spread, 8)])] : []),

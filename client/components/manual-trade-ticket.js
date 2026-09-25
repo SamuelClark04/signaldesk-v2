@@ -27,9 +27,10 @@
       busy: false, openReq: 0, result: null, opt: SD.manualOptionsTicket.fresh() };
   }
 
-  function open(asset) {
+  // opts.moonshot: { score } from the Moonshot Radar (Phase 60B): sized at the Smart Investment Amount.
+  function open(asset, opts = {}) {
     const a = String(asset || 'SPY').toUpperCase();
-    t = fresh(a, a.includes('-') ? 'crypto' : 'stock');
+    t = { ...fresh(a, a.includes('-') ? 'crypto' : 'stock'), moonshot: a.includes('-') && opts.moonshot ? { score: opts.moonshot.score ?? null } : null };
     loadDefaults();
     render();
   }
@@ -37,19 +38,19 @@
 
   function setMode(mode) {
     const keep = t.asset;
-    t = { ...fresh(keep, mode), venue: t.venue };
+    t = { ...fresh(keep, mode), venue: t.venue, moonshot: t.moonshot };
     if (mode === 'options') SD.manualOptionsTicket.enter(t, api); else loadDefaults();
     render();
   }
 
   function loadDefaults() {
     if (t.mode === 'options') return;
-    t.defReq = req('MANUAL_TRADE_DEFAULTS', { mode: t.mode, asset: t.asset, direction: t.direction, venue: t.venue });
+    t.defReq = req('MANUAL_TRADE_DEFAULTS', { mode: t.mode, asset: t.asset, direction: t.direction, venue: t.venue, moonshot: t.moonshot });
   }
 
   function ticket() {
     if (t.mode === 'options') return SD.manualOptionsTicket.ticket(t);
-    return { mode: t.mode, asset: t.asset, direction: t.direction, venue: t.venue, amount: num(t.amount), stop: num(t.stop), t1: num(t.t1), t2: t.venue === 'live' ? null : num(t.t2) };
+    return { mode: t.mode, asset: t.asset, direction: t.direction, venue: t.venue, amount: num(t.amount), stop: num(t.stop), t1: num(t.t1), t2: t.venue === 'live' ? null : num(t.t2), moonshot: t.moonshot };
   }
   function schedulePreview() {
     clearTimeout(timer);
@@ -66,6 +67,13 @@
       schedulePreview();
     } else if (type === 'MANUAL_TRADE_PREVIEW' && p.requestId === t.prevReq) {
       t.preview = p;
+      // Moonshot ticket (Phase 60B): until the user edits it, the size follows the risk
+      // engine's live Smart Investment Amount (it moves with the price vs the stop).
+      const ms = t.defaults && t.defaults.moonshot;
+      if (ms && !ms.error && !t.touched.amount && p.ok && p.engineMax > 0) {
+        if (Math.abs(num(t.amount) - p.engineMax) / p.engineMax > 0.005) { t.amount = String(Math.floor(p.engineMax * 100) / 100); schedulePreview(); }
+        Object.assign(ms, { amount: num(t.amount), risk: p.dollarRisk });
+      }
     } else if (type === 'MANUAL_TRADE_RESULT' && p.requestId === t.openReq) {
       t.busy = false;
       t.result = p;
@@ -104,6 +112,9 @@
           t.venue = v; if (v === 'live') t.direction = 'long'; t.preview = null; loadDefaults(); render();
         })]));
       if (d && d.ok && !d.liveAllowed) rows.push(el('p', { className: 'mt-note', textContent: 'Live @ Coinbase is off: Settings has Coinbase on PAPER.' }));
+      const ms = d && d.moonshot;
+      if (ms) rows.push(el('p', { className: `mt-note mt-moon${ms.error ? ' is-warn' : ''}`, textContent: ms.error ? `Moonshot sizing unavailable: ${ms.error}`
+        : `Moonshot Smart Investment Amount: ${money(ms.amount)} = ${Math.round(ms.scale * 100)}% of normal risk (radar ${ms.score ?? '—'}/100; risks ${money(ms.risk)} at the stop).` }));
     }
     rows.push(el('div', { className: 'mt-row' }, [el('span', { className: 'mt-label', textContent: 'Direction' }),
       seg([['long', 'LONG'], ['short', 'SHORT', live]], t.direction, (v) => { t.direction = v; t.touched = { amount: t.touched.amount }; loadDefaults(); render(); }, 'mt-dir')]));
@@ -164,6 +175,7 @@
       if (!a || a === t.asset) return;
       const mode = a.includes('-') ? 'crypto' : t.mode === 'crypto' || (t.mode === 'options' && !optionable(a)) ? 'stock' : t.mode;
       t.asset = a;
+      t.moonshot = null; // another coin: no radar score
       setMode(mode);
     };
     const modes = MODES.map(([k, label]) => [k, label, (k === 'options' && !optionable(t.asset)) || (k === 'crypto') !== t.asset.includes('-')]);
