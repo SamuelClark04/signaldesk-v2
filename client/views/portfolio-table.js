@@ -20,7 +20,7 @@
       return el('td', { className: 'num pf-muted', title: 'No live option prices: showing the underlying move since entry' },
         [el('span', { textContent: `Underlying ${pct(m.underlyingMove)}` })]);
     }
-    const basis = m.optionBasis ? `Option at ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : 'modelled'}). ` : '';
+    const basis = m.optionBasis ? `Option at ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}). ` : '';
     return el('td', { className: `num ${pnlClass(m.gross)}`, title: `${basis}${m.net === null ? '' : `After est. exit fees ${signed(m.net, money)}`}` }, [
       el('span', { className: 'pf-pnl', textContent: signed(m.gross, money) }),
       el('span', { className: 'pf-pnl-pct', textContent: m.pctGross === null ? '' : pct(m.pctGross) }),

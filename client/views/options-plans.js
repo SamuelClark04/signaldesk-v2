@@ -31,6 +31,8 @@
         kv('Risk', `${money(p.dollarRisk)} (${((p.dollarRisk / p.sizingBankroll) * 100).toFixed(2)}%)${p.smallAccountCap ? ' · 1-contract cap' : ''}`),
         kv('T1 net reward : risk', `${p.netRR.toFixed(2)} : 1 · costs ${p.feeDrag.toFixed(2)}R`),
       ]),
+      ...(p.stats ? [el('div', { className: 'apv-grid' }, SD.optionStats.rows({ asset: p.asset, optionsData: { type: p.type, midHoldAt: p.midHoldAt, exitRule: { targetValue: p.t1Value }, refSpot: p.refSpot },
+        targets: [{ price: p.t1 }] }, p.stats, p.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
       el('p', { className: 'apv-thesis', textContent: p.thesis.split(/(?<=\.)\s/).slice(0, 3).join(' ') }),
       el('div', { className: 'apv-actions' }, [el('button', { type: 'button', className: 'btn btn-solid', disabled: true, textContent: 'Stages on live quotes at the open',
         title: 'Priced on the last close: nothing can be approved until the market is open' })]),

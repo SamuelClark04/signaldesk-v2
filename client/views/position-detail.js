@@ -33,7 +33,10 @@
     const om = p.optionMark || {};
     const exp = new Date(`${od.expiration}T12:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
     const premium = m.optionValue === undefined ? 'No option price (no fresh quote or live underlying)'
-      : m.optionBasis === 'bid' ? `${m.optionValue.toFixed(2)} live bid${om.ask ? ` / ${om.ask} ask` : ''}` : `${m.optionValue.toFixed(2)} modelled (no fresh quote)`;
+      : m.optionBasis === 'mid' ? `${m.optionValue.toFixed(2)} mid${Number.isFinite(om.fill) ? ` (closing fills ~${om.fill.toFixed(2)})` : ''}`
+        : m.optionBasis === 'bid' ? `${m.optionValue.toFixed(2)} live bid${om.ask ? ` / ${om.ask} ask` : ''}` : `${m.optionValue.toFixed(2)} modelled (no fresh quote)`;
+    // Phase 58: live net Greeks / breakeven / POP (server optionMark.stats), else the entry stats.
+    const stats = SD.optionStats.rows(p, om.stats || od.stats, om.underlying);
     const live = (x, entry, fmt) => (Number.isFinite(x) ? `${fmt(x)} (live)` : Number.isFinite(entry) ? `${fmt(entry)} (at entry)` : '—');
     return [
       kv('Contract', od.structure === 'vertical' ? `${od.contract} / −${od.shortContract}` : od.contract),
@@ -43,9 +46,10 @@
       kv('Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),
       pnlRow('Option P&L', m),
       kv('R multiple', Number.isFinite(m.r) ? `${m.r >= 0 ? '+' : '−'}${Math.abs(m.r).toFixed(2)}R of ${money(p.dollarRisk)} at risk` : '—'),
-      kv('Delta', live(om.delta, od.delta, (x) => x.toFixed(2))),
-      kv('Implied volatility', live(om.iv, od.iv, (x) => `${(x * 100).toFixed(1)}%`)),
-      kv('Theta', Number.isFinite(od.theta) ? `${od.theta.toFixed(3)} per day (at entry)` : '—'),
+      ...(stats.length ? stats.map(([k, v, cls]) => kv(k, v, cls)) : [
+        kv('Delta', live(om.delta, od.delta, (x) => x.toFixed(2))),
+        kv('Implied volatility', live(om.iv, od.iv, (x) => `${(x * 100).toFixed(1)}%`)),
+        kv('Theta', Number.isFinite(od.theta) ? `${od.theta.toFixed(3)} per day (at entry)` : '—')]),
     ];
   }
 

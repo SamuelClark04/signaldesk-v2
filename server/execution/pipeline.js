@@ -253,6 +253,7 @@ function startPipeline(options = {}) {
   if (pipelineTimer) throw new Error("pipeline: already started");
   if (typeof options.broadcast === "function") broadcast = options.broadcast;
   expirySweeper.start(broadcast);
+  require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));

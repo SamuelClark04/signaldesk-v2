@@ -223,12 +223,22 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: pric
 const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p) }));
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
+// Data migrations (e.g. options-migration.js): mutate(position) returns true when it
+// changed the live record; the ledger is saved once if anything changed. -> count changed.
+function updatePositions(mutate) {
+  let n = 0;
+  for (const p of activePositions) if (mutate(p)) n += 1;
+  if (n) store.save();
+  return n;
+}
+
 // Hand the lists to the store once: it restores them from disk, then saves on every change.
 store.attach(LISTS);
 extras.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions, save: store.save, backup: store.backup });
 exits.bind({ activePositions, closePosition, reducePosition, save: store.save });
 
 module.exports = {
+  updatePositions,
   stageOrder,
   executeOrder,
   discardOrder,

@@ -11,6 +11,11 @@
 //                  model): at or under exitRule.stopValue, at or over
 //                  exitRule.targetValue. Older option positions use the
 //                  underlying's stop / T1 like everything else.
+//                  Phase 58 stop debounce: a stop needs STOP_CONFIRMATIONS (2)
+//                  CONSECUTIVE evaluations (pipeline passes) with the mark (a
+//                  package spread's net mid) at or under stopValue, or the
+//                  underlying through its stop level, so one noisy quote tick
+//                  cannot stop a trade out. The target still fires on the fill value.
 // LIVE positions exit at the broker (bracket orders); the reconciler records
 // those real fills, so they are skipped here. Portfolio Pilot buys since Phase 50
 // carry T1 (35%) / T2 macro targets like any plan; older Pilot holdings have no
@@ -36,11 +41,22 @@ function t1Share(pos) {
   return !pos.t1Filled && pos.market !== 'options' && t.length > 1 && a > 0 && a < 1 ? a : null;
 }
 
+const STOP_CONFIRMATIONS = 2;
+const stopHits = new Map(); // position id -> consecutive evaluations at / through the stop
+
 function premiumExit(pos, price) {
   const rule = pos.optionsData.exitRule;
   const m = saleValue(pos, price);
   if (!m) return null;
-  if (m.value <= rule.stopValue) return 'STOP_LOSS';
+  const mark = Number.isFinite(m.mid) ? m.mid : m.value;
+  const through = pos.invalidation > 0 && (pos.direction === 'short' ? price >= pos.invalidation : price <= pos.invalidation);
+  if (mark <= rule.stopValue || through) {
+    const n = (stopHits.get(pos.id) || 0) + 1;
+    stopHits.set(pos.id, n);
+    if (n >= STOP_CONFIRMATIONS) { stopHits.delete(pos.id); return 'STOP_LOSS'; }
+    return null;
+  }
+  stopHits.delete(pos.id);
   if (m.value >= rule.targetValue) return 'TAKE_PROFIT';
   return null;
 }

@@ -27,6 +27,7 @@ const options = require('../connectors/options-data');
 const { ivPercentile, realizedVols } = require('../risk/expected-move');
 const signals = require('./options-signals');
 const builder = require('./options-spread-builder');
+const spreadStats = require('../risk/spread-stats');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 
@@ -122,6 +123,15 @@ async function propose(symbol, px, sig, ctx, bars, env) {
     spreadReason: `${vertical ? (bankroll < builder.CONFIG.single.minBankroll ? `$${bankroll} bankroll (under $${builder.CONFIG.single.minBankroll})` : `ATM IV ${ivText}`) : `ATM IV ${ivText}`}: `
       + `${vertical ? 'defined-risk debit spread' : `single ${type}`}`,
   };
+  // Net Black-Scholes Greeks, expiry breakeven, POP, max value / profit, IV vs HV (Phase 58).
+  od.hv20 = hv;
+  od.stats = spreadStats.stats(od, px, now, hv);
+  od.theta = od.stats.thetaDay === null ? null : od.stats.thetaDay / CONFIG.multiplier; // per share, like a contract's theta
+  od.netDelta = od.stats.netDelta;
+  od.midHoldAt = p.midHoldAt;
+  const st = od.stats;
+  const statText = `Net delta ${st.netDelta.toFixed(2)} (${st.deltaUsd >= 0 ? '+' : '−'}$${Math.abs(st.deltaUsd).toFixed(0)} per $1), theta ${st.thetaDay >= 0 ? '+' : '−'}$${Math.abs(st.thetaDay).toFixed(2)}/day, `
+    + `POP ${Math.round(st.pop * 100)}% (expiry breakeven ${st.breakeven}).`;
   const news = await sentiment.getSentiment(symbol, now);
   const legsText = vertical ? `buy ${k.symbol} (delta ${k.delta.toFixed(2)}), sell ${p.short.symbol} (delta ${p.short.delta.toFixed(2)}), ${p.width} wide` : `buy ${k.symbol} (delta ${k.delta.toFixed(2)})`;
   return { id, candidate: {
@@ -135,7 +145,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
     thesis: `${sig.text} (${sig.timeframe}). ${name} for a ${sig.horizon === 'intraday' ? '1-5 day move' : 'multi-week swing'}: ${legsText}, ${k.dte} DTE. `
       + `One package limit near the net mid ${p.netMid}: debit ${p.debit} (${usd(p.debit)}${vertical ? `, ${Math.round((p.debit / p.width) * 100)}% of the width, max value ${usd(p.width)}` : ''}). `
       + `Stop: worth ${p.stopValue} (-${od.stopSharePct}%, ${symbol} near ${p.invalidation}); T1: worth ${p.t1Value} (+${od.t1SharePct}%, ${symbol} ${p.t1}), ${p.netRR.toFixed(2)} : 1 net`
-      + `${p.t2Value ? `; T2 stretch: worth ${p.t2Value} (${symbol} ${p.t2})` : ''}. Breakeven ${p.breakeven}. ${levelText} ${em} `
+      + `${p.t2Value ? `; T2 stretch: worth ${p.t2Value} (${symbol} ${p.t2})` : ''}; the ${symbol} levels are where the spread is worth that by mid-hold. ${statText} ${levelText} ${em} `
       + `${ivp.ok ? `IV percentile ${ivp.pct.toFixed(0)} (proxy). ` : ''}${afterHours ? 'MARKET CLOSED: priced on the last close and the chain\'s last quotes; re-priced live at the open. ' : ''}`
       + `${cat.text}${cat.list.length ? ` Inside the hold: ${cat.list.join(', ')}.` : ''} ${sentiment.describe(news)}`,
     confirmationCriteria: [sig.text, `${name}: ${label}, debit ${p.debit}${vertical ? ` of ${p.width} (30-53% band)` : ''}, slippage + fees ${p.costR.toFixed(2)}R`,

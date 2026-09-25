@@ -35,7 +35,7 @@
     if (m.optionValue === undefined) {
       return [head, el('div', { className: 'hud-pnl hud-muted', textContent: 'No option price (no fresh quote or live underlying)' })];
     }
-    const basis = m.optionBasis === 'bid' ? 'live bid' : 'modelled';
+    const basis = m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled';
     const when = m.optionAt ? new Date(m.optionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const premium = el('div', { className: 'hud-premium' }, [
       el('span', { className: 'hud-muted', textContent: 'Premium ' }),
@@ -43,7 +43,7 @@
       el('span', { className: `hud-basis is-${m.optionBasis}`, textContent: basis }),
       el('span', { className: 'hud-muted', textContent: ` paid ${od.debit}` }),
     ]);
-    premium.title = m.optionBasis === 'bid' ? `Real bid (${od.feed || 'indicative'} feed) at ${when}` : 'No fresh quote: Black-Scholes value at the live underlying price, anchored to the entry quote';
+    premium.title = m.optionBasis === 'mid' ? 'Net mid of both legs\' live quotes (closing fills 0.15 x their combined bid/ask under it)' : m.optionBasis === 'bid' ? `Real bid (${od.feed || 'indicative'} feed) at ${when}` : 'No fresh quote: Black-Scholes value at the live underlying price, anchored to the entry quote';
     const pnl = el('div', { className: `hud-pnl ${pnlClass(m.gross)}` }, [el('strong', { textContent: signed(m.gross, money) }),
       el('span', { textContent: m.pctGross === null ? '' : ` ${m.pctGross >= 0 ? '+' : '−'}${Math.abs(m.pctGross * 100).toFixed(2)}%` })]);
     return [head, premium, pnl];

@@ -101,6 +101,7 @@
       : `stop ${od.exitRule.stopValue} (-50%) · T1 ${od.exitRule.targetValue} (80% of max)`;
     if (od.structure === 'vertical') {
       return [kv('Spread', `${od.label} · buy ${od.contract} / sell ${od.shortContract}`), kv('Net debit · max profit', `${od.debit} ($${(od.debit * od.multiplier).toFixed(0)}) · ${od.maxProfit} of ${od.width}`),
+        ...SD.optionStats.rows({ asset: od.underlying, optionsData: od, targets: od.stats ? [{ price: null }] : [] }, od.stats, od.refSpot).map(([k, v, cls]) => kv(k, v, cls)),
         kv('Exit on spread value', exits), ...(od.fill === 'package' ? [kv('Package fill', `net mid ${od.netMid} + 0.15 x ${od.combinedLegSpread} combined bid/ask = ${od.debit}`)] : []), ...em, kv('Why a spread', od.spreadReason)];
     }
     return [

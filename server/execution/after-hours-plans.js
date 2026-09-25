@@ -31,7 +31,7 @@ async function review(candidate, settings) {
     stopValue: od.exitRule.stopValue, t1Value: od.exitRule.targetValue, t2Value: od.exitRule.t2Value || null, netRR: r.t1NetRR, feeDrag: r.feeDrag,
     positionSize: r.positionSize, dollarRisk: r.dollarRisk, premium: r.notional, smallAccountCap: !!r.smallAccountCap, sizingBankroll: r.sizingBankroll,
     invalidation: r.invalidation, t1: r.targets[0].price, t2: r.targets[1] ? r.targets[1].price : null, refSpot: od.refSpot, level: od.level, levelAnchored: od.levelAnchored,
-    thesis: r.thesis, plannedAt: Date.now(),
+    stats: od.stats || null, midHoldAt: od.midHoldAt || null, thesis: r.thesis, plannedAt: Date.now(),
   });
   return { reason: `MARKET_CLOSED: options plan cleared the risk engine (${r.positionSize} x ${od.label}, $${r.dollarRisk.toFixed(2)} risk${r.smallAccountCap ? ', 1-contract cap' : ''}); `
     + 'shown in Approvals, stages on live quotes at the open' };
