@@ -2,8 +2,9 @@
 // PROPOSER ONLY: reads real daily + 1h bars, today's session, the live (or last-close)
 // price and the real Alpaca options chain; returns Canonical Candidates. Never sizes,
 // stages or executes.
-//   Universe   15 liquid optionables: SPY QQQ IWM NVDA AAPL MSFT META AMZN GOOGL TSLA AMD
-//              NFLX COIN PLTR INTC
+//   Universe   25 liquid optionables: SPY QQQ IWM NVDA AAPL MSFT META AMZN GOOGL TSLA AMD
+//              NFLX COIN PLTR INTC + (Phase 58B, $15-$185: cheap spreads with real net
+//              delta on a small account) MU UBER ORCL SOFI BAC JPM WMT XOM DIS PYPL
 //   Signals    options-signals.js: TREND (call), BREAKDOWN (put), SQUEEZE (call / put),
 //              RELATIVE strength / weakness vs SPY (call / put), on 1D and 1h
 //   Structure  options-spread-builder.js: bull call / bear put debit spreads at 10-24
@@ -35,7 +36,8 @@ const STRATEGY_ID = 'options-system';
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
 const CONFIG = {
   tradeType: 'Options Swing', multiplier: 100, entryBufferPct: 0.002, hourTtlMs: 5 * 60 * 1000, maxTries: 2,
-  symbols: ['SPY', 'QQQ', 'IWM', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'TSLA', 'AMD', 'NFLX', 'COIN', 'PLTR', 'INTC'],
+  symbols: ['SPY', 'QQQ', 'IWM', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'TSLA', 'AMD', 'NFLX', 'COIN', 'PLTR', 'INTC',
+    'MU', 'UBER', 'ORCL', 'SOFI', 'BAC', 'JPM', 'WMT', 'XOM', 'DIS', 'PYPL'],
   strikes: { call: [0.95, 1.18], put: [0.82, 1.05], atm: [0.97, 1.03] },
   holdDays: { swing: 15, intraday: 5 },
   duration: { swing: '5-15 trading days (exits on the spread value, well before expiry)', intraday: '1-5 trading days (exits on the spread value)' },
@@ -73,11 +75,11 @@ function block(symbol, id, reason, cand = {}) {
 
 async function catalysts(symbol, horizon, now) {
   const list = macro.catalystsFor({ asset: symbol, strategyId: STRATEGY_ID, market: 'options' }, now).map((c) => `${c.type} ${c.date}`);
-  if (ETFS.has(symbol)) return { ok: true, list, text: 'Index ETF: no earnings.' };
+  if (ETFS.has(symbol)) return { ok: true, list, earnings: null, text: 'Index ETF: no earnings.' };
   const e = await getEarningsStatus(symbol, now);
   if (!e.ok) return { ok: false, reason: `EARNINGS_UNKNOWN: ${e.error}` };
   if (e.date && e.tradingDaysAway < CONFIG.holdDays[horizon]) list.unshift(`earnings ${e.date}`);
-  return { ok: true, list, text: e.date ? `Next earnings ${e.date} (${e.tradingDaysAway} trading days away).` : 'No earnings in the next 60 days.' };
+  return { ok: true, list, earnings: e.date || null, text: e.date ? `Next earnings ${e.date} (${e.tradingDaysAway} trading days away).` : 'No earnings in the next 60 days.' };
 }
 
 // Signal -> { candidate } or { reason }.
@@ -88,7 +90,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const id = `${STRATEGY_ID}:${sig.archetype}:${type.toUpperCase()}:${symbol}:${etDate.format(now)}`;
   const cat = await catalysts(symbol, sig.horizon, now);
   if (!cat.ok) return { id, reason: cat.reason };
-  const window = { minDte: w.minDte, maxDte: w.maxDte, spot: px };
+  const window = { minDte: builder.CONFIG.windows.short.minDte, maxDte: w.maxDte, spot: px }; // 6 DTE up: the short-weekly fallback
   const [lo, hi] = CONFIG.strikes[type];
   const main = await options.getChain(symbol, { ...window, type, strikeMin: px * lo, strikeMax: px * hi }, now);
   if (!main.ok) return { id, reason: `OPTIONS_CHAIN_UNAVAILABLE: ${main.error}` };
@@ -99,7 +101,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const atm = main.contracts.filter((c) => c.iv > 0).sort((a, b) => Math.abs(a.strike - px) - Math.abs(b.strike - px) || Math.abs(a.dte - w.prefer) - Math.abs(b.dte - w.prefer))[0];
   const single = !!(atm && hv && atm.iv <= hv && bankroll >= builder.CONFIG.single.minBankroll);
   const ivText = atm && hv ? `${(atm.iv * 100).toFixed(0)}% ${atm.iv <= hv ? '<=' : '>'} 20-day HV ${(hv * 100).toFixed(0)}%` : 'vs HV unavailable';
-  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours });
+  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings });
   if (!b.ok) return { id, reason: `OPTIONS_NO_STRUCTURE: ${b.error}` };
   const p = b.plan;
   const k = p.long;

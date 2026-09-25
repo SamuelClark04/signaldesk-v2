@@ -44,6 +44,8 @@
     const btn = el('button', { type: 'button', className: `opp-watch opp-pos${active ? ' is-active' : ''}` }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(p) }),
       el('span', { className: `opp-heat is-position${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: `${p.direction === 'short' ? 'Short · ' : ''}${venue}` }),
+      ...(SD.positionDetail.lowDelta(p) !== null ? [el('span', { className: 'opp-heat is-trigger', textContent: `Low Δ ${SD.positionDetail.lowDelta(p).toFixed(2)}`,
+        title: 'Opened under pre-Phase 58 rules: the spread barely moves with the stock' })] : []),
       pnl,
     ]);
     btn.title = m.optionBasis

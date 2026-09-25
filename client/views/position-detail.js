@@ -16,6 +16,8 @@
   const ulPx = (x) => price(x, { market: 'stocks', entryPrice: x });
   const isRealOption = (p) => p.market === 'options' && p.optionsData && !!p.optionsData.contract;
   const heldFor = (state, asset) => ((state && state.positions) || []).filter((p) => p.asset === asset);
+  // Phase 58B: a spread opened before the net-delta floor (migrated, entry net delta < 0.12).
+  const lowDelta = (p) => { const od = p.optionsData || {}; const d = Math.abs(od.netDelta ?? (od.stats ? od.stats.netDelta : NaN)); return od.migratedFrom && Math.round(d * 100) < 12 ? d : null; }; // as displayed (2 dp)
   const venueOf = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? `Live · ${p.broker}` : 'Paper');
 
   function daysLeft(expiration) {
@@ -38,7 +40,10 @@
     // Phase 58: live net Greeks / breakeven / POP (server optionMark.stats), else the entry stats.
     const stats = SD.optionStats.rows(p, om.stats || od.stats, om.underlying);
     const live = (x, entry, fmt) => (Number.isFinite(x) ? `${fmt(x)} (live)` : Number.isFinite(entry) ? `${fmt(entry)} (at entry)` : '—');
+    const low = lowDelta(p);
     return [
+      ...(low !== null ? [el('p', { className: 'opp-size-warn opp-low-delta', textContent: `Low net delta (${low.toFixed(2)}) — opened under pre-Phase 58 rules: it moves only `
+        + `$${Math.round(low * 100)} per $1 in ${p.asset}. Close it with Manual Exit / Close Position if you want to free the slot.` })] : []),
       kv('Contract', od.structure === 'vertical' ? `${od.contract} / −${od.shortContract}` : od.contract),
       kv('Strike · expiry', `${od.structure === 'vertical' ? `${od.strike}/${od.shortStrike} ${od.type === 'put' ? 'put' : 'call'} spread` : `${od.strike} ${od.type === 'put' ? 'put' : 'call'}`} · ${exp} (${daysLeft(od.expiration)} days left)`),
       ...(od.exitRule ? [kv('Exits on its value', `stop ${od.exitRule.stopValue} · T1 ${od.exitRule.targetValue} (per share)`)] : []),
@@ -130,5 +135,5 @@
     return held.length ? '' : fallback;
   }
 
-  SD.positionDetail = { panel, banner, isRealOption };
+  SD.positionDetail = { lowDelta, panel, banner, isRealOption };
 })();

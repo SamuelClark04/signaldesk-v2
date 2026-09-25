@@ -40,6 +40,7 @@ async function migrate(ledger) {
     const t2 = od.exitRule.t2Value ? at(od.exitRule.t2Value) : null;
     if (t2 && p.targets[1]) p.targets[1].price = cents(t2);
     od.statsVersion = VERSION;
+    od.migratedFrom = 57; // opened under the pre-Phase 58 rules (no net-delta floor): the UI flags a low net delta
     return true;
   });
 }
