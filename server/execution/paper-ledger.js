@@ -230,9 +230,9 @@ function releaseAdopted(candidateId) {
 const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
 // and real option contracts their current value (optionMark, option-marks.js).
-// exitQuote: what a manual close would book right now ("Net if closed now"; paper only).
+// exitQuote: what a manual close would book right now ("Net if closed now"), and its cashout.
 const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
-  exitQuote: p.execution === 'LIVE' ? null : exitQuotes.issue(p, prices.getLatestPrice(p.asset)) }));
+  exitQuote: exitQuotes.issue(p, prices.getLatestPrice(p.asset)) })); // LIVE too (display: [Close at Coinbase] cashout; closing refuses LIVE)
 const grossPnlLinear = (pos, exitPrice) => grossPnl(pos, pos.fillPrice, exitPrice);
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 

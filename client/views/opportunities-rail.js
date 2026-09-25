@@ -52,7 +52,7 @@
       ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}) vs ${p.optionsData.debit} paid · P/L before fees`
       : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = () => view.onOpenPosition(p);
+    btn.onclick = (e) => (e.shiftKey && SD.dualChart.isOn() ? SD.dualChart.setSecondary(p.asset) : view.onOpenPosition(p)); // Shift: the Dual Chart's bottom pane
     return btn;
   }
 
@@ -113,7 +113,7 @@
       px,
     ]);
     btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = () => view.onWatch(symbol);
+    btn.onclick = (e) => (e.shiftKey && SD.dualChart.isOn() ? SD.dualChart.setSecondary(symbol) : view.onWatch(symbol));
     return btn;
   }
 

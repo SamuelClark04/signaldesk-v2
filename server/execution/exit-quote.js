@@ -9,6 +9,7 @@
 //             gross = (exitValue - debit) x 100 x size; midGross the same at the mid
 //   stocks / crypto  exit at the live price (grossPnl)
 //   fees      estimateRoundTripFees: options $0.65 / leg / fill (entry + exit),
+//   cashout   what the close deposits (exit notional less the exit fee), Phase 61;
 //             linear legs as the order was sized (exit taker for a manual close)
 // Manual close (closeManually): the client sends the `at` of the quote it SHOWED; if
 // that quote was issued in the last QUOTE_MAX_AGE_MS it is booked as is (to the
@@ -16,7 +17,7 @@
 const prices = require('../market/latest-prices');
 const { saleValue } = require('./option-marks');
 const { grossPnl, feeLegs } = require('../risk/scenarios');
-const { estimateRoundTripFees } = require('../risk/cost-authority');
+const { estimateRoundTripFees, legRate, OPTIONS_COMMISSION_PER_LEG } = require('../risk/cost-authority');
 
 const QUOTE_MAX_AGE_MS = 45 * 1000;
 const MARK_MS = 5000;
@@ -41,7 +42,13 @@ function quote(pos, price, kind = 'stop', at = Date.now()) {
   }
   const fees = estimateRoundTripFees(pos.market, size, pos.fillPrice, price, feeLegs(pos, kind));
   const net = q.gross - fees;
-  return { id: pos.id, at, underlying: price > 0 ? price : null, ...q, fees, net, r: pos.dollarRisk > 0 ? net / pos.dollarRisk : null, kind };
+  // Cashout (Phase 61): the cash a close puts in the account, after the EXIT fee only:
+  // long stock / crypto size x price less the taker fee; options the exit value x 100
+  // less the closing commissions. null for shorts (a short close buys, it pays out cash).
+  const legs = pos.market === 'options' ? ((pos.optionsData.legs || []).length || 1) : 0;
+  const exitFee = pos.market === 'options' ? OPTIONS_COMMISSION_PER_LEG * legs * size : price * size * legRate(pos.market, 'taker');
+  const cashout = pos.market === 'options' ? q.exitValue * pos.optionsData.multiplier * size - exitFee : pos.direction === 'long' ? price * size - exitFee : null;
+  return { id: pos.id, at, underlying: price > 0 ? price : null, ...q, fees, net, exitFee, cashout, r: pos.dollarRisk > 0 ? net / pos.dollarRisk : null, kind };
 }
 
 // Quote and remember it (so the exact quote a client saw can be booked).

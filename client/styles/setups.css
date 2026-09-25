@@ -105,7 +105,7 @@
 
 /* ---------- Active Trade HUD over the chart (Phase 30) ---------- */
 .opp-chart-wrap { position: relative; }
-.trade-hud { position: absolute; top: 52px; right: 78px; z-index: 5; display: flex; flex-direction: column; gap: 10px; width: 260px; padding: 12px;
+.trade-hud { position: absolute; top: calc(var(--lwc-bar-h, 44px) + 8px); right: 78px; z-index: 5; display: flex; flex-direction: column; gap: 10px; width: 260px; padding: 12px;
   border: 1px solid var(--border-strong); border-radius: 10px; background: rgba(17, 24, 39, 0.94); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 .hud-title { color: var(--text-faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .hud-pos { display: flex; flex-direction: column; gap: 6px; }
@@ -214,3 +214,15 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .hud-pill-lv { font: 600 11px var(--font-mono); margin-left: 6px; }
 .hud-lines { width: auto; padding: 0 8px; font-size: 11px; margin-left: auto; margin-right: 4px; }
 .hud-lines.is-on { color: var(--accent); border-color: var(--accent); }
+
+/* [⬍ Dual Chart] (Phase 61): two stacked live charts (components/dual-chart-container.js) */
+.lwc-dual.is-active { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+.dual-charts { display: flex; flex-direction: column; gap: 10px; }
+.dual-charts .opp-lwc { height: 300px; }
+.dual-bottom { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border-strong); }
+.dual-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dual-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.dual-select { padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); font: 600 13px var(--font-mono); }
+.dual-hint { color: var(--text-faint); font-size: 12px; }
+.dual-close { margin-left: auto; padding: 3px 10px; font-size: 12px; }
+@media (max-width: 640px) { .dual-charts .opp-lwc { height: 38vh; min-height: 220px; } }

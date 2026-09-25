@@ -68,7 +68,7 @@
           el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` })]),
       ]),
       // Active Trade HUD floats over the chart when this symbol has open position(s).
-      el('div', { className: 'opp-chart-wrap' }, [chart, ...[SD.tradeHud.hud(o, ctx)].filter(Boolean)]),
+      el('div', { className: 'opp-chart-wrap', style: SD.liveChart.primary.barHeight() ? `--lwc-bar-h:${SD.liveChart.primary.barHeight()}px` : '' }, [SD.dualChart.wrap(chart, ctx.state, o.asset), ...[SD.tradeHud.hud(o, ctx)].filter(Boolean)]), // [⬍ Dual Chart] (Phase 61)
     ]);
   }
 

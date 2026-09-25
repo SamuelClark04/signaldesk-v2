@@ -87,7 +87,7 @@
         + 'no listed contract, so no live premium. Close it to retire it.' })] : []),
       el('div', { className: 'hud-levels' }, [el('span', { className: 'text-short', textContent: `${realOption ? `${p.asset} stop` : 'Stop'} ${price(p.invalidation, p)}` }),
         el('span', { className: 'text-long', textContent: `T1 ${t1 ? price(t1, p) : '—'}` }),
-        ...(m.net !== null && m.net !== undefined ? [el('span', { className: 'hud-muted', textContent: `after fees ${signed(m.net, money)}` })] : [])]),
+        ...(m.net !== null && m.net !== undefined ? [el('span', { className: 'hud-muted no-wrap', textContent: `after fees ${signed(m.net, money)}` })] : [])]),
       exitBtn,
     ]);
   }

@@ -10,8 +10,10 @@
   const SD = window.SignalDesk;
   const { el, money, price, size, signed, pnlClass } = SD.ui;
 
+  // v: text, or nodes (e.g. an unbreakable "after fees −$0.20" part).
   const kv = (k, v, cls = '') => el('div', { className: 'opp-kv' }, [
-    el('span', { className: 'opp-k', textContent: k }), el('span', { className: `opp-v ${cls}`, textContent: v })]);
+    el('span', { className: 'opp-k', textContent: k }), el('span', { className: `opp-v ${cls}`, ...(typeof v === 'string' ? { textContent: v } : {}) }, typeof v === 'string' ? [] : v)]);
+  const nowrap = (text) => el('span', { className: 'no-wrap', textContent: text }); // a sign never parts from its amount
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(2)}%`;
   const ulPx = (x) => price(x, { market: 'stocks', entryPrice: x });
   const isRealOption = (p) => p.market === 'options' && p.optionsData && !!p.optionsData.contract;
@@ -27,7 +29,8 @@
 
   function pnlRow(label, m) {
     if (m.gross === null || m.gross === undefined) return kv(label, 'No price');
-    return kv(label, `${signed(m.gross, money)}${m.pctGross === null ? '' : ` (${pct(m.pctGross)})`}${m.net === null ? '' : ` · after fees ${signed(m.net, money)}`}`, pnlClass(m.gross));
+    return kv(label, [nowrap(`${signed(m.gross, money)}${m.pctGross === null ? '' : ` (${pct(m.pctGross)})`}`),
+      ...(m.net === null || m.net === undefined ? [] : [' · ', nowrap(`after fees ${signed(m.net, money)}`)])], pnlClass(m.gross));
   }
 
   function realOptionRows(p, m) {
@@ -49,6 +52,7 @@
       ...(od.exitRule ? [kv('Exits on its value', `stop ${od.exitRule.stopValue} · T1 ${od.exitRule.targetValue} (per share)`)] : []),
       kv('Premium now', premium),
       kv('Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),
+      kv('Position value', Number.isFinite(m.optionValue) ? `${money(m.optionValue * od.multiplier * p.positionSize)} (cost basis ${money(od.debit * od.multiplier * p.positionSize)})` : '—'),
       pnlRow('Option P&L', m),
       kv('R multiple', Number.isFinite(m.r) ? `${m.r >= 0 ? '+' : '−'}${Math.abs(m.r).toFixed(2)}R of ${money(p.dollarRisk)} at risk` : '—'),
       ...(stats.length ? stats.map(([k, v, cls]) => kv(k, v, cls)) : [
@@ -72,6 +76,9 @@
   function linearRows(p, m) {
     return [
       kv('Size', size(p)),
+      // Phase 61: the capital in the asset now vs what it cost (size x live / fill price).
+      kv('Position value', m.price > 0 ? money(p.positionSize * m.price) : '—'),
+      kv('Cost basis', money(p.positionSize * p.fillPrice)),
       kv('Fill price', price(p.fillPrice, p)),
       kv('Live price', m.price > 0 ? price(m.price, p) : 'No live price'),
       pnlRow('Unrealized P/L', m),

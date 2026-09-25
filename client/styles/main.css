@@ -264,3 +264,6 @@ html, body {
   .conn { margin: 0 0 0 auto; padding: 0; }
   .main { padding: 16px; }
 }
+
+/* Phase 61: keep a signed amount on one line ("after fees −$0.20" never breaks after the sign) */
+.no-wrap { white-space: nowrap; }
