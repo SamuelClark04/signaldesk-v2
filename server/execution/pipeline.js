@@ -122,7 +122,6 @@ async function pipelinePass() {
   for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['crypto-intraday', cryptoIntraday], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
     scanLog.scanned(id, mod.takeScan());
   }
-  try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
   // capital of the venue it would execute on: the paper bankroll, or the LIVE
@@ -173,6 +172,9 @@ async function pipelinePass() {
       console.log(`[pipeline] not staged ${result.id}: ${err.message}`);
     }
   }
+
+  // After staging (Phase 62): each radar row's gate verdict reflects this pass's risk-engine outcome.
+  try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
 
   // Exit management. LIVE positions first, from broker truth (real fills);
   // then PAPER positions from local prices (monitorPositions skips LIVE ones).

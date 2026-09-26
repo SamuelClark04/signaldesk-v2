@@ -1,0 +1,54 @@
+/* Catalyst & News Feed (Phase 62, components/catalyst-feed.js): under the Live Chart
+   on Opportunities → Moonshots (right column) and Setups (center column).
+   Colors from main.css tokens. */
+
+.cfeed { min-width: 0; margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.moon-side .cfeed { margin-top: 0; }
+.cfeed-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 10px; }
+.cfeed-head .opp-section { margin: 0; }
+.cfeed-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cfeed-sep { width: 1px; height: 18px; margin: 0 2px; background: var(--border-strong); }
+.cfeed-tab, .cfeed-pill { padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--text-muted); font: 12px/18px var(--font-ui); cursor: pointer; white-space: nowrap; }
+.cfeed-tab:hover, .cfeed-pill:hover { color: var(--text); border-color: var(--accent); }
+.cfeed-tab.is-active { border-color: var(--solid); background: var(--solid); color: #fff; font-weight: 600; }
+.cfeed-pill.is-active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+/* ---------- A: what SignalDesk is basing this move on ---------- */
+.cfeed-basis { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-2, rgba(255, 255, 255, 0.02)); }
+.cfeed-basis-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.cfeed-headline { margin: 4px 0 6px; color: var(--text-muted); font: 12px var(--font-mono); }
+.cfeed-status { padding: 1px 8px; border-radius: 4px; font: 600 10px/18px var(--font-mono); white-space: nowrap; }
+.cfeed-status.is-go { background: var(--long-bg); color: var(--long); }
+.cfeed-status.is-stop { background: var(--short-bg); color: var(--short); }
+.cfeed-status.is-warn { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.cfeed-status.is-idle { background: rgba(148, 163, 184, 0.12); color: var(--text-muted); }
+.cfeed-driver { padding: 6px 0; border-top: 1px solid var(--border); }
+.cfeed-driver-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.cfeed-points { color: var(--text-muted); font: 11px var(--font-mono); text-transform: none; letter-spacing: 0; }
+.cfeed-driver ul { margin: 4px 0 0; padding-left: 18px; }
+.cfeed-driver li { margin: 2px 0; color: var(--text); font-size: 12.5px; line-height: 1.45; }
+.cfeed-driver.is-verdict li { font-weight: 600; }
+
+/* ---------- B: the stream ---------- */
+.cfeed-note { margin: 0 0 8px; }
+.cfeed-list { max-height: 420px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.cfeed-item { padding: 8px 2px; border-top: 1px solid var(--border); }
+.cfeed-item:first-child { border-top: 0; }
+.cfeed-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 3px; }
+.cfeed-src { padding: 0 6px; border-radius: 4px; font: 600 10px/17px var(--font-mono); white-space: nowrap; }
+.cfeed-src.is-news { background: rgba(56, 189, 248, 0.13); color: var(--accent); }
+.cfeed-src.is-reddit { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.cfeed-src.is-trending { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.cfeed-ticker { padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--text); font: 600 11px/17px var(--font-mono); cursor: pointer; }
+.cfeed-ticker:hover { border-color: var(--accent); color: var(--accent); }
+.cfeed-ticker.is-current { border-color: var(--solid); color: var(--accent); }
+.cfeed-age { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+.cfeed-title { display: block; color: var(--text); font-size: 13px; line-height: 1.4; text-decoration: none; overflow-wrap: anywhere; }
+a.cfeed-title:hover { color: var(--accent); text-decoration: underline; }
+.cfeed-foot { margin: 8px 0 0; font-size: 11px; }
+
+@media (max-width: 640px) {
+  .cfeed { padding: 12px; }
+  .cfeed-list { max-height: 360px; }
+  .cfeed-tab, .cfeed-pill { padding: 5px 12px; }
+}

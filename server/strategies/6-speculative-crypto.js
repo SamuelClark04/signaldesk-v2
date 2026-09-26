@@ -224,6 +224,8 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
 
 function takeBlocks() { const b = blocks; blocks = []; return b; }
 function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
+// When a gem was last proposed and until when its cooldown holds (null: not cooling down).
+const cooldownOf = (symbol, now = Date.now()) => { const at = lastSignal.get(symbol); return at && now - at < CONFIG.cooldownMs ? { proposedAt: at, until: at + CONFIG.cooldownMs } : null; };
 
-module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, assess, score, describe, bars5, btcMove, gemWatchlist,
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, cooldownOf, assess, score, describe, bars5, btcMove, gemWatchlist,
   frames: gem.frames, to15: gem.to15, STRATEGY_ID, TAG, CONFIG, LABEL };

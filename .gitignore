@@ -12,5 +12,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Ledger state (paper trade history; loaded into the ledger on start)
-server/data/
+# Ledger state (paper trade history; loaded into the ledger on start). Code in server/data/ (news-feed.js) is tracked.
+server/data/*
+!server/data/*.js

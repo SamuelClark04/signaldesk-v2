@@ -54,6 +54,7 @@
     PILOT_MATRIX: (m) => { state.pilotMatrix = m; }, // HOLD / ADD / TRIM / SELL + ROTATE per holding
     MACRO_EVENTS: (list) => { state.macro = list || []; }, // FOMC / CPI / FDA calendar (News & Catalysts)
     NEWS_SENTIMENT: (r) => SD.sentiment.received(r), // 0-100 gauge for the charted symbol
+    CATALYST_FEED: (r) => SD.catalystFeed.received(r), // Catalyst & News Feed under the chart (Phase 62)
     SAVED_SETUPS: (list) => { state.saved = list || []; }, // bookmarks (Opportunities → Saved)
     UNIVERSE: (u) => { state.universe = u; SD.scannerData.setNames(u && u.names); }, // 83 monitored symbols + names
     TRIGGER_PROXIMITY: (p) => { state.proximity = p; }, // heating-up list for Market Watch

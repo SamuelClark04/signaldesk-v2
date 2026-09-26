@@ -278,7 +278,7 @@ function createMessageHandler({ send, broadcast }) {
     if (QUEUE_ACTIONS[msg.type]) {
       return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
     }
-    if (handlePilot(ws, msg) || handleManual(ws, msg)) return undefined;
+    if (handlePilot(ws, msg) || handleManual(ws, msg) || require('../data/news-feed').handle(ws, msg, send)) return undefined; // + GET_CATALYST_FEED (Phase 62)
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'RESET_LEDGER') return handleReset(ws, msg);

@@ -241,7 +241,7 @@
       : act && act.dataset && act.dataset.focusKey && container.contains(act) ? `[data-focus-key="${CSS.escape(act.dataset.focusKey)}"]` : null;
     const caret = focusSel ? [act.selectionStart, act.selectionEnd] : null;
     const pageY = window.scrollY;
-    const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist']; // scrollable lists keep their position too
+    const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist', '.cfeed-list']; // scrollable lists keep their position too (+ the Catalyst Feed)
     const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
     const waiting = SD.oppApprovals.count(state);
@@ -274,7 +274,7 @@
       input.setSelectionRange(caret[0], caret[1]);
       window.scrollTo(window.scrollX, pageY);
     }
-    SCROLLERS.forEach((sel, i) => { const n = container.querySelector(sel); if (n) n.scrollTop = scrolls[i]; });
+    SCROLLERS.forEach((sel, i) => { const n = container.querySelector(sel); if (n && !n.dataset.fresh) n.scrollTop = scrolls[i]; });
   }
 
   // Keep "staged N ago" fresh while the tab is on screen.

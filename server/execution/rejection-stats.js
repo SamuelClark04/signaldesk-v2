@@ -41,6 +41,7 @@ let day = etDate.format(Date.now());
 let counts = new Map(); // label -> count
 let seen = new Set(); // `${candidateId}|${label}` already counted today
 let latest = new Map(); // `${market}|${asset}` -> latest rejection today, with setup context
+let byStrategy = new Map(); // `${strategyId}|${asset}` -> the same, per strategy (Catalyst Feed verdicts)
 let listener = null;
 
 function bucket(rawReason) {
@@ -57,6 +58,7 @@ function rollDay(now) {
   counts = new Map();
   seen = new Set();
   latest = new Map();
+  byStrategy = new Map();
 }
 
 function snapshot(now = Date.now()) {
@@ -74,7 +76,9 @@ function recordRejection(candidateId, rawReason, candidate = null, now = Date.no
   const label = bucket(rawReason);
   if (candidate && candidate.asset) {
     const { asset, market = null, setupType = null, direction = null, timeframe = null, strategyId = null } = candidate;
-    latest.set(`${market}|${asset}`, { asset, market, setupType, direction, timeframe, strategyId, reason: label, detail: String(rawReason || '').slice(0, 200), at: now });
+    const row = { asset, market, setupType, direction, timeframe, strategyId, reason: label, detail: String(rawReason || '').slice(0, 200), at: now };
+    latest.set(`${market}|${asset}`, row);
+    byStrategy.set(`${strategyId}|${asset}`, row);
   }
   const key = `${candidateId || '?'}|${label}`;
   if (seen.has(key)) return false;
@@ -91,4 +95,11 @@ function onChange(fn) {
   listener = fn;
 }
 
-module.exports = { recordRejection, snapshot, onChange, bucket };
+// The latest rejection today of `asset` (by one strategy, else on its market; null: none), for the Catalyst Feed verdict.
+const latestFor = (asset, { market, strategyId } = {}, now = Date.now()) => {
+  rollDay(now);
+  const r = strategyId ? byStrategy.get(`${strategyId}|${asset}`) : latest.get(`${market}|${asset}`);
+  return r ? { ...r } : null;
+};
+
+module.exports = { recordRejection, snapshot, onChange, bucket, latestFor };

@@ -69,6 +69,7 @@
       ]),
       // Active Trade HUD floats over the chart when this symbol has open position(s).
       el('div', { className: 'opp-chart-wrap', style: SD.liveChart.primary.barHeight() ? `--lwc-bar-h:${SD.liveChart.primary.barHeight()}px` : '' }, [SD.dualChart.wrap(chart, ctx.state, o.asset), ...[SD.tradeHud.hud(o, ctx)].filter(Boolean)]), // [⬍ Dual Chart] (Phase 61)
+      SD.catalystFeed.render(o.asset, { onPick: ctx.onPickSymbol }), // Catalyst & News Feed under the chart (Phase 62)
     ]);
   }
 

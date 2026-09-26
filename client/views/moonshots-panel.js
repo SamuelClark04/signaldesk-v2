@@ -12,6 +12,7 @@
 //                            /20, badge; clicking a coin charts it on 5m candles;
 //                            [Trade] opens the Manual Trade Ticket on it (Phase 60B)
 //   Chart card               [+ Trade SYMBOL]: the ticket for the charted coin
+//   Catalyst & News Feed     under the chart (Phase 62, components/catalyst-feed.js): why it scored + its news / Reddit
 //   Buzz strip               every Coinbase-listed trending / Reddit coin charts on a click
 // Tickets opened here carry the coin's radar score: Crypto mode, sized at System 6's
 // Smart Investment Amount (10-25% of normal risk), ATR / fee-floor stop, 2.5R / 3.5R.
@@ -179,7 +180,8 @@
       M().tag(activeSetups(state, ctx), mobile ? 'order' : 'queue'),
       M().tag(buzzStrip(r, ctx), 'queue'),
       M().tag(board(r, ctx), 'queue'),
-      M().tag(chartPane(r, ctx), 'chart'),
+      // Right column: the live chart and, under it, the Catalyst & News Feed (Phase 62).
+      M().tag(el('div', { className: 'moon-side' }, [chartPane(r, ctx), SD.catalystFeed.render(selected, { onPick: (s) => select(s, ctx) })]), 'chart'),
     ].filter(Boolean));
     return M().wrap(grid, { rerender: ctx.rerender, bar: null });
   }

@@ -50,10 +50,12 @@ const decode = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&lt;/g, 
   .replace(/&#39;|&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&#32;/g, ' ').replace(/\s+/g, ' ').trim();
 const tag = (xml, name) => { const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`).exec(xml); return m ? m[1] : ''; };
 
-// Atom entries -> posts.
+// Atom entries -> posts (Phase 62: + the thread link and author, for the Catalyst Feed).
+const href = (e) => { const m = /<link[^>]*href="([^"]+)"/.exec(e); const u = m ? decode(m[1]) : ''; return /^https:\/\/(www\.|old\.)?reddit\.com\//i.test(u) ? u : null; };
 function parseAtom(xml, sub) {
   return (xml.match(/<entry>[\s\S]*?<\/entry>/g) || []).map((e) => ({
     sub, title: decode(tag(e, 'title')), text: decode(decode(tag(e, 'content'))).slice(0, 600), at: Date.parse(tag(e, 'updated') || tag(e, 'published')) || null,
+    url: href(e), author: decode(tag(tag(e, 'author'), 'name')).replace(/^\/?u\//, '') || null,
   })).filter((p) => p.title);
 }
 
@@ -86,7 +88,7 @@ async function refreshTrending(now) {
   try {
     const { res, text } = await fetchText(TRENDING_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const coins = (JSON.parse(text).coins || []).map((c, rank) => ({ symbol: String(c.item.symbol || '').toUpperCase(), name: c.item.name, rank }));
+    const coins = (JSON.parse(text).coins || []).map((c, rank) => ({ symbol: String(c.item.symbol || '').toUpperCase(), name: c.item.name, rank, id: c.item.id || null }));
     trending = { at: now, coins, error: null };
   } catch (err) {
     trending = { at: now, coins: trending.coins, error: err.name === 'TimeoutError' ? 'timed out' : err.message };
@@ -118,6 +120,7 @@ async function getSocial(symbol, now = Date.now()) {
   const hit = matcher(base, nameFor(symbol));
   const posts = [...feeds.values()].flatMap((f) => f.posts);
   const hits = posts.filter((p) => hit(`${p.title} ${p.text}`));
+  matched.set(symbol, hits.map((p) => item(p, symbol)));
   const recent = hits.filter((p) => p.at && now - p.at <= RECENT_H * 3600000);
   const tone = hits.map((p) => scoreHeadline(p.title).classification);
   const t = trending.coins.find((c) => c.symbol === base || productOf(c) === symbol);
@@ -133,6 +136,23 @@ async function getSocial(symbol, now = Date.now()) {
   };
 }
 
+// A matched post as the Catalyst Feed shows it. RSS carries no vote counts: score null.
+const item = (p, symbol) => ({ symbol, title: p.title, subreddit: p.sub, url: p.url || null, createdAt: p.at, score: null, author: p.author || null });
+const matched = new Map(); // symbol -> its matched posts (newest scan), for the Catalyst Feed
+let recentList = []; // every matched post across the gems, newest first, with all its symbols
+const byNewest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
+// The matched Reddit posts for one coin (from the last scan; matched now if never scanned).
+function postsFor(symbol, limit = 20) {
+  if (!matched.has(symbol)) {
+    const hit = matcher(symbol.split('-')[0].toUpperCase(), nameFor(symbol));
+    matched.set(symbol, [...feeds.values()].flatMap((f) => f.posts).filter((p) => hit(`${p.title} ${p.text}`)).map((p) => item(p, symbol)));
+  }
+  return matched.get(symbol).slice().sort(byNewest).slice(0, limit).map((x) => ({ ...x }));
+}
+const recentPosts = (limit = 60) => recentList.slice(0, limit).map((x) => ({ ...x, symbols: [...x.symbols] }));
+// CoinGecko's trending list, each coin with its Coinbase product (null: not listed).
+const trendingList = () => ({ at: trending.at || null, coins: trending.coins.map((c) => ({ ...c, rank: c.rank + 1, product: productOf(c) })) });
+
 // Refresh the sources now (one stale Reddit feed per call, CoinGecko every 10 min).
 async function refresh(now = Date.now()) { await refreshReddit(now); await refreshTrending(now); }
 
@@ -146,12 +166,16 @@ function snapshot(symbols, now = Date.now()) {
   const key = `${symbols.length}|${[...feeds.values()].map((f) => f.at).join(',')}|${trending.at}|${Math.floor(now / 600000)}`;
   if (memo.key === key) return memo.value;
   const texts = posts.map((p) => `${p.title} ${p.text}`);
+  const bySymbol = new Map(); // post index -> the symbols it mentions (the global recent list)
   const reddit = symbols.map((symbol) => {
     const hit = matcher(symbol.split('-')[0].toUpperCase(), nameFor(symbol));
     const idx = texts.map((t, i) => (hit(t) ? i : -1)).filter((i) => i >= 0);
+    matched.set(symbol, idx.map((i) => item(posts[i], symbol)));
+    for (const i of idx) bySymbol.set(i, [...(bySymbol.get(i) || []), symbol]);
     return { symbol, mentions: idx.length, recent: idx.filter((i) => posts[i].at && now - posts[i].at <= RECENT_H * 3600000).length,
       title: idx.length ? `r/${posts[idx[0]].sub}: ${posts[idx[0]].title.slice(0, 100)}` : null };
   }).filter((r) => r.mentions > 0).sort((a, b) => b.recent - a.recent || b.mentions - a.mentions).slice(0, 25);
+  recentList = [...bySymbol].map(([i, syms]) => ({ ...item(posts[i], syms[0]), symbols: syms })).sort(byNewest).slice(0, 120);
   const liveFeeds = [...feeds.values()].filter((f) => !f.error).length;
   const value = {
     // product: its Coinbase book (null: Coinbase does not list it); gem: false for a mega-cap / pegged token (Systems 2 / 4, never the gem radar).
@@ -165,6 +189,8 @@ function snapshot(symbols, now = Date.now()) {
 }
 
 // Test hook.
-function reset() { feeds.clear(); trending = { at: 0, coins: [], error: null }; redditWaitUntil = 0; memo = { key: null, value: null }; }
+function reset() { feeds.clear(); trending = { at: 0, coins: [], error: null }; redditWaitUntil = 0; memo = { key: null, value: null }; matched.clear(); recentList = []; }
+// Test hook: cached posts for one subreddit, as if fetched now.
+function seed(sub, posts, now = Date.now()) { feeds.set(sub, { at: now, posts, error: null }); memo = { key: null, value: null }; matched.clear(); }
 
-module.exports = { getSocial, refresh, snapshot, mentions, matcher, parseAtom, reset, FEEDS, CACHE_MS };
+module.exports = { getSocial, refresh, snapshot, mentions, matcher, parseAtom, postsFor, recentPosts, trendingList, nameFor, reset, seed, FEEDS, CACHE_MS };

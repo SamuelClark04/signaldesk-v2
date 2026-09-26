@@ -50,11 +50,11 @@ button.moon-chip:hover { color: var(--text); border-color: var(--accent); }
 .moon-part { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-faint); font-size: 11px; }
 .moon-part strong { color: var(--text); font: 600 13px var(--font-mono); }
 .moon-chart .opp-lwc { height: 380px; }
-.moon-chart { position: sticky; top: 12px; }
+/* Right column (Phase 62): the chart, then the Catalyst & News Feed under it (catalyst-feed.css). */
+.moon-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
 @media (max-width: 1100px) {
   .moon { grid-template-columns: 1fr; }
-  .moon-chart { position: static; }
 }
 
 /* Manual trade from the radar (Phase 60B): [Trade] under the coin name, [+ Trade SYMBOL] on the chart card */

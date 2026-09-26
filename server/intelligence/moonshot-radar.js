@@ -16,6 +16,7 @@ const spec = require('../strategies/6-speculative-crypto');
 const social = require('../connectors/crypto-social');
 const sentiment = require('../connectors/news-sentiment');
 const discovery = require('../connectors/coinbase-discovery');
+const summary = require('./catalyst-summary'); // Phase 62: catalystSummary per row (why it scored + the gate verdict)
 
 const TOP_N = 20;
 const BADGES = [[60, 'TRIGGERED'], [40, 'HEATING UP'], [0, 'WATCHING']];
@@ -25,6 +26,7 @@ const round2 = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null);
 
 let radar = { at: null, rows: [], top: TOP_N, scanned: 0, ranked: 0, missing: [], buzz: null, btc: null, swept: 0, gems: 0 };
 const getRadar = () => ({ ...radar, rows: radar.rows.map((r) => ({ ...r })) });
+const rowOf = (symbol) => { const r = radar.rows.find((x) => x.symbol === symbol); return r ? { ...r } : null; };
 
 // One gem's radar row (null: not enough 5m history).
 async function rowFor(w, latest, btc, now) {
@@ -47,7 +49,7 @@ async function rowFor(w, latest, btc, now) {
     buzzDetail: { reddit: detail.reddit, trending: detail.trend, news: detail.news, volumeCatalyst: detail.volumeCatalyst,
       mentions: buzz.reddit.mentions, recent: buzz.reddit.recent, trendingRank: buzz.trending ? buzz.trending.rank : null, title: buzz.reddit.titles[0] || null },
     spreadPct: round2(a.spreadPct === null ? null : a.spreadPct * 100), bars: bars.length, why: spec.describe({ ...s, pattern: s.kind === 'COIL' }),
-    source: w.source, reasons: w.reasons, change24h: round2(w.change24h === null ? null : w.change24h * 100), volumeUsd: Math.round(w.volumeUsd || 0),
+    source: w.source, reasons: w.reasons, change24h: round2(w.change24h === null ? null : w.change24h * 100), volumeUsd: Math.round(w.volumeUsd || 0), volChange: Number.isFinite(w.volChange) ? w.volChange : null,
   };
 }
 
@@ -67,10 +69,15 @@ async function compute(latestPrices, now = Date.now()) {
     }
   }
   rows.sort((a, b) => b.score - a.score || (b.move15 || 0) - (a.move15 || 0));
+  const btcMoves = { move5: round2(spec.btcMove(btc, '5m') * 100), move15: round2(spec.btcMove(btc, '15m') * 100) };
+  const ctx = summary.context();
+  for (const r of rows) {
+    try { r.catalystSummary = summary.forRow(r, btcMoves, ctx, now); } catch (err) { console.error(`[moonshot-radar] ${r.symbol} summary failed: ${err.message}`); }
+  }
   const cat = discovery.snapshot();
   radar = { at: now, rows, top: TOP_N, scanned: list.length, ranked: rows.length, missing, swept: cat.swept, gems: cat.gems, catalogAt: cat.at, catalogError: cat.error,
     excluded: cat.excluded, buzz: social.snapshot(discovery.gems().map((c) => c.symbol), now),
-    btc: { move5: round2(spec.btcMove(btc, '5m') * 100), move15: round2(spec.btcMove(btc, '15m') * 100) } };
+    btc: btcMoves };
   return getRadar();
 }
 
@@ -86,4 +93,4 @@ async function publish(broadcast, latestPrices, now = Date.now()) {
 // For a new client: the radar and the chartable Coinbase catalog.
 const snapshots = () => [['MOONSHOT_RADAR', getRadar()], ['GEM_CATALOG', discovery.snapshot()]];
 
-module.exports = { compute, publish, getRadar, snapshots, badgeOf, TOP_N };
+module.exports = { compute, publish, getRadar, rowOf, snapshots, badgeOf, TOP_N };
