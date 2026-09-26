@@ -32,7 +32,7 @@ const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RAD
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
 const session = require('../market/market-session'); // is the US session open (Alpaca clock, else ET hours)
-const { spreadGate, volumeGate, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD } = require('../risk/break-even'); // crypto liquidity gates (Phase 65 / 65B)
+const { spreadGate, volumeGate, depthGate, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD } = require('../risk/break-even'); // crypto liquidity gates (65 / 65B / 66)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -164,6 +164,8 @@ async function pipelinePass() {
       recordRejection(result.candidateId, result.reason, candidate); // counted once per setup per reason
       continue;
     }
+    const top = result.market === 'crypto' ? depthGate(result.asset, result.notional) : null; // Phase 66: can the best ask take the order?
+    if (top && !top.ok) { recordRejection(result.id, top.reason, candidate); continue; }
     counts.approved += 1;
     try {
       const staged = ledger.stageOrder(result);

@@ -250,3 +250,7 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .dual-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .dual-side-label { color: var(--accent); font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
 .dual-head .mt-launch { padding: 3px 10px; font-size: 12px; }
+.dual-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.dual-seg { min-width: 0; padding: 6px 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: 12px var(--font-ui); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dual-seg:hover { color: var(--text); }
+.dual-seg.is-active { border-color: var(--solid); background: rgba(47, 129, 247, 0.16); color: var(--text); font-weight: 600; }

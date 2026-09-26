@@ -15,6 +15,7 @@
 //   spreadGate       Phase 65: a crypto setup whose live bid / ask is wider than its cap is never
 //                    staged (WIDE_CRYPTO_SPREAD): 0.45% standard crypto, 0.80% Moonshots (65B);
 //                    no fresh book: not judged.
+//   depthGate        Phase 66: THIN_TOP_OF_BOOK when the best ask (buy) / bid (sell) holds less than the order.
 //   volumeGate       Phase 65B: standard crypto needs >= $1.5M of 24h volume (ticker base volume x price).
 //   cashoutVariance  a live close's expected cashout (best bid x qty - fee, right
 //                    before the sell) vs the actual fill (qty x avg price - real fee).
@@ -43,7 +44,7 @@ function liveQuote(product, now = Date.now()) {
   let t = null;
   try { t = require('../connectors/coinbase-socket').getLatest(product); } catch { return null; }
   const age = t && t.time ? now - Date.parse(t.time) : Infinity;
-  return t && t.bid > 0 && t.ask >= t.bid && age <= QUOTE_MAX_AGE_MS ? { bid: t.bid, ask: t.ask, price: t.price } : null;
+  return t && t.bid > 0 && t.ask >= t.bid && age <= QUOTE_MAX_AGE_MS ? { bid: t.bid, ask: t.ask, price: t.price, bidQty: t.bidQty, askQty: t.askQty } : null;
 }
 
 // Round-trip fee hurdle for opening `notional` at `price` (the live / reference price).
@@ -85,6 +86,18 @@ function spreadGate(product, max = MAX_CRYPTO_SPREAD, now = Date.now()) {
     : { ok: true, spreadPct, reason: null };
 }
 
+// Phase 66: can the top of the book take the order? A buy of `notionalUsd` against the best ask's
+// quantity (a sell against the bid's). No fresh book or no quantities in the feed: not judged.
+function depthGate(product, notionalUsd, side = 'buy', now = Date.now()) {
+  const q = liveQuote(product, now);
+  const qty = q && (side === 'buy' ? q.askQty : q.bidQty);
+  if (!q || !(qty > 0) || !(notionalUsd > 0)) return { ok: true, topUsd: null, reason: null };
+  const topUsd = qty * (side === 'buy' ? q.ask : q.bid);
+  return topUsd < notionalUsd
+    ? { ok: false, topUsd, reason: `THIN_TOP_OF_BOOK: the best ${side === 'buy' ? 'ask' : 'bid'} holds $${topUsd.toFixed(2)}, less than the $${notionalUsd.toFixed(2)} order (it would walk the book)` }
+    : { ok: true, topUsd, reason: null };
+}
+
 // Standard crypto liquidity (Phase 65B): 24h USD volume from the ticker; no ticker volume: not judged.
 function volumeGate(product, min = MIN_CRYPTO_VOLUME_USD) {
   let t = null;
@@ -104,4 +117,4 @@ function cashoutVariance({ expected, expectedQty, filledQty, avgFillPrice, fees 
   return { expected: exp, actual, variance, favorable: variance >= 0, expectedBid, avgFillPrice, filledQty, fees, basis };
 }
 
-module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, spreadGate, volumeGate, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD, MIN_CRYPTO_VOLUME_USD };
+module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, spreadGate, volumeGate, depthGate, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD, MIN_CRYPTO_VOLUME_USD };

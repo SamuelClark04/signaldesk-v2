@@ -20,6 +20,13 @@ const discovery = require('./coinbase-discovery');
 
 const CACHE_MS = 10 * 60 * 1000;
 const RECENT_H = 6;
+// Phase 66: only posts from the last MAX_AGE_H hours count or show (undated posts never), and a
+// coin counts only when it is the post's SUBJECT: named in the title or the first sentence.
+const MAX_AGE_H = 48;
+const firstSentence = (t) => { const s = String(t || '').trim(); const m = /^([\s\S]{0,280}?[.!?])(\s|$)/.exec(s); return m ? m[1] : s.slice(0, 200); };
+const subject = (p) => `${p.title} ${firstSentence(p.text)}`;
+const fresh = (at, now) => Number.isFinite(at) && now - at <= MAX_AGE_H * 3600000 && at - now < 3600000;
+const livePosts = (now) => [...feeds.values()].flatMap((f) => f.posts).filter((p) => fresh(p.at, now));
 const TIMEOUT_MS = 8000;
 const UA = 'windows:signaldesk:1.0 (personal trading terminal; public RSS)';
 const FEEDS = [
@@ -118,8 +125,8 @@ async function getSocial(symbol, now = Date.now()) {
   await refreshTrending(now);
   const base = symbol.split('-')[0].toUpperCase();
   const hit = matcher(base, nameFor(symbol));
-  const posts = [...feeds.values()].flatMap((f) => f.posts);
-  const hits = posts.filter((p) => hit(`${p.title} ${p.text}`));
+  const posts = livePosts(now);
+  const hits = posts.filter((p) => hit(subject(p)));
   matched.set(symbol, hits.map((p) => item(p, symbol)));
   const recent = hits.filter((p) => p.at && now - p.at <= RECENT_H * 3600000);
   const tone = hits.map((p) => scoreHeadline(p.title).classification);
@@ -145,11 +152,11 @@ const byNewest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
 function postsFor(symbol, limit = 20) {
   if (!matched.has(symbol)) {
     const hit = matcher(symbol.split('-')[0].toUpperCase(), nameFor(symbol));
-    matched.set(symbol, [...feeds.values()].flatMap((f) => f.posts).filter((p) => hit(`${p.title} ${p.text}`)).map((p) => item(p, symbol)));
+    matched.set(symbol, livePosts(Date.now()).filter((p) => hit(subject(p))).map((p) => item(p, symbol)));
   }
-  return matched.get(symbol).slice().sort(byNewest).slice(0, limit).map((x) => ({ ...x }));
+  return matched.get(symbol).filter((x) => fresh(x.createdAt, Date.now())).sort(byNewest).slice(0, limit).map((x) => ({ ...x }));
 }
-const recentPosts = (limit = 60) => recentList.slice(0, limit).map((x) => ({ ...x, symbols: [...x.symbols] }));
+const recentPosts = (limit = 60) => recentList.filter((x) => fresh(x.createdAt, Date.now())).slice(0, limit).map((x) => ({ ...x, symbols: [...x.symbols] }));
 // CoinGecko's trending list, each coin with its Coinbase product (null: not listed).
 const trendingList = () => ({ at: trending.at || null, coins: trending.coins.map((c) => ({ ...c, rank: c.rank + 1, product: productOf(c) })) });
 
@@ -162,10 +169,10 @@ async function refresh(now = Date.now()) { await refreshReddit(now); await refre
 // catalog). Sync, from cache only; memoized until the posts or symbols change.
 let memo = { key: null, value: null };
 function snapshot(symbols, now = Date.now()) {
-  const posts = [...feeds.values()].flatMap((f) => f.posts);
+  const posts = livePosts(now);
   const key = `${symbols.length}|${[...feeds.values()].map((f) => f.at).join(',')}|${trending.at}|${Math.floor(now / 600000)}`;
   if (memo.key === key) return memo.value;
-  const texts = posts.map((p) => `${p.title} ${p.text}`);
+  const texts = posts.map(subject);
   const bySymbol = new Map(); // post index -> the symbols it mentions (the global recent list)
   const reddit = symbols.map((symbol) => {
     const hit = matcher(symbol.split('-')[0].toUpperCase(), nameFor(symbol));
@@ -193,4 +200,4 @@ function reset() { feeds.clear(); trending = { at: 0, coins: [], error: null }; 
 // Test hook: cached posts for one subreddit, as if fetched now.
 function seed(sub, posts, now = Date.now()) { feeds.set(sub, { at: now, posts, error: null }); memo = { key: null, value: null }; matched.clear(); }
 
-module.exports = { getSocial, refresh, snapshot, mentions, matcher, parseAtom, postsFor, recentPosts, trendingList, nameFor, reset, seed, FEEDS, CACHE_MS };
+module.exports = { getSocial, refresh, snapshot, mentions, matcher, parseAtom, postsFor, recentPosts, trendingList, nameFor, reset, seed, firstSentence, FEEDS, CACHE_MS, MAX_AGE_H };

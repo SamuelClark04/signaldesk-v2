@@ -90,6 +90,10 @@ function quote(pos, price, kind = 'stop', at = Date.now(), bid = null) {
 function issue(pos, price, at = Date.now()) {
   const q = quote(pos, price, 'stop', at, bidOf(pos, price, at));
   if (!q) return null;
+  if (q.sellBasis === 'best bid') { // Phase 66: does the best bid hold the whole position? (else a market sell walks the book)
+    const lq = be.liveQuote(pos.brokerProduct || pos.asset, at) || be.liveQuote(pos.asset, at);
+    if (lq && lq.bidQty > 0) Object.assign(q, { bidQty: lq.bidQty, thinBid: lq.bidQty < pos.positionSize });
+  }
   const list = (issued.get(pos.id) || []).filter((x) => at - x.at <= QUOTE_MAX_AGE_MS);
   list.push(q);
   issued.set(pos.id, list.slice(-40));

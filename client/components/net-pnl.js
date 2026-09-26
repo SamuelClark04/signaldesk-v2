@@ -85,7 +85,8 @@
     const f = live(p, m);
     const q = p.exitQuote;
     if (f && Number.isFinite(f.cashout)) {
-      return `Est. sell at ${f.atBid ? 'best bid' : 'last price'} ${price(f.sell, p)} (${money(f.sell * p.positionSize)})${f.atBid ? '' : ' (no fresh bid)'} − Coinbase fee (~${money(f.exitFee)}) = ${money(f.cashout)} cashout`;
+      const thin = q && q.thinBid ? ` · the best bid holds only ${q.bidQty} (a market sell may fill lower)` : ''; // Phase 66
+      return `Est. sell at ${f.atBid ? 'best bid' : 'last price'} ${price(f.sell, p)} (${money(f.sell * p.positionSize)})${f.atBid ? '' : ' (no fresh bid)'} − Coinbase fee (~${money(f.exitFee)}) = ${money(f.cashout)} cashout${thin}`;
     }
     if (!q || !Number.isFinite(q.cashout)) return null;
     const at = q.sellBasis === 'best bid' ? `best bid ${price(q.sellPrice, p)}` : `last price ${price(q.sellPrice || q.underlying, p)} (no fresh bid)`;

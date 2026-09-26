@@ -99,6 +99,19 @@ function sizeLinear(candidate, bankroll, riskBudget, capPct, entryPrice, stopDis
   };
 }
 
+// Phase 66: a crypto position under MIN_CRYPTO_NOTIONAL ($20) loses too much to fees and the
+// spread on a retail tier. It is sized UP to $20 only if the risk at the stop stays within the
+// user's per-trade cap (bankroll x risk %, before any Moonshot scale-down) and the capital /
+// cash / allocation caps allow $20; otherwise the setup is rejected (MIN_NOTIONAL_TOO_SMALL).
+const MIN_CRYPTO_NOTIONAL = 20;
+function sizeUpToMin(candidate, riskCap, capitalCap, cashCap, entryPrice, stopDistance) {
+  const qty = Math.ceil((MIN_CRYPTO_NOTIONAL / entryPrice) * 1e8) / 1e8;
+  const notional = qty * entryPrice;
+  const allocation = candidate.maxNotional > 0 ? candidate.maxNotional : Infinity;
+  if (qty * stopDistance > riskCap + 1e-9 || notional > Math.min(capitalCap, cashCap, allocation) + 1e-9) return null;
+  return { positionSize: qty, dollarRisk: qty * stopDistance, notional, cappedByNotional: false, cappedByAmount: false, sizedUpToMin: true };
+}
+
 // Options (long premium), sized on the real premium: risk to the stop per
 // contract, and the whole premium capped at MAX_PREMIUM_R budgets and the bankroll.
 function sizeOptions(candidate, riskBudget, bankroll, capPct, cashCap = Infinity) {
@@ -137,10 +150,15 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
   const scale = candidate.speculative ? speculativeScale(candidate) : 1;
   const riskBudget = configuredBankroll * riskPct * scale;
   const cashCap = options.cashCap >= 0 ? options.cashCap : Infinity;
-  const sizing = candidate.market === 'options'
+  let sizing = candidate.market === 'options'
     ? sizeOptions(candidate, riskBudget, configuredBankroll, capPct, cashCap)
     : sizeLinear(candidate, configuredBankroll, riskBudget, capPct, entryPrice, stopDistance, cashCap);
   if (sizing.error) return reject(candidate, sizing.error);
+  if (candidate.market === 'crypto' && sizing.notional < MIN_CRYPTO_NOTIONAL) {
+    const up = sizeUpToMin(candidate, configuredBankroll * riskPct, configuredBankroll * capPct, cashCap, entryPrice, stopDistance);
+    if (!up) return reject(candidate, `MIN_NOTIONAL_TOO_SMALL: $${sizing.notional.toFixed(2)} position is under the $${MIN_CRYPTO_NOTIONAL.toFixed(2)} minimum efficient size`);
+    sizing = up;
+  }
 
   const { positionSize, dollarRisk } = sizing;
   // Entry leg liquidity (cost-authority.js): a strategy's resting limit inside
@@ -165,6 +183,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     notional: sizing.notional,
     riskPct,
     ...(candidate.speculative ? { speculativeScale: scale, speculativeRiskPct: riskPct * scale } : {}),
+    ...(sizing.sizedUpToMin ? { sizedUpToMin: true } : {}), // raised to the $20 crypto minimum (Phase 66)
     // One contract above the profile budget (options on a small account): shown to the user as such.
     ...(sizing.smallAccountCap ? { smallAccountCap: true, smallAccountLabel: SMALL_ACCOUNT.label, budgetRisk: riskBudget } : {}),
     // What it was sized against: the approval step refuses a LIVE execution of
@@ -207,6 +226,7 @@ function resizeOrder(order, amount, { confirmed = false, fractional = false } = 
   const qty = same ? order.positionSize : options ? Math.floor(dollars / perUnit + 1e-9) : roundSize(dollars / perUnit, order.market, fractional || !!order.fractional);
   const notional = qty * perUnit;
   if (!(qty > 0) || (!options && notional < MIN_TRADE_USD)) return reject(order, `AMOUNT_BELOW_MINIMUM: $${dollars.toFixed(2)} buys less than ${options ? 'one contract' : order.market === 'stocks' && !fractional && !order.fractional ? 'one whole share' : `$${MIN_TRADE_USD}`}`);
+  if (order.market === 'crypto' && notional < MIN_CRYPTO_NOTIONAL - 0.005) return reject(order, `AMOUNT_BELOW_MINIMUM: $${notional.toFixed(2)} is under the $${MIN_CRYPTO_NOTIONAL.toFixed(2)} crypto minimum efficient size`);
   if (qty > order.positionSize && !confirmed) return reject(order, `AMOUNT_ABOVE_MAX: $${notional.toFixed(2)} is above the risk engine's $${order.notional.toFixed(2)} ceiling; confirm to proceed`);
   if (order.cashCap >= 0 && notional > order.cashCap + 0.005) return reject(order, `AMOUNT_ABOVE_CASH: $${notional.toFixed(2)} is more than the $${order.cashCap.toFixed(2)} of live cash it was sized against`);
   if (notional > order.sizingBankroll + 0.005) return reject(order, `AMOUNT_ABOVE_BANKROLL: $${notional.toFixed(2)} is more than the $${order.sizingBankroll.toFixed(2)} bankroll it was sized from`);
@@ -232,4 +252,4 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, resizeOrder, isApproved, roundSize, DEFAULT_RISK_PCT, MAX_PREMIUM_R, CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT, MIN_TRADE_USD, SPECULATIVE_SCALE, SMALL_ACCOUNT };
+module.exports = { processCandidate, resizeOrder, isApproved, roundSize, DEFAULT_RISK_PCT, MAX_PREMIUM_R, CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT, MIN_TRADE_USD, MIN_CRYPTO_NOTIONAL, SPECULATIVE_SCALE, SMALL_ACCOUNT };

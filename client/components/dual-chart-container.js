@@ -9,7 +9,8 @@
 // Phase 64: Chart 2 is a full trading surface: its own floating ACTIVE TRADE HUD (own
 // placement, minimize and [Lines] switch; the close button acts on Chart 2's position),
 // [+ Manual Trade SYM] in its header, and its own Open Position / Setup card in the right
-// column under Chart 1's (side()); [✕ Close Split] removes both.
+// column under Chart 1's (side()); [✕ Close Split] removes both. Phase 66: a [Chart 1] | [Chart 2] |
+// [Both] switcher tops the right column (one card by default, remembered per device).
 // Exposes window.SignalDesk.dualChart: { isOn, toggle, toggleButton, setSecondary, wrap, side, symbol }.
 (() => {
   const SD = window.SignalDesk;
@@ -25,6 +26,8 @@
   let selectKey = '';
 
   const save = () => { try { localStorage.setItem(KEY, on ? 'on' : 'off'); } catch { /* this session only */ } };
+  const SIDE_KEY = 'signaldesk.dualSide'; // right column while split: 'chart1' (default) | 'chart2' | 'both'
+  let sideView = (() => { try { return localStorage.getItem(SIDE_KEY) || 'chart1'; } catch { return 'chart1'; } })();
   const paint = () => { for (const b of buttons) { b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', String(on)); } };
 
   function toggle(force) {
@@ -112,7 +115,17 @@
     const order = ((state && state.pending) || []).find((x) => x.asset === symbol);
     const card = SD.positionDetail.panel(o, c2) || SD.oppDetail.right(order || { isWatch: true, ...o, setupType: 'Market Watch', timeframe: '1h' }, c2);
     const tag = (text, node) => el('section', { className: 'dual-side' }, [el('div', { className: 'dual-side-label', textContent: text }), node]);
-    return [tag(`Chart 1 · ${top.replace('-', '/')}`, primaryCard), tag(`Chart 2 · ${symbol.replace('-', '/')}`, card)];
+    const cards = { chart1: tag(`Chart 1 · ${top.replace('-', '/')}`, primaryCard), chart2: tag(`Chart 2 · ${symbol.replace('-', '/')}`, card) };
+    // Phase 66: one card at a time by default ([Chart 1] | [Chart 2] | [Both]), so the context card stays in reach.
+    const seg = (id, label) => {
+      const b = el('button', { type: 'button', className: `dual-seg${sideView === id ? ' is-active' : ''}`, textContent: label, title: id === 'both' ? 'Stack both cards' : `Show only ${label}` });
+      b.setAttribute('aria-pressed', String(sideView === id));
+      b.onclick = () => { sideView = id; try { localStorage.setItem(SIDE_KEY, id); } catch { /* this session only */ } SD.app.refresh(); };
+      return b;
+    };
+    const bar = el('div', { className: 'dual-switch', role: 'group', ariaLabel: 'Right column cards' },
+      [seg('chart1', `Chart 1: ${top.replace('-', '/')}`), seg('chart2', `Chart 2: ${symbol.replace('-', '/')}`), seg('both', 'Both')]);
+    return [bar, ...(sideView === 'both' ? [cards.chart1, cards.chart2] : [cards[sideView] || cards.chart1])];
   }
 
   // primaryHost: the top chart's node. Returns it alone, or both stacked. ctx: Chart 1's (Chart 2's HUD derives its own).

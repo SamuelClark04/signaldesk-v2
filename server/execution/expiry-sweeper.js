@@ -1,31 +1,33 @@
-// Expiry sweeper (Phase 54): every SWEEP_MS, staged setups older than the order
-// guard's approval window (30 minutes from the setup's own timestamp) are
-// discarded with reason EXPIRED and every client gets the new queue, so an
+// Expiry sweeper (Phase 54): every SWEEP_MS, staged setups past their approval window
+// (Phase 66, setup-ttl.js: 8 min Momentum Ignition, 15 min Accumulation Coil / Crypto
+// Intraday, 30 min the rest), or a fast setup the price already ran 1.5% past or through
+// its stop, are discarded with the reason (EXPIRED: unapproved after 8m / PRICE_ESCAPED /
+// INVALIDATED) and every client gets the new queue, so an
 // expired setup never lingers in Approvals, Setups, Today -> Ready for review or
 // the Scanner with a live Approve button. An order whose approval is in flight
 // right now (message-handler's lock) is left alone: the guard decides it.
 const ledger = require('./paper-ledger');
-const { MAX_CANDIDATE_AGE_MS } = require('./order-guard');
+const { staleness } = require('./setup-ttl');
+const prices = require('../market/latest-prices');
 const { recordRejection } = require('./rejection-stats');
 const scanLog = require('./scan-log');
 
 const SWEEP_MS = 30 * 1000;
 let timer = null;
 
-const createdAt = (o) => { const t = typeof o.timestamp === 'number' ? o.timestamp : Date.parse(o.timestamp); return Number.isFinite(t) ? t : o.stagedAt; };
 
 function sweep(broadcast, now = Date.now()) {
   const busy = (id) => { try { return require('./message-handler').isBusy(id); } catch { return false; } };
-  const expired = ledger.getPendingOrders().filter((o) => !(now - createdAt(o) <= MAX_CANDIDATE_AGE_MS) && !busy(o.id));
-  for (const o of expired) {
+  const expired = ledger.getPendingOrders().filter((o) => !busy(o.id)).map((o) => ({ o, why: staleness(o, prices.getLatestPrice(o.asset), now) })).filter((x) => x.why);
+  for (const { o, why } of expired) {
     try {
       ledger.discardOrder(o.id);
-      recordRejection(o.id, 'EXPIRED', o);
-      scanLog.rejected(o.id, 'EXPIRED', o);
+      recordRejection(o.id, why, o);
+      scanLog.rejected(o.id, why, o);
     } catch (err) { console.warn(`[sweeper] ${o.id}: ${err.message}`); }
   }
   if (expired.length) {
-    console.log(`[sweeper] expired ${expired.length} setup(s) past the ${MAX_CANDIDATE_AGE_MS / 60000}-minute approval window: ${expired.map((o) => o.asset).join(', ')}`);
+    console.log(`[sweeper] removed ${expired.length} stale setup(s): ${expired.map((x) => `${x.o.asset} (${x.why})`).join(', ')}`);
     broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
   }
   return expired.length;

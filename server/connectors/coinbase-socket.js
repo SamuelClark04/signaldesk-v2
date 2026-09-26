@@ -33,6 +33,8 @@ function normalizeTick(t, time) {
     price: Number(t.price),
     bid: Number(t.best_bid),
     ask: Number(t.best_ask),
+    bidQty: Number(t.best_bid_quantity), // top-of-book depth (Phase 66); NaN when the feed omits it
+    askQty: Number(t.best_ask_quantity),
     volume24h: Number(t.volume_24_h),
     change24hPct: Number(t.price_percent_chg_24_h),
     time,

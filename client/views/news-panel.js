@@ -32,7 +32,7 @@
 
   function counts(d) {
     if (!Number.isFinite(d.total)) return d.headlineSource || '';
-    return `${d.total} focused headline${d.total === 1 ? '' : 's'} in the last 48h: ${d.bullish} bullish, ${d.bearish} bearish, ${d.neutral} neutral`
+    return `${d.total} headline${d.total === 1 ? '' : 's'} in the last 48h (the Catalyst Feed's news for it): ${d.bullish} bullish, ${d.bearish} bearish, ${d.neutral} neutral`
       + `${d.headlines && d.headlines.length ? ` · the ${d.headlines.length} most recent below` : ''}`;
   }
 
@@ -67,7 +67,7 @@
       el('div', { className: 'news-head' }, [SD.sentiment.badge(o.asset, { compact: true }), el('p', { className: 'sa-muted', textContent: counts(d) })]),
       list.length
         ? el('ol', { className: 'news-list' }, list.map(headline))
-        : el('p', { className: 'sa-muted', textContent: `No focused headlines for ${o.asset} in the last 48 hours: nothing is moving the score.` }),
+        : el('p', { className: 'sa-muted', textContent: `No headlines about ${o.asset} in the last 48 hours: nothing is moving the score.` }),
       el('p', { className: 'sa-muted news-note', textContent: 'Tone is SignalDesk’s keyword reading of each headline (the same scoring as the sentiment gauge). '
         + `Score source: ${d.source}. Articles open on the publisher’s site.` }),
     ];

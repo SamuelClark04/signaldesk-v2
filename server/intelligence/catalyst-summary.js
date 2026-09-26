@@ -88,6 +88,11 @@ function verdict(r, ctx, now) {
   const label = spec.LABEL[r.trigger] || spec.LABEL[r.kind] || 'Trigger';
   const rej = rejections.latestFor(r.symbol, { strategyId: SPEC_ID }, now);
   const cd = spec.cooldownOf(r.symbol, now);
+  // Phase 66: staged, then left unapproved past its window (or the price left it): say so plainly.
+  if (cd && rej && rej.at >= cd.proposedAt - 1000 && /^(EXPIRED|PRICE_ESCAPED|INVALIDATED)/.test(rej.detail || '')) {
+    const m = /after (\d+)m/.exec(rej.detail);
+    return { status: 'EXPIRED', text: `${m ? `Expired (unapproved after ${m[1]}m)` : `Left the queue: ${rejectionText(rej)}`} at ${clock(rej.at)}. The 4-hour cooldown holds re-proposals until ${clock(cd.until)}.` };
+  }
   if (r.trigger && r.score >= spec.CONFIG.qualify) {
     if (cd && rej && rej.at >= cd.proposedAt - 1000) {
       return { status: 'FILTERED', text: `${label} live at ${r.score}/100: proposed at ${clock(cd.proposedAt)}, then filtered by a downstream gate: ${rejectionText(rej)}. `

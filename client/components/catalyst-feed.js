@@ -45,12 +45,13 @@
     const key = r.scope === 'movers' ? 'movers' : `sym:${r.symbol}`;
     const c = cache.get(key) || { askedAt: 0 };
     cache.set(key, { ...c, data: { ...r, receivedAt: Date.now() } });
+    if (r.sentiment && r.sentiment.symbol) SD.sentiment.received(r.sentiment); // Phase 66: the gauge + News & Catalysts count these same headlines
   }
 
   const radarRow = (symbol) => { const r = SD.app && SD.app.state.moonshotRadar; return ((r && r.rows) || []).find((x) => x.symbol === symbol) || null; };
 
   // ---------- Section A: the decision breakdown ----------
-  const STATUS = { STAGED: 'is-go', HELD: 'is-go', QUALIFIES: 'is-go', FILTERED: 'is-stop', COOLDOWN: 'is-warn', LOW_SCORE: 'is-warn', WAITING: 'is-warn', WATCHING: 'is-idle' };
+  const STATUS = { STAGED: 'is-go', HELD: 'is-go', QUALIFIES: 'is-go', FILTERED: 'is-stop', COOLDOWN: 'is-warn', EXPIRED: 'is-warn', LOW_SCORE: 'is-warn', WAITING: 'is-warn', WATCHING: 'is-idle' };
   function basis(symbol, s) {
     const head = el('div', { className: 'cfeed-basis-head' }, [el('strong', { textContent: 'What SignalDesk is basing this move on' }),
       ...(s ? [el('span', { className: `cfeed-status ${STATUS[s.verdict.status] || ''}`, textContent: s.verdict.status.replace('_', ' ') })] : [])]);
@@ -113,7 +114,7 @@
     const src = isCoin ? coin : movers;
     const summary = isCoin ? ((radarRow(symbol) || {}).catalystSummary || (coin && coin.catalystSummary) || null) : null;
     const notes = [
-      fallback ? `No news or Reddit posts on ${display(symbol)} in the last 72 h: showing the top movers' feed.` : null,
+      fallback ? `No news or Reddit posts on ${display(symbol)} in the last 48 h: showing the top movers' feed.` : null,
       src && src.errors && src.errors.length ? `Unavailable: ${src.errors.join('; ')} (last good data kept)` : null,
     ].filter(Boolean);
     return el('section', { className: 'cfeed', id: 'catalyst-feed' }, [
@@ -126,7 +127,7 @@
       !src ? el('p', { className: 'opp-muted', textContent: 'Loading headlines and Reddit threads…' })
         : items.length ? list(items, opts.onPick, symbol, `${scope}|${kind}|${symbol}`)
           : el('p', { className: 'opp-muted', textContent: kind ? `No ${kind === 'news' ? 'news headlines' : 'Reddit posts'} here right now.` : 'Nothing in the feed right now.' }),
-      el('p', { className: 'slog-muted cfeed-foot', textContent: 'Alpaca News (72 h) · CoinDesk · Cointelegraph · Decrypt · Reddit (5 crypto subreddits, RSS: no vote counts) · CoinGecko trending · refreshed every 2 min' }),
+      el('p', { className: 'slog-muted cfeed-foot', textContent: 'Alpaca News (48 h, headline subject) · CoinDesk · Cointelegraph · Decrypt · Reddit (5 crypto subreddits, RSS: no vote counts) · CoinGecko trending · refreshed every 2 min' }),
     ]);
   }
 

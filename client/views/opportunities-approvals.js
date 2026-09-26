@@ -57,7 +57,10 @@
     const best = s.plan || s.t1; // a T1/T2 plan: the blended result
     const rr = best && s.stop && s.stop.net < 0 ? `${(best.net / -s.stop.net).toFixed(2)} : 1${s.plan ? ' blended' : ''}` : '—';
     // The order guard's window runs from the setup's own timestamp, not from staging.
-    const left = Math.max(0, EXPIRY_MS - (Date.now() - (Date.parse(o.timestamp) || o.stagedAt || 0)));
+    // Phase 66: the server's deadline, else the same window (server/execution/setup-ttl.js): 8 min
+    // Ignition / 15 min Coil + Crypto Intraday / 30 min (a freshly staged order arrives without it).
+    const ttl = o.gemTrigger === 'IGNITION' ? 8 * 60000 : o.gemTrigger === 'COIL' || o.strategyId === 'crypto-intraday' ? 15 * 60000 : EXPIRY_MS;
+    const left = Math.max(0, (o.expiresAt || (Date.parse(o.timestamp) || o.stagedAt || 0) + ttl) - Date.now());
     const blocked = live && o.market === 'options';
     const failing = SD.scannerData.blockers(staged, ctx.state); // any failed gate (Expired, Escaped...) blocks approval
     const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked || amount.state === 'blocked' || failing.length > 0,
@@ -75,7 +78,7 @@
         // An options setup is always BOUGHT (a put spread is the bearish one), so it reads BUY + its contract label.
         el('div', { className: 'apv-title' }, [el('strong', { textContent: o.market === 'options' && od && od.label ? `BUY ${od.label}` : `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
-        el('span', { className: `apv-expiry${left < 5 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
+        el('span', { className: `apv-expiry${left < 3 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
       ]),
       el('div', { className: 'apv-grid' }, [
         kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),

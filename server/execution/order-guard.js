@@ -1,15 +1,16 @@
 // Approval guards: the last check between a human "Approve" and a fill.
 // Pure function, no state. Rejects stale setups and setups the price has left.
 const MAX_CANDIDATE_AGE_MS = 30 * 60 * 1000;
+const { ttlOf } = require('./setup-ttl'); // Phase 66: 8 min Ignition / 15 min Coil + Intraday / 30 min
 
 function toMs(ts) {
   return typeof ts === 'number' ? ts : Date.parse(ts);
 }
 
 function validateApproval(candidate, currentLivePrice, now = Date.now()) {
-  // Staleness: the setup was read off the tape more than 30 minutes ago.
+  // Staleness: the setup was read off the tape longer ago than its window (setup-ttl.js).
   const createdAt = toMs(candidate.timestamp);
-  if (!Number.isFinite(createdAt) || now - createdAt > MAX_CANDIDATE_AGE_MS) {
+  if (!Number.isFinite(createdAt) || now - createdAt > Math.min(MAX_CANDIDATE_AGE_MS, ttlOf(candidate))) {
     return { valid: false, reason: 'EXPIRED' };
   }
 
