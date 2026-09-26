@@ -15,6 +15,7 @@ const prices = require('../market/latest-prices');
 const extras = require('./ledger-extras');
 const exits = require('./exit-monitor');
 const live = require('./ledger-live');
+const ratchet = require('./ratchet'); // Phase 68: each long's profit-ratchet plan (derived on read)
 
 const pendingOrders = [];
 const activePositions = [];
@@ -121,6 +122,10 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}, booked = 
     ...extra,
     ...(exitValue === undefined ? {} : { optionsExitValue: exitValue, optionsExitBasis }),
   };
+  // Phase 68 (P1-2): a broker's real fill time (extra.closedAt) is kept when it is plausible
+  // (after the setup was staged, not in the future); otherwise the booking time.
+  const t = entry.closedAt;
+  if (!(Number.isFinite(t) && t >= (pos.stagedAt || pos.openedAt || 0) - 60000 && t <= Date.now() + 60000)) entry.closedAt = Date.now();
   activePositions.splice(i, 1);
   tradeJournal.push(entry);
   store.save();
@@ -158,8 +163,11 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: pric
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
 // and real option contracts their current value (optionMark, option-marks.js).
 // exitQuote: what a manual close would book right now ("Net if closed now"), and its cashout.
-const getActivePositions = () => activePositions.map((p) => ({ ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
-  exitQuote: exitQuotes.issue(p, prices.getLatestPrice(p.asset)) })); // LIVE too (display: [Close at Coinbase] cashout; closing refuses LIVE)
+const getActivePositions = () => activePositions.map((p) => {
+  const v = { ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
+    exitQuote: exitQuotes.issue(p, prices.getLatestPrice(p.asset)) }; // LIVE too (display: [Close at Coinbase] cashout; closing refuses LIVE)
+  return { ...v, ratchet: ratchet.plan(v) }; // Phase 68: +1.0R / +1.5R stop locks (ratchet.js)
+});
 const grossPnlLinear = (pos, exitPrice) => grossPnl(pos, pos.fillPrice, exitPrice);
 const getTradeJournal = () => tradeJournal.map((t) => ({ ...t }));
 
@@ -176,7 +184,7 @@ function updatePositions(mutate) {
 store.attach(LISTS);
 extras.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions, save: store.save, backup: store.backup });
 exits.bind({ activePositions, closePosition, reducePosition, save: store.save });
-live.bind({ activePositions, discardedOrders, isKnown, findIndex, save: store.save });
+live.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, isKnown, findIndex, save: store.save });
 
 module.exports = {
   updatePositions,
@@ -192,6 +200,9 @@ module.exports = {
   setBracketStatus: live.setBracketStatus,
   adoptPosition: live.adoptPosition,
   releaseAdopted: live.releaseAdopted,
+  markSubmitting: live.markSubmitting,
+  recoverable: live.recoverable,
+  recoverLive: live.recoverLive,
   getPendingOrders,
   getActivePositions,
   getTradeJournal,

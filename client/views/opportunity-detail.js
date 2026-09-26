@@ -34,7 +34,7 @@
     const shown = livePrice > 0 ? livePrice : ref ? ref.price : null;
     // Live candles when the chart library loaded; static level chart otherwise.
     // Market Watch on a held symbol (or one with an after-hours options plan) still draws that trade's levels.
-    const held = watch ? ((ctx.state && ctx.state.positions) || []).find((p) => p.asset === o.asset) : null;
+    const held = watch ? SD.positionDetail.pick(ctx.state, o.asset, ctx.positionId) : null; // Phase 68: the picked record's levels
     const overlay = held || (watch ? ((ctx.state && ctx.state.optionsPlans) || []).find((p) => p.asset === o.asset) : null);
     const chart = SD.liveChart.mount(o, { withLevels: !watch, overlay, banner: SD.positionDetail.banner(o, ctx, watch ? WATCH_TEXT : '') })
       || (watch ? SD.levelChart.watch(o, livePrice, WATCH_TEXT) : SD.levelChart.levels(o, livePrice));

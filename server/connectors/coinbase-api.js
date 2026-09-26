@@ -180,6 +180,7 @@ const TERMINAL = new Set(['filled', 'canceled', 'expired', 'failed']);
 // Coinbase statuses are UPPERCASE and spell CANCELLED; normalise to Alpaca-style.
 const normStatus = (s) => String(s || 'unknown').toLowerCase().replace('cancelled', 'canceled');
 const numOrNull = (x) => (x === undefined || x === null || x === '' ? null : Number(x));
+const timeOrNull = (x) => { const t = Date.parse(x); return Number.isFinite(t) ? t : null; }; // Phase 68: last_fill_time (ms)
 
 async function fetchOrder(auth, orderId) {
   const body = await cbFetch(auth, 'GET', `${HISTORICAL_PATH}${encodeURIComponent(orderId)}`);
@@ -212,7 +213,7 @@ async function getOrderStatus(brokerId, opts = {}) {
         avgFillPrice: numOrNull(a.average_filled_price),
         fees: numOrNull(a.total_fees) || 0,
         kind: null,
-        brokerExitId: a.order_id || exitId,
+        brokerExitId: a.order_id || exitId, filledAt: timeOrNull(a.last_fill_time),
       };
     }
     const status = normStatus(entry.status);
@@ -237,7 +238,7 @@ async function getOrder(orderId) {
   try {
     const o = await fetchOrder(auth, orderId);
     const status = normStatus(o.status);
-    return { ok: true, status, filledQty: numOrNull(o.filled_size) || 0, avgFillPrice: numOrNull(o.average_filled_price), fees: numOrNull(o.total_fees) || 0, terminal: TERMINAL.has(status) };
+    return { ok: true, status, filledQty: numOrNull(o.filled_size) || 0, avgFillPrice: numOrNull(o.average_filled_price), fees: numOrNull(o.total_fees) || 0, terminal: TERMINAL.has(status), filledAt: timeOrNull(o.last_fill_time) };
   } catch (err) {
     return failure(err);
   }

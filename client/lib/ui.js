@@ -9,12 +9,11 @@
   // Prices: thousands separators (83,900.00) with a fixed number of decimals per
   // market (2, or 4 for sub-$10 crypto). en-US pinned, like money() below.
   // Sub-cent coins (BONK, PEPE ~ $0.00001) get ~4 significant digits instead of 0.0000.
-  const decimals = (o, x) => {
-    if (o.market !== 'crypto') return 2;
-    const ref = o.entryPrice > 0 ? o.entryPrice : Math.abs(x);
-    if (!(ref < 1)) return ref < 10 ? 4 : 2;
-    return Math.min(10, Math.max(4, 3 - Math.floor(Math.log10(ref))));
-  };
+  // Phase 68: one rule for text and the chart's price scale (live-chart.js): >= $10: 2; $1-10:
+  // 4; under $1: at least 4 significant digits (0.005240, 0.002116), 4-8 decimals (Coinbase
+  // quotes down to 1e-8, so 0.00000912).
+  const decimalsFor = (ref) => (!(ref > 0) ? 2 : !(ref < 1) ? (ref < 10 ? 4 : 2) : Math.min(8, Math.max(4, 3 - Math.floor(Math.log10(ref)))));
+  const decimals = (o, x) => (o.market !== 'crypto' ? 2 : decimalsFor(o.entryPrice > 0 ? o.entryPrice : Math.abs(x)));
   const price = (x, o) => {
     if (!Number.isFinite(x)) return '—';
     const d = decimals(o || {}, x);
@@ -64,5 +63,5 @@
     $(`${name}-empty`).hidden = rows.length > 0;
   }
 
-  SD.ui = { $, el, td, price, money, size, signed, pnlClass, clock, age, dirCell, assetCell, setTable };
+  SD.ui = { $, el, td, price, decimalsFor, money, size, signed, pnlClass, clock, age, dirCell, assetCell, setTable };
 })();

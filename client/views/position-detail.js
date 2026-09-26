@@ -17,6 +17,18 @@
   const ulPx = (x) => price(x, { market: 'stocks', entryPrice: x });
   const isRealOption = (p) => p.market === 'options' && p.optionsData && !!p.optionsData.contract;
   const heldFor = (state, asset) => ((state && state.positions) || []).filter((p) => p.asset === asset);
+  // Phase 68: several open records on one symbol (ETH/USD Adopted + Live): the one picked (id),
+  // else the bracketed LIVE trade, else any LIVE record, else the first.
+  const pick = (state, asset, id) => { const h = heldFor(state, asset); return h.find((p) => p.id === id) || h.find((p) => p.execution === 'LIVE' && !p.adopted) || h.find((p) => p.execution === 'LIVE') || h[0] || null; };
+  const shortVenue = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? 'Live' : 'Paper');
+  function switcher(held, chosen, ctx) { // [Position 1: Live] | [Position 2: Adopted]
+    return el('div', { className: 'pos-switch', role: 'group', ariaLabel: 'Open positions on this symbol' }, held.map((p, i) => {
+      const b = el('button', { type: 'button', className: `pos-switch-btn${p.id === chosen.id ? ' is-active' : ''}`, textContent: `Position ${i + 1}: ${shortVenue(p)}`, title: p.id });
+      b.setAttribute('aria-pressed', String(p.id === chosen.id));
+      b.onclick = () => { if (ctx.onPickPosition) ctx.onPickPosition(p.id); };
+      return b;
+    }));
+  }
   // Phase 58B: a spread opened before the net-delta floor (migrated, entry net delta < 0.12).
   const lowDelta = (p) => { const od = p.optionsData || {}; const d = Math.abs(od.netDelta ?? (od.stats ? od.stats.netDelta : NaN)); return od.migratedFrom && Math.round(d * 100) < 12 ? d : null; }; // as displayed (2 dp)
   const venueOf = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? `Live · ${p.broker}` : 'Paper');
@@ -124,6 +136,7 @@
       kv(opt ? `${p.asset} stop` : 'Stop', price(p.invalidation, p), 'text-short'),
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
       kv('Opened', p.openedAt ? new Date(p.openedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'),
+      ...[SD.ratchet.status(p), SD.ratchet.button(p, m, ctx)].filter(Boolean), // Phase 68: [🛡️ Lock Break-Even] / [🛡️ Lock Profit]
       exitButton(p, m, ctx),
       ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p, m) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p, m) })] : []),
     ]);
@@ -133,7 +146,8 @@
   function panel(o, ctx) {
     const held = heldFor(ctx.state, o.asset);
     if (!held.length) return null;
-    const opt = held.some((p) => p.market === 'options');
+    const chosen = pick(ctx.state, o.asset, ctx.positionId);
+    const opt = chosen.market === 'options';
     return el('aside', { className: 'opp-right' }, [
       el('header', { className: 'opp-right-head' }, [
         SD.scannerDetail.badge(o.asset, true),
@@ -141,7 +155,8 @@
           el('span', { className: 'opp-name', textContent: `Open position${held.length > 1 ? `s (${held.length})` : ''}` })]),
         el('span', { className: 'opp-pill is-ready', textContent: 'In trade' }),
       ]),
-      ...held.map((p) => positionBlock(p, ctx.livePrice, ctx)),
+      ...(held.length > 1 ? [switcher(held, chosen, ctx)] : []),
+      positionBlock(chosen, ctx.livePrice, ctx),
       el('p', { className: 'opp-muted', textContent: `${opt ? 'The chart shows the underlying stock. ' : ''}Manual exit: the button above, or the trade panel on the chart (it can be moved or minimized).` }),
     ]);
   }
@@ -156,5 +171,5 @@
     return held.length ? '' : fallback;
   }
 
-  SD.positionDetail = { lowDelta, panel, banner, isRealOption, closeText };
+  SD.positionDetail = { lowDelta, panel, banner, isRealOption, closeText, pick };
 })();

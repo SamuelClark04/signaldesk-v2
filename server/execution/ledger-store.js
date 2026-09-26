@@ -57,6 +57,23 @@ function cleanSettings(input) {
 }
 
 // ---------- Persistence ----------
+// Phase 68 (P1-4): antivirus / file-sync tools briefly lock files on Windows (EPERM / EBUSY /
+// EACCES on the rename): retry up to RETRY_MS.length times, pausing 25-100 ms (synchronous: a
+// save is one call). Still failing: logged, and one background re-save is scheduled.
+const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RETRY_MS = [25, 50, 75, 100, 100];
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function renameRetry(from, to) {
+  for (let i = 0; ; i += 1) {
+    try { return fs.renameSync(from, to); } catch (err) {
+      if (!RETRY_CODES.has(err.code) || i >= RETRY_MS.length) throw err;
+      pause(RETRY_MS[i]);
+    }
+  }
+}
+let retryTimer = null;
+const health = { ok: true, error: null, at: null };
+
 // Write to a temp file then rename, so a crash mid-write never leaves a torn file.
 // A failed save is logged, not thrown: the in-memory ledger stays authoritative.
 function save() {
@@ -66,9 +83,12 @@ function save() {
     fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
     const tmp = `${STATE_PATH}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-    fs.renameSync(tmp, STATE_PATH);
+    renameRetry(tmp, STATE_PATH);
+    Object.assign(health, { ok: true, error: null, at: Date.now() });
   } catch (err) {
-    console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}`);
+    Object.assign(health, { ok: false, error: err.message, at: Date.now() });
+    console.error(`[ledger] FAILED to save state to ${STATE_PATH}: ${err.message}${retryTimer ? '' : ' (retrying in 2 s)'}`);
+    if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; save(); }, 2000); retryTimer.unref(); }
   }
 }
 
@@ -146,4 +166,5 @@ function backup(tag) {
   return dest;
 }
 
-module.exports = { attach, save, backup, getSettings, updateSettings };
+module.exports = {
+  saveHealth: () => ({ ...health }), RETRY_MS, attach, save, backup, getSettings, updateSettings };

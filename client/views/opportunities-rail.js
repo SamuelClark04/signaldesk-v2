@@ -44,7 +44,7 @@
       ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: p.market === 'options' && !(p.optionsData && p.optionsData.contract) ? 'Simulated'
         : m.live && p.market !== 'options' ? '—' : 'No price' })
       : el('span', { className: `opp-pos-pnl ${pnlClass(shown)}`, textContent: signed(shown, money) });
-    const active = view.isWatch && view.watchSymbol === p.asset;
+    const active = view.isWatch && view.watchSymbol === p.asset && (!view.positionId || view.positionId === p.id); // Phase 68: the record, not the symbol
     const btn = el('button', { type: 'button', className: `opp-watch opp-pos${active ? ' is-active' : ''}` }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(p) }),
       el('span', { className: `opp-heat is-position${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: `${p.direction === 'short' ? 'Short · ' : ''}${venue}` }),
@@ -58,7 +58,7 @@
       ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}) vs ${p.optionsData.debit} paid · ${isNet ? 'net P/L after fees' : 'P/L before fees'}`
       : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${isNet ? ` · net P/L after fees (gross ${signed(f.gross, money)})` : m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));
-    btn.onclick = (e) => (e.shiftKey && SD.dualChart.isOn() ? SD.dualChart.setSecondary(p.asset) : view.onOpenPosition(p)); // Shift: the Dual Chart's bottom pane
+    btn.onclick = (e) => (e.shiftKey && SD.dualChart.isOn() ? SD.dualChart.setSecondary(p.asset, p.id) : view.onOpenPosition(p)); // Shift: the Dual Chart's bottom pane
     return btn;
   }
 

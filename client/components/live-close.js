@@ -77,6 +77,10 @@
 
   // Phase 67: nothing protects this position at the broker, or a sell's outcome is unknown.
   function armor(p) {
+    if (p.stopGap) { // Phase 68: Coinbase's stop-limit sells at most 5% under the trigger
+      return el('div', { className: 'armor-warn', role: 'alert' }, [el('strong', { textContent: 'STOP_GAP_UNFILLED: ' }),
+        `Live price fell > 5% below stop threshold without fill; check Coinbase order book (bid ${price(p.stopGap.bid, p)}, stop ${price(p.stopGap.stop, p)}).`]);
+    }
     if (p.marketExitPending) {
       return el('div', { className: 'armor-warn', role: 'alert' }, [el('strong', { textContent: 'SELL UNCONFIRMED: ' }),
         `a market sell was sent to ${p.broker} without a clear answer. SignalDesk checks ${p.broker} every pass and books the sale or re-places the stop/target. Check ${p.broker}.`]);
@@ -88,9 +92,10 @@
 
   let flagged = null; // ids UNARMORED on the last update (null: none seen yet)
   function watch(positions) {
-    const now = new Set((positions || []).filter((p) => p.bracketStatus === 'UNARMORED').map((p) => p.id));
+    const now = new Set((positions || []).flatMap((p) => [p.bracketStatus === 'UNARMORED' ? `u:${p.id}` : null, p.stopGap ? `g:${p.id}` : null]).filter(Boolean));
     for (const p of positions || []) {
-      if (now.has(p.id) && !(flagged && flagged.has(p.id))) toast(`${p.asset}: UNARMORED: Stop/target bracket is not active on ${p.broker}. Set a stop there or close the position.`, false);
+      if (now.has(`u:${p.id}`) && !(flagged && flagged.has(`u:${p.id}`))) toast(`${p.asset}: UNARMORED: Stop/target bracket is not active on ${p.broker}. Set a stop there or close the position.`, false);
+      if (now.has(`g:${p.id}`) && !(flagged && flagged.has(`g:${p.id}`))) toast(`${p.asset}: STOP_GAP_UNFILLED: Live price fell > 5% below stop threshold without fill; check Coinbase order book.`, false);
     }
     flagged = now;
   }
@@ -119,5 +124,5 @@
     return b;
   }
 
-  SD.liveClose = { can, button, received, reset, armor, watch, busy: (id) => busy.has(id), TIMEOUT_MS };
+  SD.liveClose = { can, button, received, reset, armor, watch, toast, busy: (id) => busy.has(id), TIMEOUT_MS };
 })();

@@ -33,4 +33,13 @@ function validateApproval(candidate, currentLivePrice, now = Date.now()) {
   return { valid: true };
 }
 
-module.exports = { validateApproval, MAX_CANDIDATE_AGE_MS };
+// Phase 68: an AUTOMATED setup (a strategy or the Portfolio Pilot) on a coin / stock that already
+// has an open LIVE position (bracketed or adopted) would stack a second record on the same
+// broker balance. Manual Trade Ticket orders ("manual:" ids) are the user's explicit choice.
+function stackingConflict(order, positions) {
+  if (!order || String(order.id).startsWith('manual:')) return null;
+  const held = (positions || []).find((p) => p.asset === order.asset && p.execution === 'LIVE' && p.id !== order.id);
+  return held ? `ALREADY_HOLDING: ${order.asset} already has an open ${held.adopted ? 'adopted' : 'LIVE'} position (${held.id}); an automated setup would stack a second one on the same coin` : null;
+}
+
+module.exports = { validateApproval, stackingConflict, MAX_CANDIDATE_AGE_MS };

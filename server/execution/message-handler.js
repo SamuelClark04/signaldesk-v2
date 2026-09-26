@@ -179,6 +179,8 @@ function createMessageHandler({ send, broadcast }) {
       return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
     }
     if (handlePilot(ws, msg) || handleManual(ws, msg) || require('../data/news-feed').handle(ws, msg, send)) return undefined; // + GET_CATALYST_FEED (Phase 62)
+    // Phase 68: RATCHET_STOP (profit locks) and WATCH_SYMBOLS (1 s chart ticks).
+    if (require('./ratchet').handle(ws, msg, send, broadcast, ledger) || require('./chart-ticks').handle(ws, msg, send)) return undefined;
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);
     if (msg.type === 'RUN_SCAN') return handleRunScan(ws);
     if (msg.type === 'RESET_LEDGER') return handleReset(ws, msg);

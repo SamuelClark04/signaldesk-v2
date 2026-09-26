@@ -150,6 +150,8 @@
     MANUAL_TRADE_RESULT: (p) => SD.manualTicket.received('MANUAL_TRADE_RESULT', p),
     MANUAL_OPTIONS: (p) => SD.manualTicket.received('MANUAL_OPTIONS', p),
     LIVE_CLOSE_RESULT: (p) => SD.liveClose.received(p),
+    RATCHET_RESULT: (r) => SD.ratchet.received(r), // Phase 68: [🛡️ Lock Break-Even] / [🛡️ Lock Profit]
+    TICKS: (t) => SD.liveChart.tick(t && t.prices), // Phase 68: 1 s ticks for the charted symbols (candles only)
   };
 
   function setConn(state, label) {
@@ -162,7 +164,7 @@
     setConn('connecting', 'Connecting…');
     const ws = new WebSocket(WS_URL);
     socket = ws;
-    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.liveClose.reset(); refreshView(); }); // Phase 67: no close stays "Closing…" across a reconnect
+    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.liveClose.reset(); SD.ratchet.reset(); SD.liveChart.announce(true); refreshView(); }); // Phase 67/68: nothing stays busy across a reconnect; re-watch the charts
     ws.addEventListener('message', (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }

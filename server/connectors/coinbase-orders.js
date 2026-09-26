@@ -15,6 +15,8 @@
 //                may have accepted it); a refusal or a 4xx is a definite "not placed".
 //   findOrderByClientId  Phase 67: the order sent with a client_order_id (List Orders,
 //                filtered by product / side / start date), to settle an uncertain sell.
+//   listOrders   Phase 68: List Orders since a time ({ side, products }), normalised (the boot
+//                scan for orders placed just before a crash: order-recovery.js).
 // USD vs USDC (Phase 54): the account's cash is USD + USDC, and Coinbase books
 // USDC pairs separately. A BUY is routed to <BASE>-USDC when the USDC balance
 // exceeds USD, or covers the order when USD cannot; otherwise <BASE>-USD. The
@@ -83,7 +85,9 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
       },
     });
   } catch (err) {
-    return failure(err);
+    // Phase 68: no clear answer (timeout / 429 / 5xx) may still be an order at Coinbase: the
+    // setup keeps its submit mark and the recovery scan (order-recovery.js) looks it up.
+    return { ...failure(err), uncertain: !err.status || err.status === 429 || err.status >= 500 };
   }
   // Coinbase reports rejections with HTTP 200 and success: false.
   if (!body || body.success !== true) return rejection(body, 'order');
@@ -134,24 +138,36 @@ async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
   return orderId ? { ok: true, brokerId: orderId } : { ok: false, error: 'Coinbase: bracket response had no order_id' };
 }
 
-// The SELL order sent as `clientOrderId` on `product` since `sinceMs`: { ok, order } (order null:
-// not listed), or { ok: false, error } when Coinbase could not be asked.
-async function findOrderByClientId(product, clientOrderId, sinceMs) {
+const summary = (o) => {
+  const status = String(o.status || 'unknown').toLowerCase().replace('cancelled', 'canceled');
+  const at = Date.parse(o.last_fill_time);
+  return { orderId: o.order_id, clientOrderId: o.client_order_id, product: o.product_id, side: o.side, status, filledQty: Number(o.filled_size) || 0,
+    avgFillPrice: Number(o.average_filled_price) || null, fees: Number(o.total_fees) || 0, terminal: ['filled', 'canceled', 'expired', 'failed'].includes(status),
+    filledAt: Number.isFinite(at) ? at : null };
+};
+
+// Orders since `sinceMs` (5 min of slack) on `products` (all when empty), one side or both:
+// { ok, orders: [summary] } or { ok: false, error }.
+async function listOrders({ sinceMs, side = null, products = [] } = {}) {
   const auth = loadAuth();
   if (auth.error) return { ok: false, error: auth.error };
   try {
     const since = new Date(Math.max(0, sinceMs - 5 * 60 * 1000)).toISOString();
-    const q = `?product_ids=${encodeURIComponent(product)}&order_side=SELL&start_date=${encodeURIComponent(since)}&limit=100`;
+    const q = `?${products.map((p) => `product_ids=${encodeURIComponent(p)}&`).join('')}${side ? `order_side=${side}&` : ''}start_date=${encodeURIComponent(since)}&limit=250`;
     const body = await cbFetch(auth, 'GET', `${ORDERS_PATH}/historical/batch`, { query: q });
     if (!body || !Array.isArray(body.orders)) throw new Error('Coinbase: unexpected orders response');
-    const o = body.orders.find((x) => x.client_order_id === String(clientOrderId));
-    if (!o) return { ok: true, order: null };
-    const status = String(o.status || 'unknown').toLowerCase().replace('cancelled', 'canceled');
-    return { ok: true, order: { orderId: o.order_id, status, filledQty: Number(o.filled_size) || 0, avgFillPrice: Number(o.average_filled_price) || null,
-      fees: Number(o.total_fees) || 0, terminal: ['filled', 'canceled', 'expired', 'failed'].includes(status) } };
+    return { ok: true, orders: body.orders.map(summary) };
   } catch (err) {
     return failure(err);
   }
 }
 
-module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId };
+// The SELL order sent as `clientOrderId` on `product` since `sinceMs`: { ok, order } (order null:
+// not listed), or { ok: false, error } when Coinbase could not be asked.
+async function findOrderByClientId(product, clientOrderId, sinceMs) {
+  const r = await listOrders({ sinceMs, side: 'SELL', products: [product] });
+  if (!r.ok) return r;
+  return { ok: true, order: r.orders.find((o) => o.clientOrderId === String(clientOrderId)) || null };
+}
+
+module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId, listOrders };

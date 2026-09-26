@@ -1,5 +1,6 @@
 // Exit management for the pipeline (Phase 67, out of pipeline.js).
-//   reconcile(broadcast)  LIVE positions against broker truth (reconciler.js): real entry
+//   reconcile(broadcast)  first, orders Coinbase took that the ledger never recorded (Phase 68,
+//                         order-recovery.js), then LIVE positions against broker truth (reconciler.js): real entry
 //                         fills, broker exits (whole or an ended partial), voided entries and
 //                         the bracket check (UNARMORED). It runs FIRST in every pass and once
 //                         right at boot, so strategies, sizing and staging never see a position
@@ -12,6 +13,7 @@ const prices = require('../market/latest-prices');
 const optionsData = require('../connectors/options-data');
 const { legSymbols } = require('./option-marks');
 const { reconcileLivePositions } = require('./reconciler');
+const recovery = require('./order-recovery'); // Phase 68 (P1-5): orders Coinbase took that the ledger never recorded
 
 const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `
   + `net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)${t.exitLeg ? ` via ${t.exitLeg}` : ''}`);
@@ -26,6 +28,12 @@ function reconcile(broadcast = () => {}) {
   if (running) return running;
   running = (async () => {
     const out = { positionsChanged: false, journalChanged: false };
+    try {
+      const rec = await recovery.recover(ledger);
+      if (rec.some((r) => r.action === 'recovered')) { out.positionsChanged = true; broadcast('QUEUE_UPDATED', ledger.getPendingOrders()); }
+    } catch (err) {
+      console.error('[pipeline] order recovery failed:', err.message);
+    }
     try {
       for (const r of await reconcileLivePositions(ledger.getActivePositions(), ledger)) {
         if (r.trade) { logClose(r.trade); out.journalChanged = true; } // closed, or an ended partial exit booked

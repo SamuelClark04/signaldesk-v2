@@ -124,7 +124,10 @@ function start(ledger, broadcast) {
     try {
       const quotes = {};
       const book = {}; // Phase 65: each held symbol's last / bid of these quotes, so the client marks from ONE tick
-      for (const p of ledger.getActivePositions()) {
+      const list = ledger.getActivePositions();
+      // Phase 68: +1R / +1.5R reached, stop gaps (ratchet.js): every client sees the change at once.
+      if (require('./ratchet').watch(ledger, list)) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+      for (const p of list) {
         if (!p.exitQuote) continue;
         quotes[p.id] = p.exitQuote;
         if (p.exitQuote.underlying > 0 && p.market !== 'options') book[p.asset] = { last: p.exitQuote.underlying, bid: p.exitQuote.bid, at: p.exitQuote.at };

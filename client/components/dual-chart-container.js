@@ -19,6 +19,7 @@
 
   let on = (() => { try { return localStorage.getItem(KEY) === 'on'; } catch { return false; } })();
   let secondary = null; // the bottom chart's symbol (null: the default)
+  let secondaryPos = null; // Phase 68: the open record Chart 2 shows when its symbol has several
   let pane = null; // the second chart instance (live-chart.js makeChart)
   let hud = null; // its ACTIVE TRADE HUD (trade-hud.js create)
   const buttons = new Set();
@@ -43,8 +44,9 @@
     paint();
     return b;
   }
-  function setSecondary(symbol) {
+  function setSecondary(symbol, positionId = null) {
     secondary = symbol;
+    secondaryPos = positionId; // Phase 68: a Shift-clicked position row shows THAT record
     if (!on) toggle(true); else SD.app.refresh();
   }
 
@@ -69,14 +71,15 @@
 
   const marketOf = (state, symbol) => { const p = ((state && state.positions) || []).find((x) => x.asset === symbol); return symbol.includes('-') ? 'crypto' : p ? p.market : 'stocks'; };
   // Chart 2's own context: its symbol's live price (the HUD / card marks), everything else as Chart 1's.
-  const ctxFor = (ctx, state, symbol) => ({ ...ctx, livePrice: state && state.prices ? state.prices[symbol] : null, refPrice: state && state.refPrices ? state.refPrices[symbol] : null });
+  const ctxFor = (ctx, state, symbol) => ({ ...ctx, livePrice: state && state.prices ? state.prices[symbol] : null, refPrice: state && state.refPrices ? state.refPrices[symbol] : null,
+    positionId: secondaryPos, onPickPosition: (id) => { secondaryPos = id; if (ctx.rerender) ctx.rerender(); } });
 
   function bottom(state, top, ctx) {
     const symbol = symbolFor(state, top);
     if (!pane) pane = SD.liveChart.create({ tf: '15m', levelsKey: 'signaldesk.chartLevels.2' });
     if (!hud) hud = SD.tradeHud.create({ id: 'chart2', storageKey: 'signaldesk.tradeHud.2', pane: () => pane, title: 'Chart 2 · active trade' });
     const order = ((state && state.pending) || []).find((o) => o.asset === symbol);
-    const position = ((state && state.positions) || []).find((p) => p.asset === symbol);
+    const position = SD.positionDetail.pick(state, symbol, secondaryPos);
     const market = marketOf(state, symbol);
     const host = pane.mount(order || { isWatch: true, asset: symbol, market, setupType: 'Chart 2', timeframe: pane.timeframe() },
       { withLevels: !!order, overlay: order ? null : position || null, banner: '' });

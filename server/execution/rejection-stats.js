@@ -13,6 +13,7 @@ const { MAX_FEE_DRAG, MAX_FEE_DRAG_CRYPTO } = require('../risk/cost-authority');
 
 const BUCKETS = [
   [/^Cost ceiling exceeded/i, `Fee drag over cap (${MAX_FEE_DRAG_CRYPTO}R crypto, ${MAX_FEE_DRAG}R Moonshots / others)`],
+  [/^ALREADY_HOLDING/, 'Already holding this coin (no stacking)'],
   [/^MIN_NOTIONAL_TOO_SMALL/, 'Crypto position under the $20 minimum'],
   [/^THIN_TOP_OF_BOOK/, 'Top of book too thin for the order'],
   [/^WIDE_CRYPTO_SPREAD/, 'Crypto bid/ask spread over cap (0.45%; Moonshots 0.80%)'],

@@ -28,6 +28,10 @@
   const DEFAULT_WATCH = 'BTC-USD'; // crypto streams 24/7, so there is always a live price
   let watchSymbol = DEFAULT_WATCH;
   let manualWatch = false; // user picked a watch symbol while setups exist
+  // Phase 68: the open record shown when a symbol has several (e.g. ETH/USD Adopted + Live): the
+  // one clicked in the rail or picked on the card's switcher; null = the default (the bracketed
+  // LIVE trade first: SD.positionDetail.pick).
+  let watchPositionId = null;
   const marketOf = (symbol) => (symbol.includes('-') ? 'crypto' : 'stocks');
   const marketWatch = (symbol) => ({ isWatch: true, asset: symbol, market: marketOf(symbol), setupType: 'Market Watch', timeframe: '1h' });
 
@@ -105,44 +109,30 @@
     rerender();
   }
 
-  // ---------- Chart rotation (command center) ----------
-  // Every ROTATE_MS the chart moves to the next queued setup / Market Watch symbol
-  // (the rail's current list, in its order). Pause / Play in the toolbar (kept per
-  // browser). It never switches while the pointer is over the rail or the risk &
-  // execution panel, while an action is in flight, or while the symbol picker is
-  // open; any click in the workspace restarts the countdown.
-  const ROTATE_MS = 12000;
+  // ---------- Chart rotation (command center): opportunities-rotation.js ----------
   let rotation = []; // [{ id } | { symbol }] from the last Setups render
-  const rotator = SD.autoCycle({
-    periodMs: ROTATE_MS, key: 'signaldesk.chartRotation',
-    canRun: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && assetFilter !== 'moonshots' && !M().isMobile() && rotation.length > 1 && !inFlight.size
-      && !document.querySelector('.opp-rail:hover, .opp-right:hover, .trade-hud:hover') && !(document.activeElement && document.activeElement.id === 'opp-symbol-select')
-      && !(document.activeElement && document.activeElement.classList.contains('ta-input'))), // typing a Trade Amount
-    advance: () => {
-      const i = rotation.findIndex((r) => (r.id ? r.id === activeId : !activeId && r.symbol === watchSymbol));
-      const next = rotation[(i + 1) % rotation.length];
-      if (next.id) { activeId = next.id; manualWatch = false; } else { watchSymbol = next.symbol; activeId = null; manualWatch = true; }
+  const rotator = SD.oppRotation.create({
+    ready: () => !!(mounted && mounted.container.offsetParent && subTab === 'setups' && assetFilter !== 'moonshots' && !M().isMobile() && !inFlight.size),
+    list: () => rotation,
+    isCurrent: (r) => (r.id ? r.id === activeId : !activeId && r.symbol === watchSymbol),
+    go: (next) => {
+      if (next.id) { activeId = next.id; manualWatch = false; } else { watchSymbol = next.symbol; activeId = null; manualWatch = true; watchPositionId = null; }
       rerender();
     },
+    rerender,
   });
-  function rotationButton() {
-    const on = rotator.playing();
-    const b = el('button', { type: 'button', className: `btn opp-rotate${on ? ' is-on' : ''}`, textContent: on ? '⏸ Pause rotation' : '▶ Play rotation',
-      title: on ? `Auto-rotating the chart every ${ROTATE_MS / 1000}s through the queue and Market Watch` : 'Chart rotation paused' });
-    b.setAttribute('aria-pressed', String(on));
-    b.onclick = () => { rotator.setPlaying(!on); rerender(); };
-    return b;
-  }
 
   // Rail clicks (opportunities-rail.js): a queued setup, a watch symbol, or an open
   // position (charted as Market Watch, where the Active Trade HUD shows it).
   // On an iPhone a tap also jumps to the pane that shows it: a setup's Order & Risk, a symbol's Chart.
   const onSelectSetup = (id) => { activeId = id; manualWatch = false; M().setPane('order'); rerender(); };
-  const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; M().setPane('chart'); rerender(); };
+  const onWatch = (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; watchPositionId = null; M().setPane('chart'); rerender(); };
   function onOpenPosition(p) {
     if (!matchesAsset(p.market) || !watchMarketOk(marketOf(p.asset)) || !matchesSearch(p.asset, p.asset.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
-    onWatch(p.asset);
+    watchSymbol = p.asset; activeId = null; manualWatch = true; watchPositionId = p.id; // Phase 68: THIS record, not just the symbol
+    M().setPane('chart'); rerender();
   }
+  const onPickPosition = (id) => { watchPositionId = id; rerender(); }; // the card's [Position 1 | Position 2] switcher
   function onSearch(value) { search = value.trim().toLowerCase(); searchRaw = value; rerender(); }
 
   // ---------- Setups workspace (3 columns, always) ----------
@@ -165,8 +155,9 @@
     const active = visible.find((o) => o.id === activeId) || marketWatch(watchSymbol);
     rotation = [...visible.map((o) => ({ id: o.id })), ...watchable.filter((s) => !visible.some((o) => o.asset === s)).map((symbol) => ({ symbol }))];
 
+    const picked = active.isWatch ? SD.positionDetail.pick(state, active.asset, watchPositionId) : null; // Phase 68
     const rail = SD.oppRail.rail(state, { assetFilter, searchRaw, searching: !!search, filtered: assetFilter !== 'all' || !!search,
-      real, visible, activeId, watch, watchSymbol, isWatch: !!active.isWatch, inFlight, matchesAsset,
+      real, visible, activeId, watch, watchSymbol, positionId: picked ? picked.id : null, isWatch: !!active.isWatch, inFlight, matchesAsset,
       onSearch, onFilter: setFilter, onSelectSetup, onWatch, onOpenPosition, onScannerLog: () => { subTab = 'scanner'; rerender(); } });
     const ctx = {
       livePrice: state.prices ? state.prices[active.asset] : null,
@@ -179,6 +170,7 @@
       onDismiss,
       onClosePosition,
       closing,
+      positionId: picked ? picked.id : null, onPickPosition, // Phase 68: which open record the card / HUD / chart levels show
       isSaved,
       onToggleSave,
       onPickSymbol,
@@ -197,7 +189,7 @@
   // Scanner / Saved: Review and Watch jump back into the Setups workspace; bookmarks toggle.
   const nav = {
     onReview: (id) => { activeId = id; manualWatch = false; subTab = 'setups'; if (assetFilter === 'moonshots') assetFilter = 'crypto'; M().setPane('order'); rerender(); },
-    onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; subTab = 'setups'; if (assetFilter === 'moonshots') assetFilter = 'crypto'; M().setPane('chart'); rerender(); },
+    onWatch: (symbol) => { watchSymbol = symbol; activeId = null; manualWatch = true; watchPositionId = null; subTab = 'setups'; if (assetFilter === 'moonshots') assetFilter = 'crypto'; M().setPane('chart'); rerender(); },
     send: (msg) => { if (transport.isOnline()) transport.send(msg); },
     rerender: () => rerender(),
   };
@@ -208,7 +200,7 @@
   function onPickSymbol(symbol) {
     if (!watchMarketOk(marketOf(symbol)) || !matchesSearch(symbol, symbol.replace('-', '/'))) { assetFilter = 'all'; search = ''; searchRaw = ''; }
     const queued = mounted && mounted.state.pending.find((o) => o.asset === symbol && matchesAsset(o.market));
-    if (queued) { activeId = queued.id; manualWatch = false; } else { watchSymbol = symbol; activeId = null; manualWatch = true; }
+    if (queued) { activeId = queued.id; manualWatch = false; } else { watchSymbol = symbol; activeId = null; manualWatch = true; watchPositionId = null; }
     rerender();
   }
 
@@ -265,7 +257,7 @@
     container.replaceChildren(
       // The Scanner has its own Market filter; Setups (and the radar) get "Scan markets" + the asset tabs.
       el('div', { className: 'opp-toolbar' }, subTab === 'scanner' && !moon ? [tabs]
-        : [tabs, el('div', { className: 'opp-toolbar-right' }, [...(subTab === 'setups' && !moon ? [rotationButton()] : []), scanBtn, assetTabs])]),
+        : [tabs, el('div', { className: 'opp-toolbar-right' }, [...(subTab === 'setups' && !moon ? [rotator.button()] : []), scanBtn, assetTabs])]),
       ...(notice ? [el('div', { className: 'notice opp-notice', textContent: notice })] : []),
       moon ? SD.moonshots.render(state, moonCtx) : subTab === 'setups' ? setups(state) : subTab === 'approvals' ? approvals(state) : subTab === 'scanner' ? scanner(state)
         : SD.oppSaved.render(state, { ...nav, online: transport.isOnline() }),

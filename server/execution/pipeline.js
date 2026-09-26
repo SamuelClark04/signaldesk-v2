@@ -17,6 +17,7 @@ const { computeProximity } = require('../intelligence/trigger-proximity');
 const { computeTriggers } = require('../intelligence/watch-triggers');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
+const { stackingConflict } = require('./order-guard');
 const exitPass = require('./exit-pass'); // broker reconciliation (first in every pass) + paper exits (Phase 67)
 const { recordRejection: recordStat } = require('./rejection-stats');
 const scanLog = require('./scan-log');
@@ -167,6 +168,8 @@ async function pipelinePass() {
     }
     const top = result.market === 'crypto' ? depthGate(result.asset, result.notional) : null; // Phase 66: can the best ask take the order?
     if (top && !top.ok) { recordRejection(result.id, top.reason, candidate); continue; }
+    const stack = stackingConflict(result, ledger.getActivePositions()); // Phase 68: never a second automated position on a held coin
+    if (stack) { recordRejection(result.id, stack, candidate); continue; }
     counts.approved += 1;
     try {
       const staged = ledger.stageOrder(result);

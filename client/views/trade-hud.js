@@ -85,6 +85,7 @@
         + 'no listed contract, so no live premium. Close it to retire it.' })] : []),
       el('div', { className: 'hud-levels' }, [el('span', { className: 'text-short', textContent: `${realOption ? `${p.asset} stop` : 'Stop'} ${price(p.invalidation, p)}` }),
         el('span', { className: 'text-long', textContent: `T1 ${t1 ? price(t1, p) : '—'}` })]),
+      ...[SD.ratchet.button(p, m, ctx)].filter(Boolean), // Phase 68
       exitBtn,
     ]);
   }
@@ -167,8 +168,9 @@
 
     // ctx: { state, livePrice, online, closing:Set, onClosePosition(p, m) }
     function hud(o, ctx) {
-      const positions = ((ctx.state && ctx.state.positions) || []).filter((p) => p.asset === o.asset);
-      if (!positions.length) return null;
+      const all = ((ctx.state && ctx.state.positions) || []).filter((p) => p.asset === o.asset);
+      if (!all.length) return null;
+      const positions = all.length > 1 ? [SD.positionDetail.pick(ctx.state, o.asset, ctx.positionId)] : all; // Phase 68: the picked record
       let node;
       if (view.collapsed) {
         const b = pill(o, positions, ctx);
@@ -186,7 +188,7 @@
         const lines = el('button', { type: 'button', className: `hud-min hud-lines${on ? ' is-on' : ''}`, textContent: on ? 'Lines ✓' : 'Lines', title: 'Show / hide the entry, stop, target and breakeven lines on the chart' });
         lines.onclick = () => { if (pn) pn.setLevelsVisible(!on); redraw(node, o, ctx); }; // this chart's lines only
         const bar = el('div', { className: 'hud-title', title: 'Drag to move · double-click to reset' }, [
-          el('span', { textContent: `${title}${positions.length > 1 ? ` (${positions.length})` : ''}` }), lines, min]);
+          el('span', { textContent: `${title}${all.length > 1 ? ` (1 of ${all.length})` : ''}` }), lines, min]);
         bar.addEventListener('pointerdown', (e) => startDrag(e));
         bar.addEventListener('dblclick', () => { view.pos = null; saveView(); place(node); });
         node = el('aside', { className: 'trade-hud', ariaLabel: title, dataset: { hud: id } }, [bar, ...positions.map((p) => row(p, ctx.livePrice, ctx))]);

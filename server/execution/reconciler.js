@@ -38,12 +38,16 @@ function warnOnce(key, message) {
   console.warn(message);
 }
 
-// Coinbase's single attached order serves both exits: infer which one filled.
+// Coinbase's single attached order serves both exits: infer which one filled. Phase 68: from
+// the NEARER level (a ratcheted stop fills in profit), else from gain vs loss.
 function exitKind(pos, exit) {
   if (exit.kind) return exit.kind;
+  const tp = pos.targets && pos.targets[0] && pos.targets[0].price;
+  if (tp > 0 && pos.invalidation > 0) return Math.abs(exit.avgFillPrice - tp) < Math.abs(exit.avgFillPrice - pos.invalidation) ? 'take_profit' : 'stop_loss';
   const gain = pos.direction === 'short' ? exit.avgFillPrice < pos.fillPrice : exit.avgFillPrice > pos.fillPrice;
   return gain ? 'take_profit' : 'stop_loss';
 }
+const filledAt = (exit) => (exit.filledAt > 0 ? { closedAt: exit.filledAt } : {}); // P1-2: journaled at the real fill time
 
 // Real fees (this record's share of the entry fee + the exit order's) and the execution audit
 // (Phase 63: the bracket leg's own level less its fee vs the real fill) for `qty` sold.
@@ -65,7 +69,7 @@ function bookPartial(pos, current, exit, sold, booked, entryFee, ledger) {
   const kind = exitKind(current, exit);
   const part = ledger.splitPosition(pos.id, sold);
   const trade = ledger.closePosition(part.id, exit.avgFillPrice, 'BROKER_EXIT', {
-    exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', partialExit: true, ...exitBooking(current, kind, sold, exit, entryFee),
+    exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', partialExit: true, ...exitBooking(current, kind, sold, exit, entryFee), ...filledAt(exit),
   });
   ledger.updatePositions((p) => (p.id === pos.id ? Object.assign(p, { brokerExitBookedId: exit.brokerExitId, brokerExitBookedQty: booked + sold }) && true : false));
   const rest = +(current.positionSize - sold).toFixed(8);
@@ -137,7 +141,7 @@ async function reconcileOne(pos, ledger) {
     }
     const kind = exitKind(current, exit);
     const closed = ledger.closePosition(pos.id, exit.avgFillPrice, 'BROKER_EXIT', {
-      exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', ...exitBooking(current, kind, Math.min(sold, current.positionSize), exit, entryFee),
+      exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', ...exitBooking(current, kind, Math.min(sold, current.positionSize), exit, entryFee), ...filledAt(exit),
       ...(dust && rest > QTY_EPSILON ? { dustQty: rest } : {}),
     });
     return { id: pos.id, action: 'closed', detail: `${kind} filled @ ${exit.avgFillPrice}`, trade: closed };

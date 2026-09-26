@@ -35,7 +35,10 @@ Server (`server/`)
   `paper-ledger.js` + `ledger-live.js` (split / broker fill / bracketStatus / adopted) +
   `ledger-store.js` (state), `message-handler.js` (WS actions), `order-router.js` (APPROVE /
   REJECT, live routing, in-flight lock), `exit-quote.js` (net-first quotes, POSITION_MARKS),
-  `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm),
+  `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm), `bracket-ops.js`
+  (shared cancel / verify / re-arm / replaceStop), `ratchet.js` (+1R / +1.5R stop locks,
+  STOP_GAP_UNFILLED), `order-recovery.js` (orders Coinbase took that the ledger never recorded),
+  `chart-ticks.js` (1 s TICKS for charted symbols),
   `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
   `rejection-stats.js` (reason buckets), `scan-log.js`
@@ -70,6 +73,9 @@ Client (`client/`)
   <= 0.80%, fee drag <= 0.35R, T1 >= 1.35 : 1. Crypto positions >= $20 notional.
 - Break-even is the fixed sell price after the entry fee and the exit taker fee; P&L gross is
   measured at the best bid so gross + fees = net.
+- Stops only move UP (ratchet.js): +1.0R -> break-even + 0.05R, +1.5R -> entry + 0.5R; 1R
+  (dollarRisk) stays the original risk. No automated setup on a symbol with an open LIVE /
+  adopted record (order-guard.stackingConflict); Manual Trade Ticket orders are exempt.
 
 ## Testing
 

@@ -170,6 +170,7 @@ async function getOrderStatus(brokerId) {
       avgFillPrice: num(filledLeg.filled_avg_price),
       kind: kindOf(filledLeg),
       brokerExitId: filledLeg.id,
+      filledAt: Number.isFinite(Date.parse(filledLeg.filled_at)) ? Date.parse(filledLeg.filled_at) : null, // Phase 68: the real fill time
       fees: 0, // commission-free; small regulatory sell fees are not itemised on the order
     };
   } else if (legs.length) {

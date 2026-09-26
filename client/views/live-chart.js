@@ -18,7 +18,9 @@
 
   const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   const localTime = (t, opts) => new Date(t * 1000).toLocaleString([], opts);
-  const priceFormat = (p) => { const precision = p >= 10 ? 2 : p >= 0.1 ? 4 : 6; return { type: 'price', precision, minMove: 10 ** -precision }; };
+  // Phase 68: the scale keeps >= 4 significant digits for sub-cent coins (SD.ui.decimalsFor), and
+  // minMove matches it so the axis ticks never collapse onto one rounded value.
+  const priceFormat = (p) => { const precision = SD.ui.decimalsFor(p); return { type: 'price', precision, minMove: Number((10 ** -precision).toFixed(precision)) }; };
   const volBar = (b) => ({ time: b.time, value: b.volume || 0, color: b.close >= b.open ? 'rgba(38, 166, 154, 0.35)' : 'rgba(239, 83, 80, 0.35)' });
   const cyan = () => css('--accent', '#38bdf8');
 
@@ -201,6 +203,7 @@
       D.loadHistory(o.asset, tf); // no-op while fresh
       paint();
       requestAnimationFrame(fit);
+      announce(); // Phase 68: the server streams this symbol's ticks every second
       return view.host;
     }
 
@@ -219,6 +222,7 @@
       barHeight: () => (view && view.barH) || null,
       showing: () => (view && view.o ? view.o.asset : null),
       loaded: (symbol, frame) => { if (view && view.o && view.o.asset === symbol && tf === frame) paint(); },
+      ticked: (symbols) => { if (view && view.o && symbols.includes(view.o.asset)) sync(view.o.asset); }, // Phase 68: 1 s ticks (candles only)
       relevel: () => { if (view && view.o) { view.levelsKey = ''; paint(); view.chart.priceScale('right').applyOptions({ autoScale: true }); } },
       levelsVisible: () => levelsOn,
       setLevelsVisible: (on) => {
@@ -233,8 +237,23 @@
 
   D.onLoaded((symbol, frame) => { for (const p of panes) p.loaded(symbol, frame); });
 
+  // Phase 68: WATCH_SYMBOLS = every pane's symbol, sent when it changes (force: after a reconnect);
+  // TICKS { prices } (every second) extend the forming candles of the panes showing them.
+  let announced = '';
+  function announce(force = false) {
+    const symbols = [...new Set([...panes].map((p) => p.showing()).filter(Boolean))].sort();
+    const key = symbols.join(',');
+    if ((force || key !== announced) && SD.app && SD.app.isOnline()) { announced = key; SD.app.send({ type: 'WATCH_SYMBOLS', symbols }); }
+  }
+  function tick(prices) {
+    const symbols = Object.keys(prices || {});
+    if (!symbols.length) return;
+    D.record(prices);
+    for (const p of panes) p.ticked(symbols);
+  }
+
   // The primary pane (Opportunities center, Moonshot Radar): its toolbar has [⬍ Dual Chart].
   const primary = makeChart({ extraTools: () => (SD.dualChart ? [SD.dualChart.toggleButton()] : []) });
   SD.liveChart = { record: D.record, mount: primary.mount, stats: primary.stats, setTimeframe: primary.setTimeframe, primary,
-    setLevelsVisible: primary.setLevelsVisible, levelsVisible: primary.levelsVisible, levelsOf, create: makeChart };
+    setLevelsVisible: primary.setLevelsVisible, levelsVisible: primary.levelsVisible, levelsOf, create: makeChart, announce, tick };
 })();

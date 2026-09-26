@@ -2,7 +2,7 @@
 // actions and the per-order in-flight lock. The client only sends intents; the order
 // guard runs first, then the order is routed by its market's mode (paper / LIVE).
 const ledger = require('./paper-ledger');
-const { validateApproval } = require('./order-guard');
+const { validateApproval, stackingConflict } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { recordRejection } = require('./rejection-stats');
 const { requiredBasis } = require('../risk/venue-capital');
@@ -41,7 +41,9 @@ async function routeApproved(order, livePrice) {
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
   const tick = order.market === 'crypto' ? coinbaseSocket.getLatest()[order.asset] : null; // best bid for a post-only limit entry
+  ledger.markSubmitting(order.id, Date.now()); // Phase 68 (P1-5): saved BEFORE the broker call, so a crash here is recoverable at boot
   const result = await venue.api.submitOrder(order, order.positionSize, livePrice, { bid: tick && tick.bid, ask: tick && tick.ask });
+  if (!result.ok && !result.uncertain) ledger.markSubmitting(order.id, null);
   if (!result.ok) {
     console.error(`[LIVE] ${venue.broker} order FAILED for ${order.id}: ${result.error}`);
     throw new Error(`LIVE_ORDER_FAILED: ${result.error}`);
@@ -74,7 +76,8 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
   const order = ledger.getPendingOrders().find((o) => o.id === id);
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
-  const check = validateApproval(order, livePrice);
+  const stack = stackingConflict(order, ledger.getActivePositions()); // Phase 68: e.g. a Pilot rotation into a coin already held
+  const check = stack ? { valid: false, reason: stack } : validateApproval(order, livePrice);
   if (check.valid && amount !== undefined && amount !== null) {
     const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
     const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });

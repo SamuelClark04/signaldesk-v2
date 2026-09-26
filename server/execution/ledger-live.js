@@ -9,7 +9,10 @@
 //   voidLivePosition the entry never filled: the record leaves the book, no journal entry
 //   setBracketStatus 'ARMED' | 'UNARMORED' (no stop / target working at the broker, P0-1)
 //   adoptPosition / releaseAdopted   external holdings put under (or out of) SignalDesk's watch
-let L = null; // { activePositions, discardedOrders, isKnown, findIndex, save }
+//   markSubmitting / recoverable / recoverLive   Phase 68 (P1-5): a LIVE submit is marked on its
+//                    pending order first (write-ahead); at boot an order Coinbase took but the
+//                    ledger never recorded (crash, LIVE_UNRECORDED) becomes its LIVE position
+let L = null; // { pendingOrders, activePositions, tradeJournal, discardedOrders, isKnown, findIndex, save }
 function bind(ctx) { L = ctx; }
 
 // A sell working (or unconfirmed) for this record: never carried over to an unsold remainder.
@@ -113,4 +116,36 @@ function releaseAdopted(candidateId) {
   return { ...released };
 }
 
-module.exports = { bind, splitPosition, syncLiveFill, voidLivePosition, setBracketStatus, adoptPosition, releaseAdopted, entryShare, MANUAL_EXIT_FIELDS };
+// ---------- Unrecorded broker orders (Phase 68, P1-5) ----------
+// Mark (at = ms) or clear (at = null) a setup's live submit, saved BEFORE the broker call (a
+// setup discarded meanwhile keeps its mark until the recovery scan clears it).
+function markSubmitting(id, at) {
+  const o = L.pendingOrders.find((x) => x.id === id) || (!at && L.discardedOrders.find((x) => x.id === id));
+  if (!o) return false;
+  if (at) o.submittingAt = at; else delete o.submittingAt;
+  L.save();
+  return true;
+}
+
+// Setups a live submit may have reached the broker for since `sinceMs` (pending or discarded,
+// submit-marked, not already a position or a journal entry).
+function recoverable(sinceMs) {
+  const taken = new Set([...L.activePositions, ...L.tradeJournal].map((p) => p.id));
+  return [...L.pendingOrders, ...L.discardedOrders].filter((o) => o.submittingAt >= sinceMs && !taken.has(o.id) && !o.recoveredAt).map((o) => ({ ...o }));
+}
+
+// The broker holds an order for setup `id`: record the LIVE position it should have become.
+function recoverLive(id, extra) {
+  let list = L.pendingOrders;
+  let i = L.findIndex(list, id);
+  if (i === -1) { list = L.discardedOrders; i = L.findIndex(list, id); }
+  if (i === -1 || L.activePositions.some((p) => p.id === id)) throw new Error(`paper-ledger: nothing to recover for ${id}`);
+  const [order] = list.splice(i, 1);
+  const { status, discardedAt, submittingAt, ...rest } = order;
+  const pos = { ...rest, ...extra, execution: 'LIVE', status: 'open', openedAt: submittingAt || Date.now(), recoveredAt: Date.now() };
+  L.activePositions.push(pos);
+  L.save();
+  return { ...pos };
+}
+
+module.exports = { bind, markSubmitting, recoverable, recoverLive, splitPosition, syncLiveFill, voidLivePosition, setBracketStatus, adoptPosition, releaseAdopted, entryShare, MANUAL_EXIT_FIELDS };

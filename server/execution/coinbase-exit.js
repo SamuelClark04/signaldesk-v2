@@ -28,7 +28,9 @@
 //     unknown: left pending; the reconciler asks again every pass (resolvePending)
 //   - every re-arm outcome is reported truthfully; a failed re-arm is a CRITICAL error that
 //     says the position is UNARMORED at Coinbase, and the position carries bracketStatus
-// One close per position at a time (isClosing); the reconciler skips it meanwhile.
+// One close / stop move per position at a time (bracket-ops claim; the reconciler skips it).
+// Phase 68: the shared bracket helpers live in bracket-ops.js; every booking carries the
+// sell's real fill time (closedAt = Coinbase's last_fill_time).
 const api = require('../connectors/coinbase-api');
 const orders = require('../connectors/coinbase-orders');
 const be = require('../risk/break-even');
@@ -38,48 +40,10 @@ const { entryShare } = require('./ledger-live');
 // bid x qty less the exact taker fee; no fresh bid: the last price) is recorded; the
 // booked trade carries cashoutAudit { expected, actual (qty x avg fill - real fee), variance }.
 
-const timing = { pollMs: 700, verifyMs: 8000, fillWaitMs: 15000, settleMs: 2000, pendingGiveUpMs: 60000 };
+const ops = require('./bracket-ops');
+const { timing, pollUntil, rearm, rearmThenFail, patch, coinsFree, baseOf, fail, log, sleep, QTY_EPS } = ops;
 const EXIT_REASON = 'MANUAL_CLOSE @ Coinbase';
-const QTY_EPS = 1e-9;
-const closing = new Set();
-const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
-const baseOf = (product) => String(product).replace(/-USDC?$/, '');
-const fail = (code, msg) => Object.assign(new Error(`${code}: ${msg}`), { code });
-const log = (msg) => console.warn(`[LIVE] ${msg}`);
 const PENDING_FIELDS = { marketExitPending: undefined, marketExitClientId: undefined, marketExitAt: undefined, marketExitError: undefined };
-const patch = (ledger, id, fields) => ledger.updatePositions((p) => (p.id === id ? Object.assign(p, fields) && true : false));
-const coinsFree = (bal, qty) => bal.ok && bal.available + QTY_EPS >= qty * (1 - 1e-6);
-
-// Poll `read` until `done(result)` or the time runs out; the last result either way.
-async function pollUntil(read, done, ms) {
-  const until = Date.now() + ms;
-  let r = await read();
-  while (!done(r) && Date.now() < until) { await sleep(timing.pollMs); r = await read(); }
-  return r;
-}
-
-// Protection back on for `qty` at the position's own stop / T1 (a stand-alone bracket).
-async function rearm(ledger, pos, qty, why) {
-  const tp = pos.targets && pos.targets[0] && pos.targets[0].price;
-  const r = await orders.placeBracket(pos.brokerProduct || pos.asset, qty, tp, pos.invalidation, `${pos.id}:rearm:${Date.now()}`);
-  if (r.ok) {
-    patch(ledger, pos.id, { brokerBracketId: r.brokerId });
-    ledger.setBracketStatus(pos.id, 'ARMED', null);
-    log(`${pos.id}: bracket RE-ARMED as ${r.brokerId} (${qty} at stop ${pos.invalidation} / T1 ${tp}) after ${why}`);
-  } else {
-    ledger.setBracketStatus(pos.id, 'UNARMORED', `re-placing the stop/target after ${why} failed: ${r.error}`);
-    console.error(`[LIVE] CRITICAL ${pos.id}: ${why}, and re-placing its stop/target FAILED (${r.error}). The position is UNARMORED at Coinbase: set a stop there now.`);
-  }
-  return r;
-}
-
-// Re-arm after `lead` went wrong, then throw what the user must know: a plain `code` error
-// when protection is back, or a CRITICAL "UNARMORED" error when the re-arm failed too.
-async function rearmThenFail(ledger, pos, qty, why, code, msg, lead) {
-  const r = await rearm(ledger, pos, qty, why);
-  if (r.ok) throw fail(code, `${msg}; the stop/target was re-placed at Coinbase`);
-  throw fail('UNARMORED', `CRITICAL: ${lead} AND re-arm failed. Position is UNARMORED at Coinbase: set a stop there now (${msg}; re-arm: ${r.error})`);
-}
 
 // Book a filled sell: the whole position, or (partial) the sold part split off first. The
 // booked record's fees: its share of the entry order's fee + the sell's.
@@ -90,7 +54,8 @@ function book(ledger, pos, fill, entryFees, extra, expected = null) {
   const fees = entryFees * entryShare(rec) + (fill.fees || 0);
   const cashoutAudit = expected ? be.cashoutVariance({ ...expected, filledQty: fill.filledQty, avgFillPrice: fill.avgFillPrice, fees: fill.fees || 0 }) : null;
   const trade = ledger.closePosition(rec.id, fill.avgFillPrice, EXIT_REASON, {
-    exitLeg: 'manual', pnlSource: 'broker-fills', actualFees: fees, brokerExitId: fill.orderId, ...(cashoutAudit ? { cashoutAudit } : {}), ...extra,
+    exitLeg: 'manual', pnlSource: 'broker-fills', actualFees: fees, brokerExitId: fill.orderId, ...(cashoutAudit ? { cashoutAudit } : {}),
+    ...(fill.filledAt ? { closedAt: fill.filledAt } : {}), ...extra, // P1-2: the real fill time
   });
   log(`${pos.id}: SOLD ${fill.filledQty} ${pos.asset} @ ${fill.avgFillPrice} (fees ${fees.toFixed(4)}), net ${trade.netPnl.toFixed(2)}${partial ? ' (partial fill)' : ''}`);
   return { trade, partial };
@@ -139,8 +104,7 @@ async function closeLive(ledger, id) {
   if (!pos) throw fail('NO_POSITION', `no open position ${id}`);
   if (pos.execution !== 'LIVE' || pos.broker !== 'Coinbase' || pos.market !== 'crypto') throw fail('NOT_LIVE_COINBASE', `${id} is not a live Coinbase crypto position`);
   if (pos.marketExitPending) throw fail('SELL_UNCONFIRMED', 'an earlier sell of this position is still being checked at Coinbase; SignalDesk re-checks every pass');
-  if (closing.has(id)) throw fail('ORDER_BUSY', `${id} is already being closed`);
-  closing.add(id);
+  ops.claim(id);
   try {
     const product = pos.brokerProduct || pos.asset;
     const qty = pos.positionSize;
@@ -148,7 +112,7 @@ async function closeLive(ledger, id) {
     // 1. Look up the bracket.
     const b = await bracketOf(pos);
     const reconcile = async (why) => {
-      closing.delete(id); // the reconciler skips positions mid-close
+      ops.release(id); // the reconciler skips positions mid-close
       const r = await require('./reconciler').reconcileLivePositions([ledger.getActivePositions().find((p) => p.id === id)].filter(Boolean), ledger);
       const closed = r.find((x) => x.action === 'closed');
       log(`${id}: ${why}; ${closed ? `booked the broker's own exit @ ${closed.trade.exitPrice}` : 'reconciler will book it'}`);
@@ -157,21 +121,18 @@ async function closeLive(ledger, id) {
     if (b.filled) return reconcile('its stop/target already filled at Coinbase; nothing sold');
     // 2. Cancel it.
     if (b.bracketId) {
-      const c = await api.cancelOrder(b.bracketId);
-      log(`${id}: cancel bracket ${b.bracketId}: ${c.ok ? 'accepted' : c.error}`);
       // 3. Verify: canceled (or filled in the race) at Coinbase.
-      const st = await pollUntil(() => api.getOrderStatus(pos.brokerId, { exitId: b.bracketId }),
-        (s) => s.ok && s.exit && (s.exit.filledQty > 0 || s.exit.status === 'canceled'), timing.verifyMs);
-      if (st.ok && st.exit && st.exit.filledQty > 0) return reconcile('the bracket filled while canceling; nothing sold');
-      if (!(st.ok && st.exit && st.exit.status === 'canceled')) {
-        const msg = `Coinbase did not confirm the stop/target (${b.bracketId}) canceled${c.ok ? '' : `: ${c.error}`}; nothing was sold`;
-        if (c.ok) await rearmThenFail(ledger, pos, qty, 'an unverified bracket cancel', 'BRACKET_NOT_CANCELED', msg, 'The bracket cancel was not confirmed');
+      const c = await ops.cancelBracket(pos, b.bracketId);
+      if (c.filled) return reconcile('the bracket filled while canceling; nothing sold');
+      if (!c.canceled) {
+        const msg = `Coinbase did not confirm the stop/target (${b.bracketId}) canceled${c.cancelOk ? '' : `: ${c.error}`}; nothing was sold`;
+        if (c.cancelOk) await rearmThenFail(ledger, pos, qty, 'an unverified bracket cancel', 'BRACKET_NOT_CANCELED', msg, 'The bracket cancel was not confirmed');
         throw fail('BRACKET_NOT_CANCELED', msg);
       }
     }
     // 3b. The coins must be free (the hold released) before selling.
     const cur = baseOf(product);
-    const bal = await pollUntil(() => api.getAvailable(cur), (r) => coinsFree(r, qty), timing.verifyMs);
+    const bal = await ops.freeCoins(product, qty);
     if (!coinsFree(bal, qty)) {
       const msg = bal.ok ? `Coinbase shows ${bal.available} ${cur} available (${bal.hold} on hold) for a ${qty} sell; nothing was sold` : bal.error;
       if (b.bracketId) await rearmThenFail(ledger, pos, qty, 'the hold was not released', 'HOLD_NOT_RELEASED', msg, 'The coins were not released');
@@ -200,7 +161,7 @@ async function closeLive(ledger, id) {
       if (b.bracketId) await rearmThenFail(ledger, pos, qty, `a sell that ended ${o.status} unfilled`, 'SELL_UNFILLED', msg, 'Market sell did not fill');
       throw fail('SELL_UNFILLED', msg);
     }
-    const fill = { orderId: sell.brokerId, filledQty: Math.min(o.filledQty, qty), soldQty: sell.qty, avgFillPrice: o.avgFillPrice, fees: o.fees };
+    const fill = { orderId: sell.brokerId, filledQty: Math.min(o.filledQty, qty), soldQty: sell.qty, avgFillPrice: o.avgFillPrice, fees: o.fees, filledAt: o.filledAt };
     const done = book(ledger, pos, fill, b.entryFees, { canceledBracketId: b.bracketId }, expected);
     if (done.partial && b.bracketId) {
       const r = await rearm(ledger, pos, qty - fill.filledQty, 'a partial sell');
@@ -208,7 +169,7 @@ async function closeLive(ledger, id) {
     }
     return done;
   } finally {
-    closing.delete(id);
+    ops.release(id);
   }
 }
 
@@ -265,7 +226,7 @@ async function settle(pos, ledger) {
     return { id: pos.id, action: 'flagged', detail: `manual sell ${o.status} unfilled` };
   }
   const s = pos.adopted ? { ok: true, fees: 0 } : await api.getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId });
-  const fill = { orderId: pos.brokerManualExitId, filledQty: Math.min(o.filledQty, pos.positionSize), soldQty: pos.brokerManualExitQty || pos.positionSize, avgFillPrice: o.avgFillPrice, fees: o.fees };
+  const fill = { orderId: pos.brokerManualExitId, filledQty: Math.min(o.filledQty, pos.positionSize), soldQty: pos.brokerManualExitQty || pos.positionSize, avgFillPrice: o.avgFillPrice, fees: o.fees, filledAt: o.filledAt };
   // P0-3: a partial fill books the sold part; splitPosition strips the sell's markers from the
   // unsold remainder, so the next pass never books this fill again. The remainder is re-armed.
   const { trade, partial } = book(ledger, pos, fill, s.ok ? s.fees || 0 : 0, {}, pos.brokerManualExitExpected || null);
@@ -273,4 +234,4 @@ async function settle(pos, ledger) {
   return { id: pos.id, action: 'closed', detail: `manual sell filled @ ${o.avgFillPrice}${partial ? ' (partial)' : ''}`, trade };
 }
 
-module.exports = { closeLive, settle, resolvePending, isClosing: (id) => closing.has(id), timing, EXIT_REASON };
+module.exports = { closeLive, settle, resolvePending, isClosing: ops.isBusy, timing, EXIT_REASON };
