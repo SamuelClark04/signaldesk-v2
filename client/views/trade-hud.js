@@ -44,9 +44,7 @@
       el('span', { className: 'hud-muted', textContent: ` paid ${od.debit}` }),
     ]);
     premium.title = m.optionBasis === 'mid' ? 'Net mid of both legs\' live quotes (closing fills 0.15 x their combined bid/ask under it)' : m.optionBasis === 'bid' ? `Real bid (${od.feed || 'indicative'} feed) at ${when}` : 'No fresh quote: Black-Scholes value at the live underlying price, anchored to the entry quote';
-    const pnl = el('div', { className: `hud-pnl ${pnlClass(m.gross)}` }, [el('strong', { textContent: signed(m.gross, money) }),
-      el('span', { textContent: m.pctGross === null ? '' : ` ${m.pctGross >= 0 ? '+' : '−'}${Math.abs(m.pctGross * 100).toFixed(2)}%` })]);
-    return [head, premium, pnl];
+    return [head, premium, SD.netPnl.hero(p, m, { compact: true, noBreakEven: true })]; // Phase 63: net first
   }
 
   function underlyingLine(p, m) {
@@ -61,9 +59,8 @@
     const realOption = p.market === 'options' && p.optionsData && p.optionsData.contract;
     const venue = p.adopted ? 'ADOPTED' : p.execution === 'LIVE' ? `LIVE · ${p.broker}` : 'PAPER';
     const t1 = p.targets && p.targets[0] && p.targets[0].price;
-    const pnl = m.gross !== null && m.gross !== undefined
-      ? el('div', { className: `hud-pnl ${pnlClass(m.gross)}` }, [el('strong', { textContent: signed(m.gross, money) }),
-        el('span', { textContent: m.pctGross === null ? '' : ` ${m.pctGross >= 0 ? '+' : '−'}${Math.abs(m.pctGross * 100).toFixed(2)}%` })])
+    // Phase 63: the true net is the hero (gross + friction under it, then the break-even).
+    const pnl = m.gross !== null && m.gross !== undefined ? SD.netPnl.hero(p, m, { compact: true })
       : el('div', { className: 'hud-pnl hud-muted', textContent: !m.live ? 'No live price' : m.underlyingMove !== undefined
         ? `Underlying ${m.underlyingMove >= 0 ? '+' : '−'}${Math.abs(m.underlyingMove * 100).toFixed(2)}%` : '—' });
 
@@ -86,8 +83,7 @@
       ...(p.market === 'options' && !realOption ? [el('div', { className: 'hud-muted', textContent: 'Simulated spread from the old options strategy: '
         + 'no listed contract, so no live premium. Close it to retire it.' })] : []),
       el('div', { className: 'hud-levels' }, [el('span', { className: 'text-short', textContent: `${realOption ? `${p.asset} stop` : 'Stop'} ${price(p.invalidation, p)}` }),
-        el('span', { className: 'text-long', textContent: `T1 ${t1 ? price(t1, p) : '—'}` }),
-        ...(m.net !== null && m.net !== undefined ? [el('span', { className: 'hud-muted no-wrap', textContent: `after fees ${signed(m.net, money)}` })] : [])]),
+        el('span', { className: 'text-long', textContent: `T1 ${t1 ? price(t1, p) : '—'}` })]),
       exitBtn,
     ]);
   }
@@ -142,15 +138,17 @@
   // Minimized: "UNI/USD +$0.11" (option positions: the option's own P&L).
   function pill(o, positions, ctx) {
     const marks = positions.map((p) => SD.portfolioMetrics.mark(p, ctx.livePrice));
-    const known = marks.filter((m) => m.gross !== null && m.gross !== undefined);
-    const total = known.reduce((s, m) => s + m.gross, 0);
+    // Phase 63: the minimized pill sums the TRUE net (gross only where no net is known).
+    const nets = positions.map((p, i) => SD.netPnl.figures(p, marks[i])).filter(Boolean);
+    const known = nets.map((f) => (f.net ?? f.gross)).filter(Number.isFinite);
+    const total = known.reduce((s, x) => s + x, 0);
     const label = SD.oppDetail.displaySymbol(o);
     const p0 = positions[0];
     const t1 = p0.targets && p0.targets[0] && p0.targets[0].price;
     const ul = { market: 'stocks', entryPrice: p0.invalidation };
     const b = el('button', { type: 'button', className: `hud-pill ${known.length ? pnlClass(total) : 'hud-muted'}`, title: 'Show the trade panel (drag to move)' }, [
       el('span', { className: 'hud-pill-sym', textContent: `${label}${positions.length > 1 ? ` ×${positions.length}` : ''}` }),
-      el('strong', { textContent: known.length ? signed(total, money) : '—' }),
+      el('strong', { textContent: known.length ? `${signed(total, money)} net` : '—' }),
       // Phase 58C: the (underlying) stop and T1 beside the P&L.
       el('span', { className: 'hud-pill-lv text-short', textContent: `SL ${price(p0.invalidation, p0.market === 'options' ? ul : p0)}` }),
       el('span', { className: 'hud-pill-lv text-long', textContent: `T1 ${t1 ? price(t1, p0.market === 'options' ? ul : p0) : '—'}` }),

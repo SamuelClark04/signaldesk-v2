@@ -258,6 +258,7 @@
         kv('Break-even move', lv(() => (Number.isFinite(c.breakEvenPct) ? `${o.direction === 'short' ? '−' : '+'}${(c.breakEvenPct * 100).toFixed(2)}%` : '—'))),
         kv(s.plan ? 'Net reward / risk (T1 + T2 plan)' : 'Net reward / risk (T1)', rr),
         kv('Fee drag', ready && Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—'),
+        ...(ready && o.market === 'crypto' ? SD.netPnl.hurdle(staged.hurdle) : []), // Phase 63: market round trip at the staged size
       ]),
       el('h3', { className: 'opp-section opp-scen-title', textContent: ready ? `Price scenario (per ${size(o)})` : 'Price scenario' }),
       scenarioTable(o),

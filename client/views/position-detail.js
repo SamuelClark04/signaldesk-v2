@@ -13,7 +13,6 @@
   // v: text, or nodes (e.g. an unbreakable "after fees −$0.20" part).
   const kv = (k, v, cls = '') => el('div', { className: 'opp-kv' }, [
     el('span', { className: 'opp-k', textContent: k }), el('span', { className: `opp-v ${cls}`, ...(typeof v === 'string' ? { textContent: v } : {}) }, typeof v === 'string' ? [] : v)]);
-  const nowrap = (text) => el('span', { className: 'no-wrap', textContent: text }); // a sign never parts from its amount
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(2)}%`;
   const ulPx = (x) => price(x, { market: 'stocks', entryPrice: x });
   const isRealOption = (p) => p.market === 'options' && p.optionsData && !!p.optionsData.contract;
@@ -27,11 +26,8 @@
     return Math.round((Date.parse(`${expiration}T00:00:00Z`) - today) / 864e5);
   }
 
-  function pnlRow(label, m) {
-    if (m.gross === null || m.gross === undefined) return kv(label, 'No price');
-    return kv(label, [nowrap(`${signed(m.gross, money)}${m.pctGross === null ? '' : ` (${pct(m.pctGross)})`}`),
-      ...(m.net === null || m.net === undefined ? [] : [' · ', nowrap(`after fees ${signed(m.net, money)}`)])], pnlClass(m.gross));
-  }
+  // R multiple on the true net (the exit quote), else on the gross mark.
+  const rOf = (p, m) => (p.exitQuote && Number.isFinite(p.exitQuote.r) ? p.exitQuote.r : m.r);
 
   function realOptionRows(p, m) {
     const od = p.optionsData;
@@ -53,7 +49,6 @@
       kv('Premium now', premium),
       kv('Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),
       kv('Position value', Number.isFinite(m.optionValue) ? `${money(m.optionValue * od.multiplier * p.positionSize)} (cost basis ${money(od.debit * od.multiplier * p.positionSize)})` : '—'),
-      pnlRow('Option P&L', m),
       kv('R multiple', Number.isFinite(m.r) ? `${m.r >= 0 ? '+' : '−'}${Math.abs(m.r).toFixed(2)}R of ${money(p.dollarRisk)} at risk` : '—'),
       ...(stats.length ? stats.map(([k, v, cls]) => kv(k, v, cls)) : [
         kv('Delta', live(om.delta, od.delta, (x) => x.toFixed(2))),
@@ -80,24 +75,23 @@
       kv('Position value', m.price > 0 ? money(p.positionSize * m.price) : '—'),
       kv('Cost basis', money(p.positionSize * p.fillPrice)),
       kv('Fill price', price(p.fillPrice, p)),
-      kv('Live price', m.price > 0 ? price(m.price, p) : 'No live price'),
-      pnlRow('Unrealized P/L', m),
-      kv('R multiple', Number.isFinite(m.r) ? `${m.r >= 0 ? '+' : '−'}${Math.abs(m.r).toFixed(2)}R` : '—'),
+      kv('Live price', m.price > 0 ? `${price(m.price, p)}${p.exitQuote && p.exitQuote.sellBasis === 'best bid' ? ` · bid ${price(p.exitQuote.bid, p)}` : ''}` : 'No live price'),
+      kv('R multiple (net)', Number.isFinite(rOf(p, m)) ? `${rOf(p, m) >= 0 ? '+' : '−'}${Math.abs(rOf(p, m)).toFixed(2)}R` : '—'),
     ];
   }
 
   // WYSIWYG (Phase 59): the server's exit quote (p.exitQuote, re-sent every 5 s as
   // POSITION_MARKS) is exactly what a manual close books: the mid P&L, and the net
   // after the exit spread and fees. The close button carries the net.
+  // Phase 63: the net is the hero (netPnl.hero); options add their mark (mid) P&L and exit spread.
   function exitRows(p) {
     const q = p.exitQuote;
-    if (!q || p.execution === 'LIVE') return [];
+    if (!q || p.market !== 'options') return [];
     const slip = q.gross - q.midGross;
-    return [
-      kv('Mid P&L (gross)', signed(q.midGross, money), pnlClass(q.midGross)),
-      kv('Net if closed now (after spread & fees)', `${signed(q.net, money)}${slip ? ` · exit spread ${signed(slip, money)}` : ''} · fees −${money(q.fees)}`, pnlClass(q.net)),
-    ];
+    return [kv('Mid P&L (gross)', `${signed(q.midGross, money)}${slip ? ` · exit spread ${signed(slip, money)}` : ''}`, pnlClass(q.midGross))];
   }
+  // The hero: true net P&L if closed now, gross + friction under it, then the break-even.
+  const heroRow = (p, m) => el('div', { className: 'opp-kv np-row' }, [el('span', { className: 'opp-k', textContent: 'Net P&L if closed now' }), SD.netPnl.hero(p, m)]);
   const closeText = (p) => (p.exitQuote ? `Manual Exit / Close Now (${signed(p.exitQuote.net, money)} net)` : 'Manual Exit / Close Position');
 
   // Same rules as the trade panel's button: paper positions close at the live price
@@ -121,6 +115,7 @@
     const under = m.price > 0 ? `${ulPx(m.price)}${Number.isFinite(m.underlyingMove) ? ` (${pct(m.underlyingMove)} since ${ulPx(p.fillPrice)})` : ''}` : 'No live price';
     return el('div', { className: 'opp-kv-group' }, [
       el('h3', { className: 'opp-section', textContent: `${venueOf(p)} · ${p.direction === 'short' ? 'Short' : 'Long'} ${p.setupType || ''}` }),
+      ...(isRealOption(p) || !opt ? [heroRow(p, m)] : []),
       ...(isRealOption(p) ? realOptionRows(p, m) : opt ? legacyOptionRows(p) : linearRows(p, m)),
       ...exitRows(p),
       ...(opt ? [kv(`Underlying ${p.asset}`, under)] : []),
@@ -128,6 +123,7 @@
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
       kv('Opened', p.openedAt ? new Date(p.openedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'),
       exitButton(p, m, ctx),
+      ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p) })] : []),
     ]);
   }
 

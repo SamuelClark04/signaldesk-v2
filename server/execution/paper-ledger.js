@@ -227,7 +227,7 @@ function releaseAdopted(candidateId) {
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
 // derived on read, never stored, so older saved orders get them too.
-const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o) }));
+const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: priceScenarios(o), costs: costBreakdown(o), hurdle: require('../risk/break-even').hurdleFor(o) })); // + fee hurdle (Phase 63)
 // Open positions carry their fee model (derived, not stored) for live P/L marks,
 // and real option contracts their current value (optionMark, option-marks.js).
 // exitQuote: what a manual close would book right now ("Net if closed now"), and its cashout.

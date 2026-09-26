@@ -33,6 +33,7 @@ const { atr } = require('../strategies/options-signals');
 const manualOptions = require('./manual-options');
 const { exitSpreadCap } = require('../strategies/5-options-system');
 const coinbaseExit = require('./coinbase-exit');
+const { feeHurdle, liveQuote } = require('../risk/break-even'); // Phase 63: round-trip fee hurdle, shown before opening
 
 const DEFAULT_AMOUNT = { stock: 300, crypto: 20 };
 const STOP_ATR = 1.5;
@@ -184,7 +185,8 @@ async function preview(t, now = Date.now()) {
   const loss = sc.stop ? -sc.stop.net : z.dollarRisk;
   return { ok: true, price: b.px, priceBasis: basis, live: b.live, venue: b.venue, qty: z.positionSize, notional: z.notional, dollarRisk: z.dollarRisk, fees: z.estimatedFees, stopNet: sc.stop ? sc.stop.net : null,
     t1Net: sc.t1 ? sc.t1.net : null, t2Net: sc.t2 ? sc.t2.net : null, planNet: sc.plan ? sc.plan.net : null, rr: sc.t1 && loss > 0 ? sc.t1.net / loss : null,
-    aboveEngineMax: z.positionSize > s.order.positionSize, engineMax: s.order.notional, cash: b.capital.cash ?? null, bankroll: b.capital.bankroll, options: opt };
+    aboveEngineMax: z.positionSize > s.order.positionSize, engineMax: s.order.notional, cash: b.capital.cash ?? null, bankroll: b.capital.bankroll, options: opt,
+    hurdle: feeHurdle({ market: z.market, price: b.px, notional: z.notional, direction: z.direction, entryLiquidity: z.entryLiquidity, quote: z.market === 'crypto' ? liveQuote(z.asset, now) : null }) };
 }
 
 // Open: stage the sized order, then the guarded approval (paper, or LIVE @ Coinbase).

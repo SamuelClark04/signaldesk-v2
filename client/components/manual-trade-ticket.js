@@ -141,9 +141,10 @@
       kv('Risk ($) at the stop', money(p.dollarRisk), 'pnl-neg'),
       kv('Target net ($) at T1', pnl(p.t1Net), cls(p.t1Net)),
       ...(p.t2Net !== null ? [kv('Net at T2 / plan', `${pnl(p.t2Net)} / ${pnl(p.planNet)}`, cls(p.t2Net))] : []),
-      kv('Fees (est.)', money(p.fees)),
+      kv('Fees (blended est.)', money(p.fees)), // the risk gate's: T1 limit or stop; the market round trip is the hurdle below
       kv('Net R:R (T1)', p.rr ? `${p.rr.toFixed(2)} : 1` : '—'),
-    ]), ...(p.aboveEngineMax ? [el('p', { className: 'mt-note is-warn', textContent: `Above the risk engine's ${money(p.engineMax)} max safe size.` })] : [])];
+    ]), ...SD.netPnl.hurdle(p.hurdle, 'mt-note mt-hurdle'), // Phase 63: the round-trip fee hurdle, before opening
+    ...(p.aboveEngineMax ? [el('p', { className: 'mt-note is-warn', textContent: `Above the risk engine's ${money(p.engineMax)} max safe size.` })] : [])];
   }
 
   function actions() {

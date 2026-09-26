@@ -87,6 +87,7 @@
       ]),
       // Phase 58 options stats: net Greeks, IV vs HV, max value / profit, breakeven, POP, mid-hold T1.
       ...(od && od.stats ? [el('div', { className: 'apv-grid' }, SD.optionStats.rows(o, od.stats, od.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
+      ...(o.market === 'crypto' ? SD.netPnl.hurdle(o.hurdle, 'apv-note apv-hurdle') : []), // Phase 63: fee hurdle up front
       ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Smart Investment Amount ${money(o.notional)}: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
       ...(o.smallAccountCap ? [el('p', { className: 'apv-note is-small-cap', textContent: `${o.smallAccountLabel}: 1 contract risks ${money(o.dollarRisk)} `
         + `(${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(1)}% of the bankroll) to its stop, above the ${money(o.budgetRisk)} profile budget; debit ${money(o.notional)}.` })] : []),

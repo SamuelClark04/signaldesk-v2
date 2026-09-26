@@ -10,6 +10,7 @@
 //      ENTRY_TTL_MS -> cancel it at the broker; the next pass voids it
 //   5. Anything else (working, partially filled, broker unreachable) -> wait
 const alpacaApi = require('../connectors/alpaca-api');
+const be = require('../risk/break-even'); // Phase 63: expected vs actual exit (cashoutAudit)
 const coinbaseApi = require('../connectors/coinbase-api');
 
 const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi };
@@ -66,6 +67,11 @@ async function reconcileOne(pos, ledger) {
     current = ledger.syncLiveFill(pos.id, { fillPrice: s.avgFillPrice, filledQty: Math.min(s.filledQty, pos.positionSize) });
     synced = true;
   }
+  // Phase 63: the entry order's real fee (the net P&L and break-even use it, not the model's).
+  if (s.filledQty > 0 && Number.isFinite(s.fees) && s.fees > 0 && current.entryFeeActual !== s.fees) {
+    ledger.updatePositions((p) => (p.id === pos.id ? Object.assign(p, { entryFeeActual: s.fees }) && true : false));
+    current = { ...current, entryFeeActual: s.fees };
+  }
 
   // 3. Protective exit filled in full: close with the broker's real price.
   const exit = s.exit;
@@ -78,8 +84,14 @@ async function reconcileOne(pos, ledger) {
     const kind = exitKind(current, exit);
     // Real fees = entry order fees + exit order fees, when the broker reports them.
     const actualFees = Number.isFinite(s.fees) && Number.isFinite(exit.fees) ? s.fees + exit.fees : undefined;
+    // Execution audit (Phase 63): the bracket leg's own level (stop trigger / take-profit limit) less its fee vs the real fill.
+    const level = kind === 'take_profit' ? current.targets && current.targets[0] && current.targets[0].price : current.invalidation;
+    const rate = pos.broker === 'Coinbase' ? be.exactRate('crypto', kind === 'take_profit' ? 'maker' : 'taker') : 0;
+    const cashoutAudit = pos.direction === 'short' || !(level > 0) ? null : be.cashoutVariance({ expected: level * exit.filledQty * (1 - rate), expectedQty: exit.filledQty,
+      filledQty: exit.filledQty, avgFillPrice: exit.avgFillPrice, fees: Number.isFinite(exit.fees) ? exit.fees : level * exit.filledQty * rate, expectedBid: level,
+      basis: kind === 'take_profit' ? 'take-profit limit' : 'stop trigger' });
     const closed = ledger.closePosition(pos.id, exit.avgFillPrice, 'BROKER_EXIT', {
-      exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', actualFees,
+      exitLeg: kind, brokerExitId: exit.brokerExitId, pnlSource: 'broker-fills', actualFees, ...(cashoutAudit ? { cashoutAudit } : {}),
     });
     return { id: pos.id, action: 'closed', detail: `${kind} filled @ ${exit.avgFillPrice}`, trade: closed };
   }

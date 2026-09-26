@@ -21,6 +21,11 @@
 // One close per position at a time (isClosing); the reconciler skips it meanwhile.
 const api = require('../connectors/coinbase-api');
 const orders = require('../connectors/coinbase-orders');
+const be = require('../risk/break-even');
+const prices = require('../market/latest-prices');
+// Phase 63 execution audit: right before the sell, the expected cashout (Coinbase's best
+// bid x qty less the exact taker fee; no fresh bid: the last price) is recorded; the
+// booked trade carries cashoutAudit { expected, actual (qty x avg fill - real fee), variance }.
 
 const timing = { pollMs: 700, verifyMs: 8000, fillWaitMs: 15000 };
 const EXIT_REASON = 'MANUAL_CLOSE @ Coinbase';
@@ -53,15 +58,24 @@ async function rearm(ledger, pos, qty, why) {
 }
 
 // Book a filled sell: the whole position, or (partial) the sold part split off first.
-function book(ledger, pos, fill, entryFees, extra) {
+function book(ledger, pos, fill, entryFees, extra, expected = null) {
   let id = pos.id;
   const partial = fill.filledQty + QTY_EPS < fill.soldQty;
   if (partial) id = ledger.splitPosition(pos.id, fill.filledQty).id;
+  const cashoutAudit = expected ? be.cashoutVariance({ ...expected, filledQty: fill.filledQty, avgFillPrice: fill.avgFillPrice, fees: fill.fees || 0 }) : null;
   const trade = ledger.closePosition(id, fill.avgFillPrice, EXIT_REASON, {
-    exitLeg: 'manual', pnlSource: 'broker-fills', actualFees: entryFees + fill.fees, brokerExitId: fill.orderId, ...extra,
+    exitLeg: 'manual', pnlSource: 'broker-fills', actualFees: entryFees + fill.fees, brokerExitId: fill.orderId, ...(cashoutAudit ? { cashoutAudit } : {}), ...extra,
   });
   log(`${pos.id}: SOLD ${fill.filledQty} ${pos.asset} @ ${fill.avgFillPrice} (fees ${(entryFees + fill.fees).toFixed(4)}), net ${trade.netPnl.toFixed(2)}${partial ? ' (partial fill)' : ''}`);
   return { trade, partial };
+}
+
+// What the sell should deposit, right before it is sent: { expected, expectedQty, expectedBid, basis, at }.
+function expectedCashout(pos, product, qty, now = Date.now()) {
+  const q = be.liveQuote(product, now) || be.liveQuote(pos.asset, now);
+  const px = q ? q.bid : prices.getLatestPrice(pos.asset);
+  if (!(px > 0)) return null;
+  return { expected: px * qty * (1 - be.exactRate('crypto', 'taker')), expectedQty: qty, expectedBid: px, basis: q ? 'best bid' : 'last price', at: now };
 }
 
 // The bracket's state: { entryFees, bracketId, filled } from the entry's order status.
@@ -116,7 +130,8 @@ async function closeLive(ledger, id) {
       if (b.bracketId) await rearm(ledger, pos, qty, 'the hold was not released');
       throw fail('HOLD_NOT_RELEASED', bal.ok ? `Coinbase shows ${bal.available} ${cur} available (${bal.hold} on hold) for a ${qty} sell; nothing was sold` : bal.error);
     }
-    // 4. Sell.
+    // 4. Sell (the expected cashout recorded first: the execution audit).
+    const expected = expectedCashout(pos, product, qty);
     const sell = await orders.sellMarket(product, qty, `${id}:manual-close`);
     if (!sell.ok) {
       if (b.bracketId) await rearm(ledger, pos, qty, `a refused sell (${sell.error})`);
@@ -126,7 +141,7 @@ async function closeLive(ledger, id) {
     // 5. Book the fill.
     const o = await pollUntil(() => api.getOrder(sell.brokerId), (r) => r.ok && r.terminal, timing.fillWaitMs);
     if (!(o.ok && o.terminal)) {
-      ledger.updatePositions((p) => (p.id === id ? Object.assign(p, { brokerManualExitId: sell.brokerId, brokerManualExitQty: sell.qty }) && true : false));
+      ledger.updatePositions((p) => (p.id === id ? Object.assign(p, { brokerManualExitId: sell.brokerId, brokerManualExitQty: sell.qty, brokerManualExitExpected: expected }) && true : false));
       log(`${id}: sell ${sell.brokerId} still working; the reconciler books it when it fills`);
       return { pending: true, brokerExitId: sell.brokerId };
     }
@@ -135,7 +150,7 @@ async function closeLive(ledger, id) {
       throw fail('SELL_UNFILLED', `the market sell ended ${o.status} with nothing filled`);
     }
     const fill = { orderId: sell.brokerId, filledQty: Math.min(o.filledQty, qty), soldQty: sell.qty, avgFillPrice: o.avgFillPrice, fees: o.fees };
-    const done = book(ledger, pos, fill, b.entryFees, { canceledBracketId: b.bracketId });
+    const done = book(ledger, pos, fill, b.entryFees, { canceledBracketId: b.bracketId }, expected);
     if (done.partial && b.bracketId) await rearm(ledger, pos, qty - fill.filledQty, 'a partial sell');
     return done;
   } finally {
@@ -154,7 +169,7 @@ async function settle(pos, ledger) {
   }
   const s = pos.adopted ? { ok: true, fees: 0 } : await api.getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId });
   const fill = { orderId: pos.brokerManualExitId, filledQty: Math.min(o.filledQty, pos.positionSize), soldQty: pos.brokerManualExitQty || pos.positionSize, avgFillPrice: o.avgFillPrice, fees: o.fees };
-  const { trade } = book(ledger, pos, fill, s.ok ? s.fees || 0 : 0, {});
+  const { trade } = book(ledger, pos, fill, s.ok ? s.fees || 0 : 0, {}, pos.brokerManualExitExpected || null);
   return { id: pos.id, action: 'closed', detail: `manual sell filled @ ${o.avgFillPrice}`, trade };
 }
 

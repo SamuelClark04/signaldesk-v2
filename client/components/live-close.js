@@ -23,7 +23,7 @@
     if (busy.has(p.id) || !SD.app.isOnline()) return;
     const live = m && m.price > 0 ? m.price : null;
     const q = p.exitQuote;
-    const est = q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your Coinbase cash at ${price(q.underlying, p)} (after the ${money(q.exitFee)} exit fee); net ${signed(q.net, money)} after all fees`
+    const est = q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your Coinbase cash: ${SD.netPnl.cashoutMath(p)}; net ${signed(q.net, money)} after all fees`
       : live ? `~${money(p.positionSize * live)} at ${price(live, p)} before fees (${signed((live - p.fillPrice) * p.positionSize, money)} vs entry)` : 'at the market price';
     const steps = p.adopted ? 'It has no SignalDesk stop/target at Coinbase, so this is a plain market sell.'
       : '1) cancel its stop/target bracket at Coinbase, 2) wait until Coinbase releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.';
@@ -44,8 +44,8 @@
     SD.app.refresh();
   }
 
-  // Phase 61: the button carries what the sale deposits (cashout: size x live price less
-  // the exit fee, from the server's exit quote) and the round-trip net P&L.
+  // Phase 61: the button carries what the sale deposits (cashout: size x the best bid (Phase 63)
+  // less the exact taker fee, from the server's exit quote) and the round-trip net P&L.
   // Each amount is one unbreakable piece: the sign never wraps away from its figure.
   const label = (p) => {
     const q = p.exitQuote;
@@ -56,8 +56,10 @@
 
   function button(p, m, ctx) {
     const closing = busy.has(p.id);
+    const math = SD.netPnl.cashoutMath(p); // Phase 63: the cashout arithmetic (best bid − the exact Coinbase fee) on hover
     const b = el('button', { type: 'button', className: 'btn hud-exit is-armed is-live-close', disabled: closing || !ctx.online,
-      title: p.adopted ? 'Market-sell this holding at Coinbase (real money)' : 'Cancel its stop/target at Coinbase, then market-sell it (real money)' },
+      title: `${math ? `${math}
+` : ''}${p.adopted ? 'Market-sell this holding at Coinbase (real money)' : 'Cancel its stop/target at Coinbase, then market-sell it (real money)'}` },
     closing ? ['Closing at Coinbase…'] : label(p));
     b.onclick = () => request(p, m);
     return b;

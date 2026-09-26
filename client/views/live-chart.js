@@ -37,7 +37,8 @@
     return {
       option: !!od || plan, entry: plan ? x.refSpot : x.fillPrice || (x.entryZone && x.entryZone.max), entryMin: x.entryZone && x.entryZone.min !== x.entryZone.max ? x.entryZone.min : 0,
       stop: x.invalidation, t1: plan ? x.t1 : t[0] && t[0].price, t2: plan ? x.t2 : t[1] && t[1].price,
-      be: plan ? x.stats && x.stats.breakeven : od && (od.breakeven || (od.stats && od.stats.breakeven)),
+      // BE: options at expiry; a stock / crypto position the price where closing now nets $0 (Phase 63), a staged order its fee hurdle.
+      be: plan ? x.stats && x.stats.breakeven : od ? od.breakeven || (od.stats && od.stats.breakeven) : (x.exitQuote && x.exitQuote.breakEven) || (x.hurdle && x.hurdle.breakEven),
       debit: plan ? x.debit : od && od.debit, stopValue: plan ? x.stopValue : rule && rule.stopValue, t1Value: plan ? x.t1Value : rule && rule.targetValue, t2Value: plan ? x.t2Value : rule && rule.t2Value,
     };
   }
@@ -53,10 +54,12 @@
     const L = withLevels ? levelsOf(o) : levelsOf(overlay);
     return (!levelsOn || !L ? [] : L.option ? optionSpecs(L) : !withLevels ? [
       { title: 'T2', price: L.t2, color: css('--long', '#2dd4bf') }, { title: 'T1', price: L.t1, color: css('--long', '#2dd4bf') },
+      { title: 'BE', price: L.be, color: css('--warn', '#fbbf24') }, // dashed: breakeven after both fees (+ the bid gap)
       { title: 'Entry', price: L.entry, color: cyan() }, { title: 'SL', price: L.stop, color: css('--short', '#fb7185') },
     ] : [
       { title: 'T2', price: t[1] && t[1].price, color: css('--long', '#2dd4bf') },
       { title: 'T1', price: t[0] && t[0].price, color: css('--long', '#2dd4bf') },
+      { title: 'BE', price: o.hurdle && o.hurdle.breakEven, color: css('--warn', '#fbbf24') },
       { title: 'Entry', price: o.entryZone.max, color: cyan() },
       { title: 'Entry', price: o.entryZone.min !== o.entryZone.max ? o.entryZone.min : 0, color: cyan() },
       { title: 'Stop', price: o.invalidation, color: css('--short', '#fb7185') },

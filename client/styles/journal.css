@@ -3,3 +3,6 @@
 /* ---------- P/L utilities (same palette: green = gain, red = loss) ---------- */
 .pnl-pos { color: var(--long); }
 .pnl-neg { color: var(--short); }
+
+/* Execution audit line under a live close (Phase 63): expected vs actual cashout. */
+.jr-audit { display: block; margin-top: 2px; font-size: 11.5px; }
