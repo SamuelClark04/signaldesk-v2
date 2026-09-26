@@ -71,3 +71,7 @@
 .np-math { margin: 4px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
 .np-hurdle, .mt-hurdle, .apv-hurdle { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; }
 .np-hurdle.is-warn, .mt-hurdle.is-warn, .apv-hurdle.is-warn { padding: 5px 8px; border: 1px solid rgba(251, 191, 36, 0.45); border-radius: 6px; background: rgba(251, 191, 36, 0.1); color: var(--warn); font-weight: 600; }
+/* Phase 67: no stop/target working at the broker (UNARMORED), or a sell being confirmed */
+.armor-warn { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--short); border-radius: 6px; background: var(--short-bg); color: var(--text); font-size: 12px; line-height: 1.4; }
+.armor-warn strong { color: var(--short); }
+.opp-heat.is-unarmored { background: var(--short-bg); color: var(--short); font-weight: 600; }

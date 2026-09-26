@@ -136,7 +136,7 @@
     ACTION_FAILED: (payload) => (payload && ['CLOSE_POSITION', 'ADOPT_POSITION', 'RELEASE_POSITION'].includes(payload.type)
       ? (SD.portfolio.actionFailed(payload), payload.type === 'CLOSE_POSITION' && SD.opportunities.actionFailed(payload))
       : SD.opportunities.actionFailed(payload)),
-    POSITIONS_UPDATED: () => SD.portfolio.positionsUpdated(), // closes a pending adoption form
+    POSITIONS_UPDATED: (list) => { SD.portfolio.positionsUpdated(); SD.liveClose.watch(list); }, // closes a pending adoption form; UNARMORED toast (Phase 67)
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
@@ -162,7 +162,7 @@
     setConn('connecting', 'Connecting…');
     const ws = new WebSocket(WS_URL);
     socket = ws;
-    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); refreshView(); });
+    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.liveClose.reset(); refreshView(); }); // Phase 67: no close stays "Closing…" across a reconnect
     ws.addEventListener('message', (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }

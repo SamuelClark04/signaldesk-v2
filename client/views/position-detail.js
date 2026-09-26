@@ -116,6 +116,7 @@
     const under = m.price > 0 ? `${ulPx(m.price)}${Number.isFinite(m.underlyingMove) ? ` (${pct(m.underlyingMove)} since ${ulPx(p.fillPrice)})` : ''}` : 'No live price';
     return el('div', { className: 'opp-kv-group' }, [
       el('h3', { className: 'opp-section', textContent: `${venueOf(p)} · ${p.direction === 'short' ? 'Short' : 'Long'} ${p.setupType || ''}` }),
+      ...[SD.liveClose.armor(p)].filter(Boolean), // Phase 67: UNARMORED / SELL UNCONFIRMED
       ...(isRealOption(p) || !opt ? [heroRow(p, m)] : []),
       ...(isRealOption(p) ? realOptionRows(p, m) : opt ? legacyOptionRows(p) : linearRows(p, m)),
       ...exitRows(p),

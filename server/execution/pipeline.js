@@ -17,14 +17,12 @@ const { computeProximity } = require('../intelligence/trigger-proximity');
 const { computeTriggers } = require('../intelligence/watch-triggers');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
-const { reconcileLivePositions } = require('./reconciler');
+const exitPass = require('./exit-pass'); // broker reconciliation (first in every pass) + paper exits (Phase 67)
 const { recordRejection: recordStat } = require('./rejection-stats');
 const scanLog = require('./scan-log');
 const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const prices = require('../market/latest-prices');
-const optionsData = require('../connectors/options-data');
-const { legSymbols } = require('./option-marks');
 const macro = require('../connectors/macro-events');
 const { reviewHoldings } = require('./pilot-handler');
 const expirySweeper = require('./expiry-sweeper'); // expired setups leave the queue within 30 s
@@ -111,6 +109,9 @@ function notify(order) {
 
 async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
+  // Broker truth FIRST (Phase 67): fills, exits and voids that happened at the broker (also while
+  // SignalDesk was offline) are booked before any strategy runs or any setup is sized / staged.
+  await exitPass.reconcile(broadcast);
   // Macro/FDA calendar (re-read every few hours): every setup is tagged with the
   // scheduled events inside its expected hold (candidate.catalysts).
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
@@ -185,8 +186,7 @@ async function pipelinePass() {
   // After staging (Phase 62): each radar row's gate verdict reflects this pass's risk-engine outcome.
   try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
 
-  // Exit management. LIVE positions first, from broker truth (real fills);
-  // then PAPER positions from local prices (monitorPositions skips LIVE ones).
+  // Exit management (LIVE positions were reconciled at the top of the pass).
   // Live prices: watchlist last prices, and PRICES_UPDATED for the Setups view
   // (each broadcast only when a price actually moved).
   try {
@@ -209,39 +209,9 @@ async function pipelinePass() {
     console.error('[pipeline] watch triggers failed:', err.message);
   }
 
-  let positionsChanged = false;
-  let journalChanged = false;
-  // Held option contracts: one quote request per pass (only while any are open),
-  // so marks and paper exits use the real bid. Re-sent every pass while held.
-  const held = ledger.getActivePositions().filter((p) => p.market === 'options' && p.optionsData && p.optionsData.contract);
-  if (held.length) {
-    // Every leg of a spread; each quote remembers the underlying price then (delta interpolation, option-marks.js).
-    await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), Date.now(), (u) => prices.getLatestPrice(u));
-    positionsChanged = true;
-  }
-  const logClose = (t) => console.log(`[ledger] closed ${t.id} ${t.exitReason} @ ${t.exitPrice}: `
-    + `net ${t.netPnl.toFixed(2)} (${t.rMultiple.toFixed(2)}R)${t.exitLeg ? ` via ${t.exitLeg}` : ''}`);
-  try {
-    for (const r of await reconcileLivePositions(ledger.getActivePositions(), ledger)) {
-      if (r.action === 'closed') { logClose(r.trade); journalChanged = true; }
-      if (r.action === 'voided') console.warn(`[reconcile] voided ${r.id}: ${r.detail}`);
-      if (r.action === 'synced') console.log(`[reconcile] ${r.id}: entry synced to broker fill`);
-      if (['closed', 'voided', 'synced'].includes(r.action)) positionsChanged = true;
-    }
-  } catch (err) {
-    console.error('[pipeline] broker reconciliation failed:', err.message);
-  }
-  try {
-    const closed = ledger.monitorPositions(prices.getLatestPrices());
-    closed.forEach(logClose);
-    if (closed.length) { positionsChanged = true; journalChanged = true; }
-  } catch (err) {
-    console.error('[pipeline] position monitor failed:', err.message);
-  }
-  if (positionsChanged) broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+  await exitPass.run(broadcast); // held option quotes, PAPER exits, POSITIONS_UPDATED / JOURNAL_UPDATED (exit-pass.js)
   // Portfolio Pilot defense: SELL under the 200-day SMA, TRIM when far extended (Approvals queue).
   try { await reviewHoldings(broadcast); } catch (err) { console.error('[pipeline] pilot review failed:', err.message); }
-  if (journalChanged) broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
 
   // "Heating up": distance to each strategy's trigger (Market Watch filter).
   try {
@@ -270,6 +240,7 @@ function startPipeline(options = {}) {
   if (pipelineTimer) throw new Error("pipeline: already started");
   if (typeof options.broadcast === "function") broadcast = options.broadcast;
   expirySweeper.start(broadcast);
+  exitPass.reconcile(broadcast); // Phase 67: book what the broker did while SignalDesk was down, right at boot (errors are logged inside)
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)

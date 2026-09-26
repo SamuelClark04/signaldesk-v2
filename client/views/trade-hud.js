@@ -79,6 +79,7 @@
     return el('div', { className: 'hud-pos' }, [
       el('div', { className: 'hud-line' }, [el('span', { className: `hud-venue${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: venue }),
         el('span', { textContent: realOption ? `${p.optionsData.structure === 'vertical' ? (p.optionsData.type === 'put' ? 'BEAR PUT SPREAD' : 'BULL CALL SPREAD') : `LONG ${p.optionsData.type === 'put' ? 'PUT' : 'CALL'}`}` : `${p.direction.toUpperCase()} ${size(p)} @ ${price(p.fillPrice, p)}` })]),
+      ...[SD.liveClose.armor(p)].filter(Boolean), // Phase 67: UNARMORED / SELL UNCONFIRMED
       ...(realOption ? [...optionBlock(p, m), underlyingLine(p, m)] : [pnl]),
       ...(p.market === 'options' && !realOption ? [el('div', { className: 'hud-muted', textContent: 'Simulated spread from the old options strategy: '
         + 'no listed contract, so no live premium. Close it to retire it.' })] : []),
@@ -124,15 +125,19 @@
         const cur = document.querySelector(`.trade-hud[data-hud="${id}"]`);
         if (cur) { place(cur); view.pos = { left: cur.offsetLeft, top: cur.offsetTop }; } // keep what is shown (clamped)
       };
-      const up = () => {
+      // Phase 67: pointerup AND pointercancel (touch scroll, lost pointer) end the drag, so the
+      // window listeners never outlive it; a cancel keeps what was dragged and fires no click.
+      const end = (ev) => {
         window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
         document.body.classList.remove('hud-dragging');
-        if (moved) saveView(); else if (onClick) onClick();
+        if (moved) saveView(); else if (onClick && ev.type === 'pointerup') onClick();
       };
       document.body.classList.add('hud-dragging');
       window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
       e.preventDefault();
     }
 

@@ -3,103 +3,18 @@
 // every open client shows the same thing. Transport (send/broadcast) is injected
 // by server.js, so this file never touches sockets directly.
 const ledger = require('./paper-ledger');
-const { validateApproval } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { createPilotHandler } = require('./pilot-handler');
 const { publishBrokerState } = require('./broker-state');
-const { recordRejection } = require('./rejection-stats');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
 const { runPipeline, getScanStatus } = require('./pipeline');
-const { requiredBasis } = require('../risk/venue-capital');
-const { resizeOrder } = require('../risk/risk-engine');
-const alpacaApi = require('../connectors/alpaca-api');
-const coinbaseApi = require('../connectors/coinbase-api');
-const coinbaseSocket = require('../connectors/coinbase-socket');
+// APPROVE / REJECT, live routing and the in-flight lock (Phase 67: order-router.js).
+const { approveWithGuard, QUEUE_ACTIONS, inFlight, isBusy } = require('./order-router');
 const brokerSync = require('../connectors/broker-sync');
 const adoption = require('./adoption');
 const { suggestLevels } = require('../risk/adoption-levels');
 const newsSentiment = require('../connectors/news-sentiment');
 const externalApi = require('./external-api');
-
-// Execution venue per market: which mode setting governs it, and which broker
-// connector places LIVE orders. Options have no live path yet: the contract and
-// premium are real (options-data.js), but no option order routing exists, and a
-// stock bracket on the underlying would buy SHARES.
-const VENUES = {
-  stocks: { modeKey: 'stockMode', broker: 'Alpaca', api: alpacaApi },
-  options: { modeKey: 'stockMode', broker: 'Alpaca', api: null },
-  crypto: { modeKey: 'cryptoMode', broker: 'Coinbase', api: coinbaseApi },
-};
-
-// Route a guard-approved order by its venue's mode (`order` may be the user's
-// resized copy: risk-engine.js resizeOrder, same id, a new quantity).
-//   paper: fill in the paper ledger.
-//   live:  submit to the broker first; only an ACCEPTED order is recorded in the
-//          ledger (tagged execution LIVE + brokerId). A failed submit leaves the
-//          order pending and nothing is filled anywhere.
-async function routeApproved(order, livePrice) {
-  const venue = VENUES[order.market];
-  if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
-  const settings = ledger.getSettings();
-  const resized = order.amountOverride ? order : null;
-  if (settings[venue.modeKey] === 'paper' || order.forcePaper) return ledger.executeOrder(order.id, livePrice, {}, resized); // forcePaper: a manual PAPER ticket (manual-trade.js)
-  if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
-  // A LIVE order must have been sized from that live account. One staged while
-  // the venue was on paper (or before this check existed) is refused, never sent.
-  const needed = requiredBasis(order.market, settings);
-  if (order.sizingBasis !== needed) throw new Error(`SIZED_FOR_OTHER_VENUE: sized from ${order.sizingBasis || 'the paper bankroll'}, venue needs ${needed}`);
-
-  console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
-  const tick = order.market === 'crypto' ? coinbaseSocket.getLatest()[order.asset] : null; // best bid for a post-only limit entry
-  const result = await venue.api.submitOrder(order, order.positionSize, livePrice, { bid: tick && tick.bid, ask: tick && tick.ask });
-  if (!result.ok) {
-    console.error(`[LIVE] ${venue.broker} order FAILED for ${order.id}: ${result.error}`);
-    throw new Error(`LIVE_ORDER_FAILED: ${result.error}`);
-  }
-  console.warn(`[LIVE] ${venue.broker} accepted ${order.id} as ${result.brokerId}`);
-
-  try {
-    return ledger.executeOrder(order.id, livePrice, {
-      execution: 'LIVE',
-      brokerId: result.brokerId,
-      broker: venue.broker,
-      brokerEnvironment: result.environment,
-      fillEstimated: true, // the broker's actual fill price is not fetched yet
-      ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}), ...(result.product ? { brokerProduct: result.product } : {}),
-    }, resized);
-  } catch (err) {
-    // The broker holds a real position the ledger could not record. Never silent.
-    console.error(`[LIVE] CRITICAL: ${venue.broker} order ${result.brokerId} was placed for ${order.id} `
-      + `but the ledger could not record it (${err.message}). Reconcile manually in ${venue.broker}.`);
-    throw new Error(`LIVE_UNRECORDED: ${venue.broker} order ${result.brokerId} placed but not recorded; check ${venue.broker}`);
-  }
-}
-
-// Guarded approval: the order guard runs first whatever the venue, then the order
-// is routed by its market's mode. Failed guards retire the setup with a reason.
-// amount: the user's Trade Amount ($) for this order (Setups / Approvals); the
-// risk engine re-sizes it (fractional shares on paper only: live Alpaca brackets
-// need whole shares). An invalid amount leaves the order pending.
-async function approveWithGuard(id, { amount, confirmed } = {}) {
-  const order = ledger.getPendingOrders().find((o) => o.id === id);
-  if (!order) throw new Error(`no pending order ${id}`);
-  const livePrice = prices.getLatestPrice(order.asset);
-  const check = validateApproval(order, livePrice);
-  if (check.valid && amount !== undefined && amount !== null) {
-    const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
-    const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });
-    if (!resized.approved) throw new Error(resized.reason);
-    console.log(`[ledger] APPROVE ${id}: trade amount $${Number(amount).toFixed(2)} -> ${resized.positionSize} (was ${order.positionSize}), risk $${resized.dollarRisk.toFixed(2)}`);
-    return routeApproved(resized, livePrice);
-  }
-  if (check.valid) return routeApproved(order, livePrice);
-  // A missing price is a data gap, not a verdict on the setup: leave it pending.
-  if (check.reason !== 'NO_LIVE_PRICE') {
-    ledger.discardOrder(id);
-    recordRejection(id, check.reason, order);
-  }
-  throw new Error(check.reason);
-}
 
 // Manual close from the Portfolio tab. PAPER positions only, at a fresh live
 // price, booked by the ledger exactly like a stop/target exit (same fee model).
@@ -107,21 +22,6 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
 // reconciler then records the real fill.
 // Manual close: books the exact exit quote the user was shown (exit-quote.js, Phase 59).
 const closeManually = (id, quoteAt) => require('./exit-quote').closeManually(ledger, id, quoteAt);
-
-const QUEUE_ACTIONS = {
-  APPROVE: (id, msg) => approveWithGuard(id, msg),
-  REJECT: (id) => {
-    const order = ledger.getPendingOrders().find((o) => o.id === id);
-    const discarded = ledger.discardOrder(id);
-    recordRejection(id, 'REJECTED_BY_USER', order);
-    return discarded;
-  },
-};
-
-// Orders with an APPROVE/REJECT in progress. A live submit awaits the broker, so
-// without this a double-click could send two orders, or a REJECT could remove an
-// order the broker is filling.
-const inFlight = new Set();
 
 // Manual "Run scan": one extra pipeline pass (the same pass the 60s timer runs),
 // at most once per MANUAL_SCAN_GAP_MS and never on top of a running pass.
@@ -293,4 +193,4 @@ function createMessageHandler({ send, broadcast }) {
   };
 }
 
-module.exports = { createMessageHandler, isBusy: (id) => inFlight.has(id) }; // isBusy: expiry-sweeper.js
+module.exports = { createMessageHandler, isBusy }; // isBusy lives in order-router.js (expiry-sweeper.js reads it there)

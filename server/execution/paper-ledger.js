@@ -14,6 +14,7 @@ const exitQuotes = require('./exit-quote'); // WYSIWYG: the one exit pricing for
 const prices = require('../market/latest-prices');
 const extras = require('./ledger-extras');
 const exits = require('./exit-monitor');
+const live = require('./ledger-live');
 
 const pendingOrders = [];
 const activePositions = [];
@@ -146,83 +147,9 @@ function reducePosition(candidateId, fraction, exitPrice, exitReason) {
   return closePosition(part.id, exitPrice, exitReason);
 }
 
-// Split `qty` off an open position into its own record "<id>:part:<ms>" (dollar risk
-// pro rata), e.g. the filled part of a partially filled broker sell (coinbase-exit.js).
-function splitPosition(candidateId, qty) {
-  const pos = activePositions.find((p) => p.id === candidateId);
-  if (!pos) throw new Error(`paper-ledger: no open position ${candidateId}`);
-  if (!(qty > 0 && qty < pos.positionSize)) throw new Error('paper-ledger: split quantity must be inside the position');
-  const part = { ...pos, id: `${pos.id}:part:${Date.now()}`, parentId: pos.id, positionSize: qty, dollarRisk: pos.dollarRisk * (qty / pos.positionSize) };
-  pos.positionSize -= qty;
-  pos.dollarRisk -= part.dollarRisk;
-  activePositions.push(part);
-  store.save();
-  return { ...part };
-}
-
 // Exit checks (stop, T1 partial, T2 runner, option values): exit-monitor.js.
 const monitorPositions = (latestPricesMap) => exits.monitorPositions(latestPricesMap);
-
-// ---------- Broker reconciliation (LIVE positions only) ----------
-function findLive(candidateId) {
-  const pos = activePositions.find((p) => p.id === candidateId);
-  if (!pos) throw new Error(`paper-ledger: no open position ${candidateId}`);
-  if (pos.execution !== 'LIVE') throw new Error(`paper-ledger: ${candidateId} is not a LIVE position`);
-  return pos;
-}
-
-// Replace the estimated entry with the broker's actual fill. A partial fill
-// shrinks the position (and its dollar risk) to what was really bought.
-function syncLiveFill(candidateId, { fillPrice, filledQty }) {
-  const pos = findLive(candidateId);
-  if (!(fillPrice > 0) || !(filledQty > 0)) throw new Error('paper-ledger: broker fill needs price and quantity');
-  if (filledQty < pos.positionSize) {
-    pos.dollarRisk *= filledQty / pos.positionSize;
-    pos.positionSize = filledQty;
-  }
-  Object.assign(pos, { fillPrice, fillEstimated: false, brokerFillSyncedAt: Date.now() });
-  store.save();
-  return { ...pos };
-}
-
-// The broker never filled the entry (rejected / canceled / expired): nothing was
-// traded, so the record leaves the book without entering the trade journal.
-function voidLivePosition(candidateId, reason) {
-  findLive(candidateId);
-  const i = findIndex(activePositions, candidateId);
-  const [pos] = activePositions.splice(i, 1);
-  const voided = { ...pos, status: 'void', voidReason: reason, voidedAt: Date.now() };
-  discardedOrders.push(voided);
-  store.save();
-  return { ...voided };
-}
-
-// ---------- Adopted holdings (external LIVE positions) ----------
-// A holding bought outside SignalDesk, put under its watch with user-chosen
-// levels. Recorded as a LIVE position flagged `adopted`: no broker order exists,
-// so the reconciler skips it and monitorPositions (paper exits) skips it too;
-// SignalDesk ALERTS on it (attention engine) but never places or sends orders.
-// Not a risk-engine order: it records money already invested, so isApproved()
-// does not apply. The caller (execution/adoption.js) validates everything.
-function adoptPosition(position) {
-  if (!position || !position.id || isKnown(position.id)) throw new Error('paper-ledger: invalid or duplicate adoption id');
-  const pos = { ...position, execution: 'LIVE', adopted: true, status: 'open', openedAt: Date.now() };
-  activePositions.push(pos);
-  store.save();
-  return { ...pos };
-}
-
-// Stop managing an adopted holding (the coins stay at the broker). It leaves the
-// book without a journal entry: SignalDesk never traded it.
-function releaseAdopted(candidateId) {
-  const i = findIndex(activePositions, candidateId);
-  if (i === -1 || !activePositions[i].adopted) throw new Error(`paper-ledger: ${candidateId} is not an adopted position`);
-  const [pos] = activePositions.splice(i, 1);
-  const released = { ...pos, status: 'released', releasedAt: Date.now() };
-  discardedOrders.push(released);
-  store.save();
-  return { ...released };
-}
+// LIVE bookkeeping (split, broker fill, void, bracket status) and adopted holdings: ledger-live.js (Phase 67).
 
 // Read-only views: callers get copies, never the ledger's own arrays.
 // Pending orders carry derived price scenarios (stop/T1/T2) for the Setups view;
@@ -249,6 +176,7 @@ function updatePositions(mutate) {
 store.attach(LISTS);
 extras.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, savedSetups, pilotActions, save: store.save, backup: store.backup });
 exits.bind({ activePositions, closePosition, reducePosition, save: store.save });
+live.bind({ activePositions, discardedOrders, isKnown, findIndex, save: store.save });
 
 module.exports = {
   updatePositions,
@@ -257,12 +185,13 @@ module.exports = {
   discardOrder,
   closePosition,
   reducePosition,
-  splitPosition,
+  splitPosition: live.splitPosition,
   monitorPositions,
-  syncLiveFill,
-  voidLivePosition,
-  adoptPosition,
-  releaseAdopted,
+  syncLiveFill: live.syncLiveFill,
+  voidLivePosition: live.voidLivePosition,
+  setBracketStatus: live.setBracketStatus,
+  adoptPosition: live.adoptPosition,
+  releaseAdopted: live.releaseAdopted,
   getPendingOrders,
   getActivePositions,
   getTradeJournal,

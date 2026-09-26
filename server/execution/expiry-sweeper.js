@@ -17,7 +17,7 @@ let timer = null;
 
 
 function sweep(broadcast, now = Date.now()) {
-  const busy = (id) => { try { return require('./message-handler').isBusy(id); } catch { return false; } };
+  const busy = (id) => { try { return require('./order-router').isBusy(id); } catch { return false; } };
   const expired = ledger.getPendingOrders().filter((o) => !busy(o.id)).map((o) => ({ o, why: staleness(o, prices.getLatestPrice(o.asset), now) })).filter((x) => x.why);
   for (const { o, why } of expired) {
     try {

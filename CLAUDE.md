@@ -30,10 +30,13 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
 
 Server (`server/`)
 - `server.js` wiring · `client-assets.js` cache-busted client files
-- `execution/` `pipeline.js` (60 s loop: strategies -> gates -> risk engine -> stage),
-  `paper-ledger.js` + `ledger-store.js` (state), `message-handler.js` (WS actions),
-  `exit-quote.js` (net-first quotes, POSITION_MARKS), `coinbase-exit.js` ([Close at
-  Coinbase]), `reconciler.js` (broker truth), `expiry-sweeper.js` + `setup-ttl.js`
+- `execution/` `pipeline.js` (60 s loop: reconcile -> strategies -> gates -> risk engine ->
+  stage), `exit-pass.js` (broker reconcile first in every pass + at boot; paper exits),
+  `paper-ledger.js` + `ledger-live.js` (split / broker fill / bracketStatus / adopted) +
+  `ledger-store.js` (state), `message-handler.js` (WS actions), `order-router.js` (APPROVE /
+  REJECT, live routing, in-flight lock), `exit-quote.js` (net-first quotes, POSITION_MARKS),
+  `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm),
+  `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
   `rejection-stats.js` (reason buckets), `scan-log.js`
 - `risk/` `risk-engine.js` (sizing, $20 crypto minimum, gates), `cost-authority.js`

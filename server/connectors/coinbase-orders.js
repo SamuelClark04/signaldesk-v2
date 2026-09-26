@@ -10,7 +10,11 @@
 //                Coinbase refuses it rather than let it cross. The reconciler
 //                cancels it if still unfilled after 30 minutes. Otherwise market IOC.
 //   sellMarket   plain market SELL (an approved Portfolio Pilot sell / trim / stop
-//                on a broker-synced holding bought outside SignalDesk).
+//                on a broker-synced holding bought outside SignalDesk). Phase 67: a
+//                timeout, transport error, HTTP 429 or 5xx is `uncertain: true` (Coinbase
+//                may have accepted it); a refusal or a 4xx is a definite "not placed".
+//   findOrderByClientId  Phase 67: the order sent with a client_order_id (List Orders,
+//                filtered by product / side / start date), to settle an uncertain sell.
 // USD vs USDC (Phase 54): the account's cash is USD + USDC, and Coinbase books
 // USDC pairs separately. A BUY is routed to <BASE>-USDC when the USDC balance
 // exceeds USD, or covers the order when USD cannot; otherwise <BASE>-USD. The
@@ -101,7 +105,7 @@ async function sellMarket(product, size, clientOrderId) {
     body = await cbFetch(auth, 'POST', ORDERS_PATH, { body: { client_order_id: String(clientOrderId), product_id: product, side: 'SELL',
       order_configuration: { market_market_ioc: { base_size: qty } } } });
   } catch (err) {
-    return failure(err);
+    return { ...failure(err), uncertain: !err.status || err.status === 429 || err.status >= 500, qty: Number(qty) };
   }
   if (!body || body.success !== true) return rejection(body, 'sell');
   const orderId = body.success_response && body.success_response.order_id;
@@ -130,4 +134,24 @@ async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
   return orderId ? { ok: true, brokerId: orderId } : { ok: false, error: 'Coinbase: bracket response had no order_id' };
 }
 
-module.exports = { submitOrder, sellMarket, placeBracket, routeProduct };
+// The SELL order sent as `clientOrderId` on `product` since `sinceMs`: { ok, order } (order null:
+// not listed), or { ok: false, error } when Coinbase could not be asked.
+async function findOrderByClientId(product, clientOrderId, sinceMs) {
+  const auth = loadAuth();
+  if (auth.error) return { ok: false, error: auth.error };
+  try {
+    const since = new Date(Math.max(0, sinceMs - 5 * 60 * 1000)).toISOString();
+    const q = `?product_ids=${encodeURIComponent(product)}&order_side=SELL&start_date=${encodeURIComponent(since)}&limit=100`;
+    const body = await cbFetch(auth, 'GET', `${ORDERS_PATH}/historical/batch`, { query: q });
+    if (!body || !Array.isArray(body.orders)) throw new Error('Coinbase: unexpected orders response');
+    const o = body.orders.find((x) => x.client_order_id === String(clientOrderId));
+    if (!o) return { ok: true, order: null };
+    const status = String(o.status || 'unknown').toLowerCase().replace('cancelled', 'canceled');
+    return { ok: true, order: { orderId: o.order_id, status, filledQty: Number(o.filled_size) || 0, avgFillPrice: Number(o.average_filled_price) || null,
+      fees: Number(o.total_fees) || 0, terminal: ['filled', 'canceled', 'expired', 'failed'].includes(status) } };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId };

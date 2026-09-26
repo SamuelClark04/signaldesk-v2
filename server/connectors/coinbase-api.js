@@ -60,7 +60,7 @@ async function cbFetch(auth, method, path, { query = '', body } = {}) {
   try { json = await res.json(); } catch { /* non-JSON error page */ }
   if (!res.ok) {
     const hint = res.status === 401 ? ' (check key name/secret; Advanced Trade needs an ECDSA CDP key)' : '';
-    throw new Error(`Coinbase HTTP ${res.status}: ${(json && (json.message || json.error)) || res.statusText}${hint}`);
+    throw Object.assign(new Error(`Coinbase HTTP ${res.status}: ${(json && (json.message || json.error)) || res.statusText}${hint}`), { status: res.status });
   }
   return json;
 }
