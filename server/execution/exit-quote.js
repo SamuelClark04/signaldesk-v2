@@ -13,11 +13,14 @@
 //             linear legs as the order was sized (exit taker for a manual close)
 // Phase 63 (net first): every quote splits its friction into entryFee (Coinbase's real
 // entry fee once reconciled: pos.entryFeeActual, else the model's) and exitCost, and
-// carries breakEven (the price at which closing now nets $0) and net / gross %. A long
-// crypto position priced NOW (issue) sells at Coinbase's best bid: cashout = bid x size
-// less the exact taker fee, and the net is that cashout less the cost basis and entry
-// fee (the last-trade-to-bid gap is part of the exit cost). Without a fresh bid, or
-// for a level exit (stop / target), the last price with the model's taker rate.
+// carries breakEven and net / gross %. A long crypto position priced NOW (issue) sells at
+// Coinbase's best bid: cashout = bid x size less the exact taker fee in force, and the net
+// is that cashout less the cost basis and entry fee. Without a fresh bid, or for a level
+// exit (stop / target), the last price with the model's taker rate.
+// Phase 65: the gross is measured AT THE SELL PRICE (the bid), so gross - (entry fee + exit
+// fee) = net to the cent and the exit fee is Coinbase's fee alone (the spread is not a fee:
+// spreadCost is reported apart). breakEven is the fixed SELL price that nets $0 after the
+// entry fee and the exact exit taker fee: it never moves with the ticks.
 // Manual close (closeManually): the client sends the `at` of the quote it SHOWED; if
 // that quote was issued in the last QUOTE_MAX_AGE_MS it is booked as is (to the
 // cent), else the position is re-quoted at the live price and that is booked.
@@ -67,14 +70,19 @@ function quote(pos, price, kind = 'stop', at = Date.now(), bid = null) {
   const exitFee = opt ? OPTIONS_COMMISSION_PER_LEG * legs * size : sellPrice * size * exitRate;
   const modelled = estimateRoundTripFees(pos.market, size, pos.fillPrice, price, feeLegs(pos, kind));
   const entryFee = opt ? OPTIONS_COMMISSION_PER_LEG * legs * size : Number.isFinite(pos.entryFeeActual) ? pos.entryFeeActual : size * pos.fillPrice * legRate(pos.market, pos.entryLiquidity);
-  const spreadCost = atBid ? (price - bid) * size : 0;
-  const fees = atBid || Number.isFinite(pos.entryFeeActual) ? entryFee + spreadCost + exitFee : modelled;
+  const spreadCost = atBid ? (price - bid) * size : 0; // information only (the last-to-bid gap)
+  const lastGross = q.gross;
+  if (atBid) q.gross = grossPnl(pos, pos.fillPrice, bid); // gross at the bid: what a sell really realizes
+  const fees = atBid || Number.isFinite(pos.entryFeeActual) ? entryFee + exitFee : modelled;
   const net = q.gross - fees;
   const cashout = opt ? q.exitValue * pos.optionsData.multiplier * size - exitFee : pos.direction === 'long' ? sellPrice * size - exitFee : null;
   const cost = opt ? pos.optionsData.debit * pos.optionsData.multiplier * size : pos.fillPrice * size;
-  const breakEven = opt ? null : be.breakEvenPrice({ direction: pos.direction, fillPrice: pos.fillPrice, size, entryFee, exitRate, spread: spreadCost / size });
+  // Fixed: the sell price that nets $0 (exact taker exit fee for crypto; no live spread term).
+  const beRate = opt ? 0 : pos.market === 'crypto' ? be.exactRate('crypto', 'taker') : legRate(pos.market, 'taker');
+  const breakEven = opt ? null : be.breakEvenPrice({ direction: pos.direction, fillPrice: pos.fillPrice, size, entryFee, exitRate: beRate });
   return { id: pos.id, at, underlying: price > 0 ? price : null, ...q, fees, net, exitFee, cashout, r: pos.dollarRisk > 0 ? net / pos.dollarRisk : null, kind,
     entryFee, entryFeeActual: Number.isFinite(pos.entryFeeActual), exitCost: fees - entryFee, spreadCost, sellPrice, sellBasis: atBid ? 'best bid' : 'last price', bid: atBid ? bid : null,
+    exitRate, lastGross, size, fillPrice: pos.fillPrice, direction: pos.direction, market: pos.market,
     netPct: cost > 0 ? net / cost : null, grossPct: cost > 0 ? q.gross / cost : null, breakEven, breakEvenPct: breakEven ? breakEven / pos.fillPrice - 1 : null };
 }
 
@@ -99,7 +107,7 @@ function closeManually(ledger, id, quoteAt, now = Date.now()) {
   const q = seen && now - seen.at <= QUOTE_MAX_AGE_MS ? seen : quote(pos, live, 'stop', now, bidOf(pos, live, now));
   if (!q) throw new Error('NO_LIVE_PRICE');
   issued.delete(id);
-  return ledger.closePosition(id, q.underlying || live, 'MANUAL_CLOSE', { exitQuote: { at: q.at, booked: seen === q ? 'as shown' : 're-quoted at close' } }, q);
+  return ledger.closePosition(id, q.sellPrice || q.underlying || live, 'MANUAL_CLOSE', { exitQuote: { at: q.at, booked: seen === q ? 'as shown' : 're-quoted at close' } }, q);
 }
 
 // POSITION_MARKS every MARK_MS: every paper position's exit quote at the live price
@@ -111,9 +119,14 @@ function start(ledger, broadcast) {
   timer = setInterval(() => {
     try {
       const quotes = {};
-      for (const p of ledger.getActivePositions()) if (p.exitQuote) quotes[p.id] = p.exitQuote;
-      const key = JSON.stringify(Object.values(quotes).map((q) => [q.id, Math.round(q.net * 100), Math.round(q.midGross * 100)]));
-      if (key !== lastKey) { lastKey = key; broadcast('POSITION_MARKS', { at: Date.now(), quotes }); }
+      const book = {}; // Phase 65: each held symbol's last / bid of these quotes, so the client marks from ONE tick
+      for (const p of ledger.getActivePositions()) {
+        if (!p.exitQuote) continue;
+        quotes[p.id] = p.exitQuote;
+        if (p.exitQuote.underlying > 0 && p.market !== 'options') book[p.asset] = { last: p.exitQuote.underlying, bid: p.exitQuote.bid, at: p.exitQuote.at };
+      }
+      const key = JSON.stringify([Object.values(quotes).map((q) => [q.id, Math.round(q.net * 100), Math.round(q.midGross * 100)]), book].map((x, i) => (i ? Object.entries(x).map(([s, b]) => [s, b.last, b.bid]) : x)));
+      if (key !== lastKey) { lastKey = key; broadcast('POSITION_MARKS', { at: Date.now(), quotes, book }); }
     } catch (err) {
       console.error('[exit-quote] marks failed:', err.message);
     }

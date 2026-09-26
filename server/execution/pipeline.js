@@ -32,6 +32,7 @@ const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RAD
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
 const session = require('../market/market-session'); // is the US session open (Alpaca clock, else ET hours)
+const { spreadGate } = require('../risk/break-even'); // crypto bid/ask <= 0.45% (Phase 65)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -144,6 +145,9 @@ async function pipelinePass() {
         : 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
       continue;
     }
+    // Phase 65: never stage a crypto setup into a wide book (every crypto strategy, Moonshots too).
+    const book = candidate.market === 'crypto' ? spreadGate(candidate.asset) : null;
+    if (book && !book.ok) { recordRejection(candidate.id, book.reason, candidate); continue; }
     const capital = await sizingBankroll(candidate.market, settings);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.
@@ -264,6 +268,7 @@ function startPipeline(options = {}) {
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)
+  require('../connectors/coinbase-fees').start(); // the account's real Coinbase fee tier (Phase 65)
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));

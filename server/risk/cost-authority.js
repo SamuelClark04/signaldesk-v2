@@ -7,6 +7,9 @@
 //   COINBASE_MAKER_FEE      resting limit orders (0.006 = 0.60%: post-only entries, T1 limits)
 //   COINBASE_TAKER_FEE      orders that cross the spread (0.012 = 1.20%: stops, market exits)
 //   COINBASE_SPREAD_BUFFER  spread/slippage allowance for a TAKER leg (default 0.001)
+// Phase 65: the ACCOUNT's real fee tier (Coinbase /transaction_summary, coinbase-fees.js)
+// replaces these once fetched (setCoinbaseFees); coinbaseFees() is always the one in force.
+// Crypto setups are held to MAX_FEE_DRAG_CRYPTO (0.30R) and their stop floor budgets under it.
 // Legs are costed by how they really execute:
 //   entry   maker when the strategy rests a limit inside its entry zone
 //           (candidate.entryLiquidity = 'maker'), on paper AND live: live
@@ -40,6 +43,16 @@ const LEG_RATE = {
   crypto: { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE + COINBASE_SPREAD_BUFFER },
   stocks: { maker: 0.0005, taker: 0.0005 }, // slippage per leg (no commission)
 };
+// The Coinbase rates in force: the .env / default ones until the account's own tier is read.
+let cbFees = { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)', at: null };
+const coinbaseFees = () => ({ ...cbFees, buffer: COINBASE_SPREAD_BUFFER });
+function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
+  const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
+  if (!ok(maker) || !ok(taker) || !(taker > 0)) return false;
+  cbFees = { maker: Math.min(maker, taker), taker, source, at };
+  LEG_RATE.crypto = { maker: cbFees.maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  return true;
+}
 
 // Options are costed per contract (Phase 57): OPTIONS_COMMISSION_PER_LEG ($0.65,
 // the common retail rate; Alpaca itself charges $0 + pass-through fees, so this
@@ -65,6 +78,8 @@ function packageQuote(legs) {
 }
 
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
+const MAX_FEE_DRAG_CRYPTO = Math.min(MAX_FEE_DRAG, 0.30); // Phase 65: at most 30% of 1R to Coinbase fees + spread
+const maxFeeDrag = (market) => (market === 'crypto' ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG);
 
 function legRate(market, liquidity = 'taker') {
   const rates = LEG_RATE[market];
@@ -84,7 +99,7 @@ const blendedRoundTripRate = (market, entryLiquidity = 'taker') =>
 // rounded UP to 0.1%. Crypto with a maker entry at the Intro tier: 0.60% +
 // (0.60% maker T1 + 1.30% taker stop incl. spread) / 2 = 1.55% round trip
 // -> 4.6% stop (paper and live), fee drag 0.337R <= 0.35R.
-const minStopPct = (market, entryLiquidity, budget = 0.34) =>
+const minStopPct = (market, entryLiquidity, budget = maxFeeDrag(market) - 0.01) =>
   Math.ceil((blendedRoundTripRate(market, entryLiquidity) / budget) * 1000 - 1e-9) / 1000;
 
 // Round-trip cost in dollars for a sized position. The ledger uses the same
@@ -115,7 +130,7 @@ function evaluateCosts(candidate, dollarRisk) {
     : candidate.positionSize * candidate.entryPrice * blendedRoundTripRate(candidate.market, candidate.entryLiquidity)) + spreadCost;
   const feeDrag = estimatedFees / dollarRisk;
 
-  if (feeDrag > MAX_FEE_DRAG) {
+  if (feeDrag > maxFeeDrag(candidate.market)) {
     return { approved: false, reason: 'Cost ceiling exceeded', feeDrag, estimatedFees };
   }
   return { approved: true, feeDrag, estimatedFees };
@@ -129,6 +144,10 @@ module.exports = {
   legRate,
   minStopPct,
   MAX_FEE_DRAG,
+  MAX_FEE_DRAG_CRYPTO,
+  maxFeeDrag,
+  coinbaseFees,
+  setCoinbaseFees,
   COINBASE_MAKER_FEE,
   COINBASE_TAKER_FEE,
   COINBASE_SPREAD_BUFFER,

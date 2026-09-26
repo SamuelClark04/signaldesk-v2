@@ -16,13 +16,13 @@
 //                  tagged smallAccountCap so the user sees the real dollar risk.
 //   T1 reality gate (Phase 54): live brackets exit 100% at T1, so the NET
 //   reward : risk of T1 ALONE (after fees, the ledger's own scenarios) must be
-//   >= MIN_T1_NET_RR (1.25 : 1) for every trade, whatever T2 would add.
+//   >= minT1NetRR (1.25 : 1; crypto 1.5 : 1 since Phase 65) for every trade, whatever T2 would add.
 //   Live cash cap: options.cashCap (the LIVE venue's spendable cash, e.g.
 //   Coinbase USD + USDC) is a ceiling on notional / premium: a live buy is never
 //   sized above the money actually there.
 const { evaluateCosts } = require('./cost-authority');
 const { priceScenarios } = require('./scenarios');
-const { t1NetRR, MIN_T1_NET_RR } = require('./reality-gate');
+const { t1NetRR, minT1NetRR } = require('./reality-gate');
 
 const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
@@ -153,8 +153,9 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
   const cost = evaluateCosts(sized, dollarRisk);
   if (!cost.approved) return reject(candidate, cost.reason, { feeDrag: cost.feeDrag });
   const rr = t1NetRR(priceScenarios(sized));
-  if (rr !== null && rr < MIN_T1_NET_RR) {
-    return reject(candidate, `T1_NET_RR_TOO_LOW: T1 alone pays ${rr.toFixed(2)} : 1 after fees (needs ${MIN_T1_NET_RR} : 1; live brackets exit 100% at T1)`, { t1NetRR: rr });
+  const needRR = minT1NetRR(candidate.market); // 1.5 : 1 for crypto (Phase 65), else 1.25 : 1
+  if (rr !== null && rr < needRR) {
+    return reject(candidate, `T1_NET_RR_TOO_LOW: T1 alone pays ${rr.toFixed(2)} : 1 after fees (needs ${needRR} : 1; live brackets exit 100% at T1)`, { t1NetRR: rr });
   }
 
   const approved = Object.freeze({

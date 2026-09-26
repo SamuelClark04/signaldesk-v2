@@ -32,8 +32,8 @@ const STRATEGY_ID = 'crypto-intraday';
 const SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'AVAX', 'LINK', 'SUI', 'UNI', 'NEAR', 'APT', 'ARB', 'RENDER', 'PEPE', 'LTC'].map((s) => `${s}-USD`);
 const TF = { '15m': { sec: 900, hold: '1-6 hours' }, '1h': { sec: 3600, hold: '4-24 hours' } };
 const CONFIG = {
-  symbols: SYMBOLS, minBars: 80, stopAtrBuffer: 0.25, entryBufferPct: 0.002, maxChasePct: 0.005, t1R: 2.0, t2R: 3.0,
-  resistanceBars: 48, dailyLookback: 100, feeBudget: 0.34, tradeType: 'Day Trade',
+  symbols: SYMBOLS, minBars: 80, stopAtrBuffer: 0.25, entryBufferPct: 0.002, maxChasePct: 0.005, t1R: 2.3, t2R: 3.0, // Phase 65: 2.3R nets >= 1.5 : 1 at the 5.4% maker floor
+  resistanceBars: 48, dailyLookback: 100, feeBudget: 0.29, tradeType: 'Day Trade',
 };
 
 const bars = new Map(); // `${symbol}|${tf}` -> { slot, bars } (completed bars, oldest first)

@@ -26,8 +26,9 @@
     return Math.round((Date.parse(`${expiration}T00:00:00Z`) - today) / 864e5);
   }
 
-  // R multiple on the true net (the exit quote), else on the gross mark.
-  const rOf = (p, m) => (p.exitQuote && Number.isFinite(p.exitQuote.r) ? p.exitQuote.r : m.r);
+  // R multiple on the true net (re-marked on this tick, Phase 65), else on the gross mark.
+  const rOf = (p, m) => { const f = SD.netPnl.live(p, m); return f && p.dollarRisk > 0 ? f.net / p.dollarRisk : p.exitQuote && Number.isFinite(p.exitQuote.r) ? p.exitQuote.r : m.r; };
+  const liveBid = (p) => { const f = SD.netPnl.live(p, { price: null }); return f && f.atBid ? f.sell : null; };
 
   function realOptionRows(p, m) {
     const od = p.optionsData;
@@ -75,7 +76,7 @@
       kv('Position value', m.price > 0 ? money(p.positionSize * m.price) : '—'),
       kv('Cost basis', money(p.positionSize * p.fillPrice)),
       kv('Fill price', price(p.fillPrice, p)),
-      kv('Live price', m.price > 0 ? `${price(m.price, p)}${p.exitQuote && p.exitQuote.sellBasis === 'best bid' ? ` · bid ${price(p.exitQuote.bid, p)}` : ''}` : 'No live price'),
+      kv('Live price', m.price > 0 ? `${price(m.price, p)}${liveBid(p) ? ` · bid ${price(liveBid(p), p)}` : ''}` : 'No live price'),
       kv('R multiple (net)', Number.isFinite(rOf(p, m)) ? `${rOf(p, m) >= 0 ? '+' : '−'}${Math.abs(rOf(p, m)).toFixed(2)}R` : '—'),
     ];
   }
@@ -123,7 +124,7 @@
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
       kv('Opened', p.openedAt ? new Date(p.openedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'),
       exitButton(p, m, ctx),
-      ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p) })] : []),
+      ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p, m) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p, m) })] : []),
     ]);
   }
 

@@ -75,6 +75,13 @@ function ledgerVerdict(symbol, ctx) {
 function verdict(r, ctx, now) {
   const fromLedger = ledgerVerdict(r.symbol, ctx);
   if (fromLedger) return fromLedger;
+  // Phase 65 liquidity gates: a thin or wide book is never traded, whatever it scores.
+  if (Number.isFinite(r.volumeUsd) && r.volumeUsd < spec.CONFIG.minVolumeUsd) {
+    return { status: 'FILTERED', text: `24h volume $${Math.round(r.volumeUsd).toLocaleString('en-US')} is under the $${(spec.CONFIG.minVolumeUsd / 1e6).toFixed(1)}M liquidity floor: thin book, never traded (${r.score}/100).` };
+  }
+  if (Number.isFinite(r.spreadPct) && r.spreadPct > 0.45) {
+    return { status: 'FILTERED', text: `Bid/ask spread ${r.spreadPct.toFixed(2)}% exceeds the 0.45% cap: a buy would start that far underwater, so it is not staged (${r.score}/100).` };
+  }
   const label = spec.LABEL[r.trigger] || spec.LABEL[r.kind] || 'Trigger';
   const rej = rejections.latestFor(r.symbol, { strategyId: SPEC_ID }, now);
   const cd = spec.cooldownOf(r.symbol, now);

@@ -39,7 +39,16 @@
     QUEUE_UPDATED: (orders) => { state.pending = orders || []; },
     POSITIONS_UPDATED: (positions) => { state.positions = positions || []; },
     // Every 5 s: each paper position's exit quote ("Net if closed now", Phase 59).
-    POSITION_MARKS: (m) => { const q = (m && m.quotes) || {}; state.positions = state.positions.map((p) => (q[p.id] ? { ...p, exitQuote: q[p.id] } : p)); },
+    POSITION_MARKS: (m) => {
+      const q = (m && m.quotes) || {};
+      state.positions = state.positions.map((p) => (q[p.id] ? { ...p, exitQuote: q[p.id] } : p));
+      // Phase 65: the held symbols' last price + best bid of the same quotes (one tick for every figure).
+      const book = Object.entries((m && m.book) || {});
+      if (book.length) {
+        state.prices = { ...state.prices, ...Object.fromEntries(book.map(([s, b]) => [s, b.last])) };
+        state.bids = { ...state.bids, ...Object.fromEntries(book.filter(([, b]) => b.bid > 0).map(([s, b]) => [s, b.bid])) };
+      }
+    },
     JOURNAL_UPDATED: (trades) => { state.journal = trades || []; },
     SETTINGS_UPDATED: (settings) => { state.settings = settings; },
     BROKER_STATE: (broker) => { state.broker = broker; },
@@ -134,6 +143,7 @@
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
     LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
+    POSITION_MARKS: (m) => SD.liveChart.record(Object.fromEntries(Object.entries((m && m.book) || {}).map(([s, b]) => [s, b.last]))), // held symbols every 5 s
     // Manual Trade Ticket + [Close at Coinbase] (Phase 60): answers to this client.
     MANUAL_TRADE_DEFAULTS: (p) => SD.manualTicket.received('MANUAL_TRADE_DEFAULTS', p),
     MANUAL_TRADE_PREVIEW: (p) => SD.manualTicket.received('MANUAL_TRADE_PREVIEW', p),

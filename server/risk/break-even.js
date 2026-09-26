@@ -1,25 +1,29 @@
 // Break-even, fee hurdle and cashout variance (Phase 63). One place for the maths the
 // position card, the chart's BE line, the trade ticket, staged approvals and the
 // Journal's execution audit all show:
-//   breakEvenPrice   the market price (last trade) at which closing NOW nets $0 after
-//                    the entry fee, the exit fee and, for a long crypto position, the
-//                    current distance from the last trade down to the best bid (a
-//                    market sell fills at the bid). Long: (cost + entry fee) / (size x
-//                    (1 - exit rate)) + (last - bid); short: the mirror image.
+//   breakEvenPrice   the SELL price (a long's fill: the best bid) at which closing nets $0
+//                    after the entry fee and the exit taker fee: (cost + entry fee) /
+//                    (size x (1 - exit rate)); short: the mirror image. Phase 65: for an
+//                    open position it is a constant (no live spread term), so the BE line
+//                    never moves with the ticks; the pre-trade hurdle alone adds the
+//                    half-spread (spread) it will cross.
 //   feeHurdle        before opening: the round-trip fees on `notional` and the % move
 //                    needed to break even (entry at the ask for a taker entry, exit at
 //                    the bid, both Coinbase fees). With a live bid / ask the EXACT fee
 //                    rates are used (the spread is real); without one the cost model's
 //                    per-leg rates (taker incl. the spread allowance). wide: > 2.5%.
+//   spreadGate       Phase 65: a crypto setup whose live bid / ask is wider than 0.45% of
+//                    the mid is never staged (WIDE_CRYPTO_SPREAD); no fresh book: not judged.
 //   cashoutVariance  a live close's expected cashout (best bid x qty - fee, right
 //                    before the sell) vs the actual fill (qty x avg price - real fee).
-const { legRate, COINBASE_TAKER_FEE, COINBASE_MAKER_FEE } = require('./cost-authority');
+const { legRate, coinbaseFees } = require('./cost-authority');
 
 const WIDE_HURDLE = 0.025;
 const QUOTE_MAX_AGE_MS = 60 * 1000;
+const MAX_CRYPTO_SPREAD = 0.0045;
 
-// A leg's fee rate: Coinbase's exact fee (a real bid / ask carries the spread), else the model's.
-const exactRate = (market, liquidity = 'taker') => (market === 'crypto' ? (liquidity === 'maker' ? COINBASE_MAKER_FEE : COINBASE_TAKER_FEE) : legRate(market, liquidity));
+// A leg's fee rate: Coinbase's exact fee in force (the account's tier once read), else the model's.
+const exactRate = (market, liquidity = 'taker') => (market === 'crypto' ? coinbaseFees()[liquidity === 'maker' ? 'maker' : 'taker'] : legRate(market, liquidity));
 
 // spread: last trade minus the price the close fills at (long: last - bid; short: ask - last).
 function breakEvenPrice({ direction = 'long', fillPrice, size, entryFee = 0, exitRate, spread = 0 }) {
@@ -67,6 +71,16 @@ function hurdleFor(order, now = Date.now()) {
   return feeHurdle({ market: order.market, price: order.entryPrice, notional: order.positionSize * order.entryPrice, direction: order.direction, entryLiquidity: order.entryLiquidity, quote });
 }
 
+// Phase 65 hard gate: { ok, spreadPct, reason } for a crypto product's live book (no fresh book: ok, unjudged).
+function spreadGate(product, now = Date.now()) {
+  const q = liveQuote(product, now);
+  if (!q) return { ok: true, spreadPct: null, reason: null };
+  const spreadPct = (q.ask - q.bid) / ((q.ask + q.bid) / 2);
+  return spreadPct > MAX_CRYPTO_SPREAD
+    ? { ok: false, spreadPct, reason: `WIDE_CRYPTO_SPREAD: bid/ask spread ${(spreadPct * 100).toFixed(2)}% exceeds ${(MAX_CRYPTO_SPREAD * 100).toFixed(2)}% cap (${q.bid} / ${q.ask})` }
+    : { ok: true, spreadPct, reason: null };
+}
+
 // Expected vs actual cashout of a sell. expected: best bid x qty - fee (before the sell);
 // actual: filled qty x average price - Coinbase's fee. Scaled to the filled quantity.
 function cashoutVariance({ expected, expectedQty, filledQty, avgFillPrice, fees = 0, expectedBid = null, basis = 'best bid' }) {
@@ -77,4 +91,4 @@ function cashoutVariance({ expected, expectedQty, filledQty, avgFillPrice, fees 
   return { expected: exp, actual, variance, favorable: variance >= 0, expectedBid, avgFillPrice, filledQty, fees, basis };
 }
 
-module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS };
+module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, spreadGate, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS, MAX_CRYPTO_SPREAD };

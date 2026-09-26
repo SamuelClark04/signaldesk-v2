@@ -17,8 +17,8 @@
 // the entry is a resting limit inside the zone (maker: paper, and live Coinbase
 // as a post-only limit at the bid), a target exit is a resting limit (maker),
 // a stop is taker + spread. Intro tier (0.60% maker / 1.20% taker + 0.10%
-// spread): 0.60% + (0.60% + 1.30%) / 2 = 1.55% blended round trip / 0.34R =
-// 4.6% stop, instead of an all-taker 7.7%.
+// spread): 0.60% + (0.60% + 1.30%) / 2 = 1.55% blended round trip / 0.29R (Phase 65:
+// the crypto gate is 0.30R) = 5.4% stop, instead of an all-taker 9.0%.
 // Resistance (risk/target-plan.js): a major DAILY top under the target no longer
 // vetoes the setup when it is far enough away: T1 (50%) snaps just under it and
 // T2 (50% runner) keeps the full target, if the blended net reward still meets
@@ -39,7 +39,7 @@ const { createTally } = require('./scan-tally');
 
 const STRATEGY_ID = 'crypto-swing';
 
-const FEE_DRAG_BUDGET = 0.34; // under the gate's 0.35R, with a little room
+const FEE_DRAG_BUDGET = 0.29; // under the crypto gate's 0.30R (Phase 65), with a little room
 // Maker entry: a limit inside the zone (post-only when live, coinbase-api.js).
 const entryLiquidity = () => 'maker';
 const stopPct = () => minStopPct('crypto', 'maker', FEE_DRAG_BUDGET);

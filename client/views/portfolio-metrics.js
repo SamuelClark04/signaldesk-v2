@@ -33,7 +33,8 @@
   // close books: exit spread + fees), not the mid less fees.
   function mark(p, livePrice, close) {
     const m = rawMark(p, livePrice, close);
-    return m && p.exitQuote && Number.isFinite(p.exitQuote.net) ? { ...m, net: p.exitQuote.net, netSource: 'exit quote' } : m;
+    const f = m && SD.netPnl ? SD.netPnl.live(p, m) : null; // Phase 65: the net on this tick (same as the hero / rail)
+    return f ? { ...m, net: f.net, netSource: 'exit quote' } : m && p.exitQuote && Number.isFinite(p.exitQuote.net) ? { ...m, net: p.exitQuote.net, netSource: 'exit quote' } : m;
   }
   function rawMark(p, livePrice, close) {
     if (p.execution === 'BROKER') return markBroker(p, livePrice > 0 ? livePrice : close, livePrice > 0);
