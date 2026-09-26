@@ -31,7 +31,7 @@
 .pf-empty-venue { display: flex; flex-direction: column; gap: 4px; }
 
 /* ---------- KPI cards ---------- */
-.pf-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.pf-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; } /* + Realized P/L (Phase 64B) */
 .pf-kpi, .pf-venue-tile { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); min-width: 0; }
 .pf-kpi-label { color: var(--text-muted); font-size: 13px; }
 .pf-kpi-value { font: 600 24px var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -184,3 +184,7 @@
 .pf-ext-row td { padding: 0 !important; }
 .pf-action { white-space: nowrap; }
 .pf-action .btn + .btn { margin-left: 6px; }
+
+/* Realized P/L card + [Open Journal →] (Phase 64B); full width on a phone. */
+.pf-journal-link { align-self: flex-start; margin-top: 8px; padding: 4px 12px; font-size: 12px; text-decoration: none; }
+@media (max-width: 768px) { .pf-realized { grid-column: 1 / -1; } }

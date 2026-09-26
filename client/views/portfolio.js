@@ -92,7 +92,19 @@
           : t.cash >= 0 ? 'Paper cash available: bankroll + realized − open paper positions'
             : `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll`, t.cash < 0 ? 'pnl-neg' : ''),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
+      realizedCard(card),
     ]);
+  }
+
+  // Realized P/L of the venue's closed trades (net of fees) + [Open Journal →] (Phase 64B: the Journal from Portfolio, e.g. on a phone).
+  function realizedCard(card) {
+    const v = venueOf();
+    const closed = (mounted.state.journal || []).filter((x) => (v === 'paper' ? x.execution !== 'LIVE' : v === 'crypto' ? x.execution === 'LIVE' : true));
+    const net = closed.reduce((s, x) => s + (x.netPnl || 0), 0);
+    const c = card('Realized P/L', closed.length ? signed(net, money) : '—', `${closed.length} closed trade${closed.length === 1 ? '' : 's'} · net of fees`, closed.length ? pnlClass(net) : '');
+    c.classList.add('pf-realized');
+    c.append(el('a', { className: 'btn pf-journal-link', href: '#journal', textContent: 'Open Journal →' }));
+    return c;
   }
 
   // ---------- Execution venues (BROKER_STATE) ----------

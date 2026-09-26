@@ -40,8 +40,9 @@
   .m-tab {
     position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
     min-height: var(--m-tabbar-h); padding: 6px 0; border: 0; background: transparent; color: var(--text-faint);
-    font: inherit; font-size: 11px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    min-width: 0; font: inherit; font-size: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
+  .m-tab-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -0.01em; }
   .m-tab svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .m-tab.is-active { color: var(--accent); }
   .m-tab-badge {
