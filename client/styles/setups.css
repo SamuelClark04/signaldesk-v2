@@ -226,3 +226,21 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .dual-hint { color: var(--text-faint); font-size: 12px; }
 .dual-close { margin-left: auto; padding: 3px 10px; font-size: 12px; }
 @media (max-width: 640px) { .dual-charts .opp-lwc { height: 38vh; min-height: 220px; } }
+
+/* ---------- Context card in the right column (Phase 62B) ----------
+   News & Catalysts / Price structure / Market context / Sources under the Setup /
+   position panel: 2x2 tabs, one column of content, internal scroll. */
+.opp-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.opp-side .opp-analysis { grid-column: auto; padding: 12px; }
+.opp-side .sa-head { flex-direction: column; align-items: stretch; gap: 6px; margin-bottom: 10px; }
+.opp-side .sa-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.opp-side .sa-tab { padding: 6px 8px; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.opp-side .sa-body { max-height: 520px; overflow: hidden auto; scrollbar-width: thin; }
+.opp-side .sa-cols { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.opp-side .sa-col + .sa-col { padding: 12px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+.opp-side .sa-text, .opp-side .sa-list, .opp-side .sa-dl dd { overflow-wrap: anywhere; }
+.opp-side .sa-table { width: 100%; max-width: none; table-layout: fixed; }
+.opp-side .sa-table td, .opp-side .sa-table th { padding: 6px; overflow-wrap: anywhere; }
+.opp-side .sa-dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.opp-side .sa-dl dd { margin-bottom: 8px; }
+@media (max-width: 1200px) { .opp-side { grid-column: 1 / -1; } }

@@ -186,8 +186,11 @@
       rerender, // Trade Amount changes
     };
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
-    const grid = el('div', { className: 'opp-grid m-panes', dataset: { pane: M().pane() } }, [M().tag(rail, 'queue'), M().tag(SD.oppDetail.center(active, ctx), 'chart'),
-      M().tag(SD.oppDetail.right(active, ctx), 'order'), M().tag(analysis, 'chart')]);
+    // Desktop (Phase 62B): the context card sits under the Setup / position panel in the right column;
+    // the center is the chart(s) + Catalyst & News Feed. iPhone panes keep it on the chart pane.
+    const side = M().isMobile() ? [M().tag(SD.oppDetail.right(active, ctx), 'order'), M().tag(analysis, 'chart')]
+      : [el('div', { className: 'opp-side' }, [SD.oppDetail.right(active, ctx), analysis])];
+    const grid = el('div', { className: 'opp-grid m-panes', dataset: { pane: M().pane() } }, [M().tag(rail, 'queue'), M().tag(SD.oppDetail.center(active, ctx), 'chart'), ...side]);
     return M().wrap(grid, { rerender, bar: SD.oppDetail.actionBar(active, ctx) });
   }
 
@@ -241,7 +244,7 @@
       : act && act.dataset && act.dataset.focusKey && container.contains(act) ? `[data-focus-key="${CSS.escape(act.dataset.focusKey)}"]` : null;
     const caret = focusSel ? [act.selectionStart, act.selectionEnd] : null;
     const pageY = window.scrollY;
-    const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist', '.cfeed-list']; // scrollable lists keep their position too (+ the Catalyst Feed)
+    const SCROLLERS = ['.opp-positions', '.opp-queue', '.opp-watchlist', '.cfeed-list', '.opp-side .sa-body']; // scrollable lists keep their position too (+ the Catalyst Feed, the context card)
     const scrolls = SCROLLERS.map((sel) => { const n = container.querySelector(sel); return n ? n.scrollTop : 0; });
 
     const waiting = SD.oppApprovals.count(state);

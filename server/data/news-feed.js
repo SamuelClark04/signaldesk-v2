@@ -7,7 +7,7 @@
 //                 "latest" articles can be years old), per symbol set, cached CACHE_MS (2.5 min)
 //   Crypto RSS    CoinDesk, Cointelegraph, Decrypt public RSS, each cached RSS_MS
 //                 (3 min); an article counts for a coin when its title / summary
-//                 names it (crypto-social.js's matcher: $TICKER, TICKER, or name)
+//                 names it (crypto-social.js's matcher: $TICKER, TICKER, or name), last WINDOW_H hours only
 //                 (CryptoCompare's news endpoint now requires an API key: not used)
 //   Reddit        the posts System 6's social scanner already matched per coin
 //                 (crypto-social.js: 5 subreddits' RSS; no extra Reddit requests)
@@ -95,9 +95,11 @@ async function rssItems() {
   return { items: results.flatMap((r) => r.value), errors: results.filter((r) => r.error).map((r) => `${r.outlet}: ${r.error}`) };
 }
 // RSS articles -> feed items tagged with the crypto symbols they name (untagged: dropped).
-function matchRss(items, symbols) {
+// Only articles from the last WINDOW_H hours, like Alpaca's (a feed's old podcast entries never
+// show as news; an undated article is dropped: its age cannot be told).
+function matchRss(items, symbols, now = Date.now()) {
   const matchers = symbols.filter((s) => s.includes('-')).map((s) => [s, social.matcher(s.split('-')[0].toUpperCase(), social.nameFor(s))]);
-  return items.map((a) => {
+  return items.filter((a) => a.at && now - a.at <= WINDOW_H * 3600000).map((a) => {
     const text = `${a.title} ${a.text}`;
     return { id: `rss:${a.url}`, kind: 'news', source: `NEWS · ${a.outlet}`, outlet: a.outlet, title: a.title, url: a.url, at: a.at, symbols: matchers.filter(([, hit]) => hit(text)).map(([s]) => s) };
   }).filter((x) => x.symbols.length);
