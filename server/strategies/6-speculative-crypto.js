@@ -21,13 +21,14 @@
 //   B  0-30  buzz: Reddit (5 subreddits), CoinGecko trending, news sentiment; with
 //            >= 3.5x volume the volume is its own catalyst (at least 12)
 //   C  0-20  strength vs BTC over the same window (0-12) + live spread (0-8)
-// IGNITION T1 2.3R (50%), T2 3R; COIL T1 2.35R, T2 3.5R (Phase 65: crypto needs T1 alone
-// >= 1.5 : 1 net of the real Coinbase fees, and fee drag <= 0.30R: at the stop floors
-// (7.8% taker / 5.4% maker) 2.3R nets 1.55 : 1 and 2.35R 1.58 : 1).
-// Liquidity (Phase 65): a gem trades only with >= $1.5M of 24h volume (MIN_VOLUME_USD);
-// the volume-only catalyst credit (12/30) needs a real catalyst (CoinGecko trending or
-// Reddit mentions) or >= $3M of 24h volume, so a tiny print on a thin book scores nothing.
-// Every crypto setup's live bid/ask must be <= 0.45% wide (pipeline.js spread gate).
+// Moonshot tier (Phase 65B): fee drag <= 0.35R and T1 alone >= 1.35 : 1 net of the real
+// Coinbase fees, stop floors at a 0.34R budget (6.7% taker / 4.6% maker). IGNITION T1 2.2R
+// (50%), T2 3R: 2.2R nets 1.38 : 1 at the 6.7% floor (2.1R would net 1.31); COIL T1 2.25R,
+// T2 3.5R: 1.41 : 1 at 4.6%.
+// Liquidity (65B): >= $350k of 24h Coinbase volume, or >= $200k with a confirmed catalyst
+// (CoinGecko trending, a Reddit mention, or >= 2.5x relative volume with 24h volume up >= 50%);
+// the volume-only catalyst credit (12/30) needs a real catalyst, or >= $500k of 24h volume
+// (>= $250k when 24h volume is up >= 75%). Bid/ask <= 0.80% (pipeline.js spread gate).
 // conviction = (score - 60) / 40: the Smart Investment Amount, 10-25% of normal risk.
 const { getHistory } = require('../connectors/history-bars');
 const { minStopPct } = require('../risk/cost-authority');
@@ -42,8 +43,9 @@ const { createTally } = require('./scan-tally');
 const STRATEGY_ID = 'speculative-crypto';
 const TAG = 'Speculative Moonshot';
 const CONFIG = {
-  volumeCatalyst: 3.5, qualify: 60, swingBars: 6, stopBufferPct: 0.003, entryBufferPct: 0.003, t1R: 2.3, t2R: 3, coilT1R: 2.35, coilT2R: 3.5,
-  minVolumeUsd: 1500000, volumeCreditUsd: 3000000, cooldownMs: 4 * 60 * 60 * 1000,
+  volumeCatalyst: 3.5, qualify: 60, swingBars: 6, stopBufferPct: 0.003, entryBufferPct: 0.003, t1R: 2.2, t2R: 3, coilT1R: 2.25, coilT2R: 3.5, feeBudget: 0.34,
+  minVolumeUsd: 350000, catalystVolumeUsd: 200000, catalystRelVol: 2.5, catalystVolChange: 0.5,
+  volumeCreditUsd: 500000, volumeCreditSurgeUsd: 250000, volumeCreditSurge: 0.75, cooldownMs: 4 * 60 * 60 * 1000,
   tradeType: TAG, expectedDuration: 'Minutes to hours (momentum; exits at stop or targets)', ...gem.CONFIG.ignition,
 };
 const LABEL = { IGNITION: 'Momentum Ignition', COIL: 'Accumulation Coil' };
@@ -73,8 +75,9 @@ async function bars5(symbol, now) {
 }
 
 // The 100-point conviction score. m: { surge, relVol }; parts in, breakdown out.
-// volumeUsd: the gem's 24h USD volume (the volume-only credit needs >= volumeCreditUsd or a real catalyst).
-function score({ m, btcSurge, buzz, news, spreadPct, volumeUsd }) {
+// volumeUsd / volChange: the gem's 24h USD volume and its change vs the prior 24h (the volume-only
+// credit needs a real catalyst, >= volumeCreditUsd, or >= volumeCreditSurgeUsd on a volumeCreditSurge surge).
+function score({ m, btcSurge, buzz, news, spreadPct, volumeUsd, volChange }) {
   const velocity = 25 * clamp01((m.surge - 0.02) / 0.06);
   const volume = 25 * clamp01((m.relVol - 1.5) / 3);
   const r = buzz && buzz.reddit;
@@ -83,7 +86,7 @@ function score({ m, btcSurge, buzz, news, spreadPct, volumeUsd }) {
   const fresh = news && news.ok && news.score !== null ? (news.score >= 70 ? 15 : news.score >= 60 ? 8 : 0) : 0;
   const found = Math.min(30, reddit + trend + fresh);
   const external = !!(buzz && (buzz.trending || (buzz.reddit && buzz.reddit.mentions > 0)));
-  const deep = Number.isFinite(volumeUsd) && volumeUsd >= CONFIG.volumeCreditUsd;
+  const deep = Number.isFinite(volumeUsd) && (volumeUsd >= CONFIG.volumeCreditUsd || (volumeUsd >= CONFIG.volumeCreditSurgeUsd && volChange >= CONFIG.volumeCreditSurge));
   const catalyst = m.relVol >= CONFIG.volumeCatalyst && found < 12 && (external || deep) ? 12 : 0;
   const buzzPts = Math.max(found, catalyst);
   const rs = 12 * clamp01((m.surge - (btcSurge || 0)) / 0.06);
@@ -118,16 +121,25 @@ function assess(b, live, symbol, ctx) {
   const coil = gem.coil(b, live);
   const scored = [];
   const vol = ctx.volumeUsd;
-  for (const f of ign.frames) scored.push({ kind: 'IGNITION', m: f, ok: ign.ok && ign.m === f, ...score({ m: f, btcSurge: btcMove(ctx.btc, f.frame), buzz: ctx.buzz, news: ctx.news, spreadPct, volumeUsd: vol }) });
+  const volChange = ctx.volChange;
+  for (const f of ign.frames) scored.push({ kind: 'IGNITION', m: f, ok: ign.ok && ign.m === f, ...score({ m: f, btcSurge: btcMove(ctx.btc, f.frame), buzz: ctx.buzz, news: ctx.news, spreadPct, volumeUsd: vol, volChange }) });
   if (Number.isFinite(coil.volRatio)) {
     const m = { surge: coil.move, relVol: coil.volRatio, frame: '15m', minutes: 60 };
-    const s = score({ m, btcSurge: btcMove(ctx.btc, '1h'), buzz: ctx.buzz, news: ctx.news, spreadPct, volumeUsd: vol });
+    const s = score({ m, btcSurge: btcMove(ctx.btc, '1h'), buzz: ctx.buzz, news: ctx.news, spreadPct, volumeUsd: vol, volChange });
     const parts = { ...s.parts, velocity: gem.coilPattern(coil) };
     scored.push({ kind: 'COIL', m, ok: coil.ok, pattern: true, parts, detail: s.detail, total: Math.round(Object.values(parts).reduce((x, y) => x + y, 0)) });
   }
   const pick = (list) => (list.length ? list.reduce((a, x) => (x.total > a.total ? x : a)) : null);
   const triggered = pick(scored.filter((x) => x.ok));
   return { ign, coil, spreadPct, trigger: triggered ? triggered.kind : null, best: triggered || pick(scored) };
+}
+
+// Phase 65B liquidity floor: $350k, or $200k with a confirmed catalyst. -> { ok, floor, catalyst, reason }
+function liquidity({ volumeUsd, volChange, relVol, buzz }) {
+  const catalyst = !!(buzz && (buzz.trending || (buzz.reddit && buzz.reddit.mentions > 0))) || (relVol >= CONFIG.catalystRelVol && volChange >= CONFIG.catalystVolChange);
+  const floor = catalyst ? CONFIG.catalystVolumeUsd : CONFIG.minVolumeUsd;
+  const ok = Number.isFinite(volumeUsd) && volumeUsd >= floor;
+  return { ok, floor, catalyst, reason: ok ? null : `THIN_VOLUME: 24h volume $${Math.round(volumeUsd || 0).toLocaleString('en-US')} under the $${Math.round(floor / 1000)}k Moonshot floor${catalyst ? ' (catalyst floor)' : ' (no confirmed catalyst: $200k with one)'}` };
 }
 
 function block(symbol, reason, now, kind = 'MOON') {
@@ -138,16 +150,19 @@ function block(symbol, reason, now, kind = 'MOON') {
 async function evaluate(symbol, live, now, btc, watchRow) {
   if (now - (lastSignal.get(symbol) || 0) < CONFIG.cooldownMs) return tally.skip(symbol, 'Proposed in the last 4 hours');
   const volumeUsd = watchRow ? watchRow.volumeUsd : null;
-  if (!(volumeUsd >= CONFIG.minVolumeUsd)) return tally.skip(symbol, 'Thin book: 24h volume under $1.5M (never traded)');
+  const volChange = watchRow ? watchRow.volChange : null;
+  if (!(volumeUsd >= CONFIG.catalystVolumeUsd)) return tally.skip(symbol, 'Thin book: 24h volume under $200k (never traded)');
   const b = await bars5(symbol, now);
-  const probe = assess(b, live, symbol, { btc, volumeUsd }); // triggers first: social / news only for a triggered gem
+  const probe = assess(b, live, symbol, { btc, volumeUsd, volChange }); // triggers first: social / news only for a triggered gem
   if (!probe.trigger) {
     // Grouped in the Scanner log by cause (the radar shows each gem's numbers).
     return tally.skip(symbol, probe.ign.frames.length ? `Ignition: ${probe.ign.short} · Coil: ${probe.coil.short}` : 'Not enough 5-minute history');
   }
   const [buzz, news] = await Promise.all([social.getSocial(symbol, now), sentiment.getSentiment(symbol, now)]);
-  const a = assess(b, live, symbol, { btc, buzz, news, volumeUsd });
+  const a = assess(b, live, symbol, { btc, buzz, news, volumeUsd, volChange });
   const s = { ...a.best };
+  const liq = liquidity({ volumeUsd, volChange, relVol: s.m && s.m.relVol, buzz });
+  if (!liq.ok) { block(symbol, liq.reason, now, a.trigger === 'COIL' ? 'COIL' : 'MOON'); return tally.skip(symbol, 'Thin book: under the $350k floor without a confirmed catalyst'); }
   const kind = a.trigger || probe.trigger;
   const move = kind === 'COIL'
     ? `${symbol} ${pct(a.coil.move)} in 1h breaking a ${pct(a.coil.baseRange)} 3-hour base on ${a.coil.volRatio.toFixed(1)}x its 6-hour volume`
@@ -158,7 +173,7 @@ async function evaluate(symbol, live, now, btc, watchRow) {
   }
 
   const entryMax = round(live * (1 + CONFIG.entryBufferPct));
-  const floor = minStopPct('crypto', kind === 'COIL' ? 'maker' : 'taker'); // coil: resting limit at the breakout (5.4%); ignition crosses the spread (7.8%)
+  const floor = minStopPct('crypto', kind === 'COIL' ? 'maker' : 'taker', CONFIG.feeBudget); // Moonshot tier: coil (maker) 4.6%, ignition (taker) 6.7%
   let invalidation;
   let stopBasis;
   if (kind === 'COIL') {
@@ -238,5 +253,5 @@ function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
 // When a gem was last proposed and until when its cooldown holds (null: not cooling down).
 const cooldownOf = (symbol, now = Date.now()) => { const at = lastSignal.get(symbol); return at && now - at < CONFIG.cooldownMs ? { proposedAt: at, until: at + CONFIG.cooldownMs } : null; };
 
-module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, cooldownOf, assess, score, describe, bars5, btcMove, gemWatchlist,
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, cooldownOf, liquidity, assess, score, describe, bars5, btcMove, gemWatchlist,
   frames: gem.frames, to15: gem.to15, STRATEGY_ID, TAG, CONFIG, LABEL };

@@ -12,12 +12,13 @@
 //                only exempt from them when the entry is breaking above (or
 //                within 0.5% of) that high; otherwise T1 must sit under it
 //   t1NetRR      the NET reward : risk of T1 ALONE after fees (live brackets exit
-//                100% at T1): every trade needs >= MIN_T1_NET_RR (1.25 : 1; crypto 1.5 : 1, minT1NetRR)
+//                100% at T1): every trade needs >= MIN_T1_NET_RR (1.25 : 1; crypto 1.5 : 1, Moonshots 1.35 : 1: minT1NetRR)
 // Pure functions.
 const MIN_CHART_STOP = 0.032;
 const MIN_T1_NET_RR = 1.25;
-const MIN_T1_NET_RR_CRYPTO = 1.5; // Phase 65: crypto (incl. Moonshots) must pay 1.5 : 1 at T1 after real Coinbase fees
-const minT1NetRR = (market) => (market === 'crypto' ? MIN_T1_NET_RR_CRYPTO : MIN_T1_NET_RR);
+const MIN_T1_NET_RR_CRYPTO = 1.5; // Phase 65: standard crypto must pay 1.5 : 1 at T1 after real Coinbase fees
+const MIN_T1_NET_RR_MOONSHOT = 1.35; // Phase 65B: Moonshots (speculative) 1.35 : 1
+const minT1NetRR = (market, speculative = false) => (market !== 'crypto' ? MIN_T1_NET_RR : speculative ? MIN_T1_NET_RR_MOONSHOT : MIN_T1_NET_RR_CRYPTO);
 const ATR_CAP = { intraday: 1.0, swing: 2.5 };
 const BREAKOUT_WITHIN = 0.005;
 const CHART_STOP_REASON = 'Chart stop too tight for Coinbase fee tier';
@@ -68,4 +69,4 @@ function t1NetRR(scenarios) {
   return s.t1.net / -s.stop.net;
 }
 
-module.exports = { chartStop, dailyAtr, atrCap, dailyCeiling, t1NetRR, MIN_CHART_STOP, MIN_T1_NET_RR, MIN_T1_NET_RR_CRYPTO, minT1NetRR, ATR_CAP, BREAKOUT_WITHIN, CHART_STOP_REASON };
+module.exports = { chartStop, dailyAtr, atrCap, dailyCeiling, t1NetRR, MIN_CHART_STOP, MIN_T1_NET_RR, MIN_T1_NET_RR_CRYPTO, MIN_T1_NET_RR_MOONSHOT, minT1NetRR, ATR_CAP, BREAKOUT_WITHIN, CHART_STOP_REASON };

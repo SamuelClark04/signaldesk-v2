@@ -12,8 +12,10 @@
 //                    the bid, both Coinbase fees). With a live bid / ask the EXACT fee
 //                    rates are used (the spread is real); without one the cost model's
 //                    per-leg rates (taker incl. the spread allowance). wide: > 2.5%.
-//   spreadGate       Phase 65: a crypto setup whose live bid / ask is wider than 0.45% of
-//                    the mid is never staged (WIDE_CRYPTO_SPREAD); no fresh book: not judged.
+//   spreadGate       Phase 65: a crypto setup whose live bid / ask is wider than its cap is never
+//                    staged (WIDE_CRYPTO_SPREAD): 0.45% standard crypto, 0.80% Moonshots (65B);
+//                    no fresh book: not judged.
+//   volumeGate       Phase 65B: standard crypto needs >= $1.5M of 24h volume (ticker base volume x price).
 //   cashoutVariance  a live close's expected cashout (best bid x qty - fee, right
 //                    before the sell) vs the actual fill (qty x avg price - real fee).
 const { legRate, coinbaseFees } = require('./cost-authority');
@@ -21,6 +23,8 @@ const { legRate, coinbaseFees } = require('./cost-authority');
 const WIDE_HURDLE = 0.025;
 const QUOTE_MAX_AGE_MS = 60 * 1000;
 const MAX_CRYPTO_SPREAD = 0.0045;
+const MAX_MOONSHOT_SPREAD = 0.008;
+const MIN_CRYPTO_VOLUME_USD = 1500000;
 
 // A leg's fee rate: Coinbase's exact fee in force (the account's tier once read), else the model's.
 const exactRate = (market, liquidity = 'taker') => (market === 'crypto' ? coinbaseFees()[liquidity === 'maker' ? 'maker' : 'taker'] : legRate(market, liquidity));
@@ -72,13 +76,22 @@ function hurdleFor(order, now = Date.now()) {
 }
 
 // Phase 65 hard gate: { ok, spreadPct, reason } for a crypto product's live book (no fresh book: ok, unjudged).
-function spreadGate(product, now = Date.now()) {
+function spreadGate(product, max = MAX_CRYPTO_SPREAD, now = Date.now()) {
   const q = liveQuote(product, now);
   if (!q) return { ok: true, spreadPct: null, reason: null };
   const spreadPct = (q.ask - q.bid) / ((q.ask + q.bid) / 2);
-  return spreadPct > MAX_CRYPTO_SPREAD
-    ? { ok: false, spreadPct, reason: `WIDE_CRYPTO_SPREAD: bid/ask spread ${(spreadPct * 100).toFixed(2)}% exceeds ${(MAX_CRYPTO_SPREAD * 100).toFixed(2)}% cap (${q.bid} / ${q.ask})` }
+  return spreadPct > max
+    ? { ok: false, spreadPct, reason: `WIDE_CRYPTO_SPREAD: bid/ask spread ${(spreadPct * 100).toFixed(2)}% exceeds ${(max * 100).toFixed(2)}% cap (${q.bid} / ${q.ask})` }
     : { ok: true, spreadPct, reason: null };
+}
+
+// Standard crypto liquidity (Phase 65B): 24h USD volume from the ticker; no ticker volume: not judged.
+function volumeGate(product, min = MIN_CRYPTO_VOLUME_USD) {
+  let t = null;
+  try { t = require('../connectors/coinbase-socket').getLatest(product); } catch { return { ok: true, volumeUsd: null, reason: null }; }
+  const usd = t && t.volume24h > 0 && t.price > 0 ? t.volume24h * t.price : null;
+  return usd !== null && usd < min ? { ok: false, volumeUsd: usd, reason: `THIN_VOLUME: 24h volume $${Math.round(usd).toLocaleString('en-US')} under the $${(min / 1e6).toFixed(1)}M floor` }
+    : { ok: true, volumeUsd: usd, reason: null };
 }
 
 // Expected vs actual cashout of a sell. expected: best bid x qty - fee (before the sell);
@@ -91,4 +104,4 @@ function cashoutVariance({ expected, expectedQty, filledQty, avgFillPrice, fees 
   return { expected: exp, actual, variance, favorable: variance >= 0, expectedBid, avgFillPrice, filledQty, fees, basis };
 }
 
-module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, spreadGate, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS, MAX_CRYPTO_SPREAD };
+module.exports = { breakEvenPrice, feeHurdle, hurdleFor, liveQuote, spreadGate, volumeGate, cashoutVariance, exactRate, WIDE_HURDLE, QUOTE_MAX_AGE_MS, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD, MIN_CRYPTO_VOLUME_USD };

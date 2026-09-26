@@ -32,7 +32,7 @@ const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RAD
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
 const session = require('../market/market-session'); // is the US session open (Alpaca clock, else ET hours)
-const { spreadGate } = require('../risk/break-even'); // crypto bid/ask <= 0.45% (Phase 65)
+const { spreadGate, volumeGate, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD } = require('../risk/break-even'); // crypto liquidity gates (Phase 65 / 65B)
 
 const PIPELINE_INTERVAL_MS = 60000;
 const STARTUP_PASS_MS = 8000; // first pass soon after boot: Watching, the Pilot matrix and the radar never wait a minute
@@ -145,9 +145,12 @@ async function pipelinePass() {
         : 'MARKET_CLOSED: setup on the last session close; re-checked on live prices at the open', candidate);
       continue;
     }
-    // Phase 65: never stage a crypto setup into a wide book (every crypto strategy, Moonshots too).
-    const book = candidate.market === 'crypto' ? spreadGate(candidate.asset) : null;
-    if (book && !book.ok) { recordRejection(candidate.id, book.reason, candidate); continue; }
+    // Phase 65B: never stage a crypto setup into a wide or thin book. Standard crypto: <= 0.45% spread and
+    // >= $1.5M of 24h volume; Moonshots: <= 0.80% (their own volume floors are System 6's).
+    const book = candidate.market === 'crypto' ? spreadGate(candidate.asset, candidate.speculative ? MAX_MOONSHOT_SPREAD : MAX_CRYPTO_SPREAD) : null;
+    const depth = candidate.market === 'crypto' && !candidate.speculative ? volumeGate(candidate.asset) : null;
+    const thin = [book, depth].find((g) => g && !g.ok);
+    if (thin) { recordRejection(candidate.id, thin.reason, candidate); continue; }
     const capital = await sizingBankroll(candidate.market, settings);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.

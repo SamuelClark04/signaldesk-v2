@@ -12,8 +12,9 @@
 const { MAX_FEE_DRAG, MAX_FEE_DRAG_CRYPTO } = require('../risk/cost-authority');
 
 const BUCKETS = [
-  [/^Cost ceiling exceeded/i, `Fee drag over cap (${MAX_FEE_DRAG_CRYPTO}R crypto, ${MAX_FEE_DRAG}R others)`],
-  [/^WIDE_CRYPTO_SPREAD/, 'Crypto bid/ask spread over 0.45%'],
+  [/^Cost ceiling exceeded/i, `Fee drag over cap (${MAX_FEE_DRAG_CRYPTO}R crypto, ${MAX_FEE_DRAG}R Moonshots / others)`],
+  [/^WIDE_CRYPTO_SPREAD/, 'Crypto bid/ask spread over cap (0.45%; Moonshots 0.80%)'],
+  [/^THIN_VOLUME/, 'Crypto 24h volume under its floor'],
   [/^Bankroll too small/i, 'Bankroll too small for one contract'],
   [/^Position size rounds to zero/i, 'Position too small to size'],
   [/wrong side of entry/i, 'Stop on the wrong side of entry'],

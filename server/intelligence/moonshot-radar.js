@@ -35,7 +35,7 @@ async function rowFor(w, latest, btc, now) {
   const live = tick > 0 ? tick : bars.length ? bars[bars.length - 1].close : null; // a gem still joining the stream: its last 5m close
   if (!(live > 0) || bars.length < 16) return null;
   const buzz = await social.getSocial(w.symbol, now);
-  const a = spec.assess(bars, live, w.symbol, { btc, buzz, news: sentiment.peek(w.symbol), volumeUsd: w.volumeUsd });
+  const a = spec.assess(bars, live, w.symbol, { btc, buzz, news: sentiment.peek(w.symbol), volumeUsd: w.volumeUsd, volChange: w.volChange });
   const s = a.best;
   const { parts, detail } = s;
   const frame = (f) => { const x = a.ign.frames.find((y) => y.frame === f); return x ? round2(x.surge * 100) : null; };

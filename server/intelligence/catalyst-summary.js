@@ -19,6 +19,7 @@ const social = require('../connectors/crypto-social');
 const sentiment = require('../connectors/news-sentiment');
 
 const SPEC_ID = spec.STRATEGY_ID;
+const MOON_SPREAD_PCT = require('../risk/break-even').MAX_MOONSHOT_SPREAD * 100; // 0.80 (Phase 65B)
 const pct = (x, d = 2) => (Number.isFinite(x) ? `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(d)}%` : '—'); // x already in %
 const x1 = (x) => (Number.isFinite(x) ? `${x.toFixed(1)}x` : '—');
 const etDay = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
@@ -75,12 +76,14 @@ function ledgerVerdict(symbol, ctx) {
 function verdict(r, ctx, now) {
   const fromLedger = ledgerVerdict(r.symbol, ctx);
   if (fromLedger) return fromLedger;
-  // Phase 65 liquidity gates: a thin or wide book is never traded, whatever it scores.
-  if (Number.isFinite(r.volumeUsd) && r.volumeUsd < spec.CONFIG.minVolumeUsd) {
-    return { status: 'FILTERED', text: `24h volume $${Math.round(r.volumeUsd).toLocaleString('en-US')} is under the $${(spec.CONFIG.minVolumeUsd / 1e6).toFixed(1)}M liquidity floor: thin book, never traded (${r.score}/100).` };
+  // Phase 65B Moonshot liquidity gates: a thin or wide book is never traded, whatever it scores.
+  const b = r.buzzDetail || {};
+  const liq = Number.isFinite(r.volumeUsd) ? spec.liquidity({ volumeUsd: r.volumeUsd, volChange: r.volChange, relVol: r.relVol, buzz: { trending: b.trendingRank || null, reddit: { mentions: b.mentions || 0 } } }) : null;
+  if (liq && !liq.ok) {
+    return { status: 'FILTERED', text: `24h volume $${Math.round(r.volumeUsd).toLocaleString('en-US')} is under the $${Math.round(liq.floor / 1000)}k Moonshot floor${liq.catalyst ? '' : ' ($200k with a confirmed catalyst)'}: thin book, never traded (${r.score}/100).` };
   }
-  if (Number.isFinite(r.spreadPct) && r.spreadPct > 0.45) {
-    return { status: 'FILTERED', text: `Bid/ask spread ${r.spreadPct.toFixed(2)}% exceeds the 0.45% cap: a buy would start that far underwater, so it is not staged (${r.score}/100).` };
+  if (Number.isFinite(r.spreadPct) && r.spreadPct > MOON_SPREAD_PCT) {
+    return { status: 'FILTERED', text: `Bid/ask spread ${r.spreadPct.toFixed(2)}% exceeds the ${MOON_SPREAD_PCT.toFixed(2)}% Moonshot cap: a buy would start that far underwater, so it is not staged (${r.score}/100).` };
   }
   const label = spec.LABEL[r.trigger] || spec.LABEL[r.kind] || 'Trigger';
   const rej = rejections.latestFor(r.symbol, { strategyId: SPEC_ID }, now);

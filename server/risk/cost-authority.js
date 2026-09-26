@@ -78,8 +78,9 @@ function packageQuote(legs) {
 }
 
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
-const MAX_FEE_DRAG_CRYPTO = Math.min(MAX_FEE_DRAG, 0.30); // Phase 65: at most 30% of 1R to Coinbase fees + spread
-const maxFeeDrag = (market) => (market === 'crypto' ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG);
+const MAX_FEE_DRAG_CRYPTO = Math.min(MAX_FEE_DRAG, 0.30); // Phase 65: standard crypto, at most 30% of 1R to fees + spread
+// Phase 65B two tiers: Moonshots (speculative) keep MAX_FEE_DRAG (0.35R) so tight coils stay tradeable.
+const maxFeeDrag = (market, speculative = false) => (market === 'crypto' && !speculative ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG);
 
 function legRate(market, liquidity = 'taker') {
   const rates = LEG_RATE[market];
@@ -130,7 +131,7 @@ function evaluateCosts(candidate, dollarRisk) {
     : candidate.positionSize * candidate.entryPrice * blendedRoundTripRate(candidate.market, candidate.entryLiquidity)) + spreadCost;
   const feeDrag = estimatedFees / dollarRisk;
 
-  if (feeDrag > maxFeeDrag(candidate.market)) {
+  if (feeDrag > maxFeeDrag(candidate.market, !!candidate.speculative)) {
     return { approved: false, reason: 'Cost ceiling exceeded', feeDrag, estimatedFees };
   }
   return { approved: true, feeDrag, estimatedFees };

@@ -43,6 +43,10 @@ const FEE_DRAG_BUDGET = 0.29; // under the crypto gate's 0.30R (Phase 65), with 
 // Maker entry: a limit inside the zone (post-only when live, coinbase-api.js).
 const entryLiquidity = () => 'maker';
 const stopPct = () => minStopPct('crypto', 'maker', FEE_DRAG_BUDGET);
+// Phase 65B: T1 at least 2.4R, so it nets >= 1.5 : 1 (the standard crypto gate) at the 5.4% floor,
+// whatever the global Strictness target (Moderate 2R) says.
+const MIN_TARGET_R = 2.4;
+const targetR = () => Math.max(getStrictness().targetR, MIN_TARGET_R);
 
 const CONFIG = {
   symbols: [...CRYPTO], // the monitored crypto universe (server/market/universe.js)
@@ -95,7 +99,7 @@ function levels(live, s, bars) {
   if (!cs.ok) return cs;
   const invalidation = floorPx(cs.invalidation);
   return { ok: true, entryMax, invalidation, pct: (entryMax - invalidation) / entryMax, widened: cs.widened,
-    target: px(entryMax + getStrictness().targetR * (entryMax - invalidation)) };
+    target: px(entryMax + targetR() * (entryMax - invalidation)) };
 }
 
 function candidate(symbol, live, s, now, ctx) {
@@ -120,7 +124,7 @@ function candidate(symbol, live, s, now, ctx) {
     targets: plan.targets,
     catalyst: { type: 'technical', headline: null, sentimentScore: 0 },
     thesis: `${symbol} flushed to ${px(s.flushBar.low)} (${depth.toFixed(1)}% under its ${CONFIG.meanBars}-bar ${CONFIG.timeframe} mean `
-      + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${getStrictness().targetR}R move (${getStrictness().level} setting); `
+      + `${px(s.mean)}) and is reclaiming it at ${px(live)}. Multi-day long for a ${targetR()}R move (${getStrictness().level} setting, at least ${MIN_TARGET_R}R); `
       + `invalid below ${invalidation} (${+(pct * 100).toFixed(1)}% stop, under the flush low${widened ? ', widened to the maker/taker fee floor' : ''}). `
       + `T1 is ${ctx.atrMult.toFixed(2)}x the daily ATR away. ${plan.text} `
       + `${sentiment.describe(ctx.news)} Expected hold: ${CONFIG.expectedDuration}.`,
