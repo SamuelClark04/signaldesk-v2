@@ -244,3 +244,9 @@ body.hud-dragging, body.hud-dragging .hud-title, body.hud-dragging .hud-pill { c
 .opp-side .sa-dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .opp-side .sa-dl dd { margin-bottom: 8px; }
 @media (max-width: 1200px) { .opp-side { grid-column: 1 / -1; } }
+
+/* Dual Chart trading surface (Phase 64): Chart 2's own HUD wrap + the labelled right-column cards. */
+.dual-chart2 { min-width: 0; }
+.dual-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dual-side-label { color: var(--accent); font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+.dual-head .mt-launch { padding: 3px 10px; font-size: 12px; }

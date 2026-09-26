@@ -198,8 +198,8 @@
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && t) close(); });
 
-  function button(asset) {
-    const b = el('button', { type: 'button', className: 'btn btn-solid mt-launch', textContent: '+ Manual Trade', title: `Open a manual trade ticket for ${asset}` });
+  function button(asset, label = '+ Manual Trade') {
+    const b = el('button', { type: 'button', className: 'btn btn-solid mt-launch', textContent: label, title: `Open a manual trade ticket for ${asset}` });
     b.onclick = () => open(asset);
     return b;
   }

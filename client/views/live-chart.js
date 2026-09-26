@@ -25,7 +25,8 @@
   // Level lines (Phase 58C), shared switch: the charted setup's, else the overlay (an
   // open position or an after-hours options plan). Options map the UNDERLYING levels,
   // labelled with the spread's value there: ENTRY · paid, SL, T1 / T2, BE (expiry).
-  let levelsOn = (() => { try { return localStorage.getItem('signaldesk.chartLevels') !== 'off'; } catch { return true; } })();
+  // Each pane has its own switch (Phase 64: Chart 2's [Lines] never touches Chart 1), remembered per device.
+  const readLevels = (key) => { try { return localStorage.getItem(key) !== 'off'; } catch { return true; } };
   const panes = new Set();
   // { entry, entryMin, stop, t1, t2, be, debit, stopValue, t1Value, t2Value, option } from an order / plan / position.
   function levelsOf(x) {
@@ -49,7 +50,7 @@
     { title: `ENTRY · paid ${L.debit}`, price: L.entry, color: cyan(), style: 2 },
     { title: `SL · spread ${L.stopValue}`, price: L.stop, color: css('--short', '#fb7185'), style: 0 },
   ];
-  function specsFor(o, withLevels, overlay) {
+  function specsFor(o, withLevels, overlay, levelsOn) {
     const t = o.targets || [];
     const L = withLevels ? levelsOf(o) : levelsOf(overlay);
     return (!levelsOn || !L ? [] : L.option ? optionSpecs(L) : !withLevels ? [
@@ -66,8 +67,10 @@
     ]).filter((s) => s.price > 0);
   }
 
-  // One chart pane. opts: { tf, extraTools: () => [nodes] for its toolbar, label }.
+  // One chart pane. opts: { tf, extraTools: () => [nodes] for its toolbar, levelsKey: its [Lines] storage key }.
   function makeChart(paneOpts = {}) {
+    const levelsKey = paneOpts.levelsKey || 'signaldesk.chartLevels';
+    let levelsOn = readLevels(levelsKey);
     let tf = paneOpts.tf || '15m';
     let follow = true;
     let view = null;
@@ -136,7 +139,7 @@
     }
 
     function setLevels() {
-      const specs = specsFor(view.o, view.opts.withLevels, view.opts.overlay);
+      const specs = specsFor(view.o, view.opts.withLevels, view.opts.overlay, levelsOn);
       const key = JSON.stringify(specs);
       if (key === view.levelsKey) return;
       view.levelsKey = key;
@@ -217,6 +220,12 @@
       showing: () => (view && view.o ? view.o.asset : null),
       loaded: (symbol, frame) => { if (view && view.o && view.o.asset === symbol && tf === frame) paint(); },
       relevel: () => { if (view && view.o) { view.levelsKey = ''; paint(); view.chart.priceScale('right').applyOptions({ autoScale: true }); } },
+      levelsVisible: () => levelsOn,
+      setLevelsVisible: (on) => {
+        levelsOn = !!on;
+        try { localStorage.setItem(levelsKey, on ? 'on' : 'off'); } catch { /* this session only */ }
+        pane.relevel();
+      },
     };
     panes.add(pane);
     return pane;
@@ -224,14 +233,8 @@
 
   D.onLoaded((symbol, frame) => { for (const p of panes) p.loaded(symbol, frame); });
 
-  function setLevelsVisible(on) {
-    levelsOn = !!on;
-    try { localStorage.setItem('signaldesk.chartLevels', on ? 'on' : 'off'); } catch { /* this session only */ }
-    for (const p of panes) p.relevel();
-  }
-
   // The primary pane (Opportunities center, Moonshot Radar): its toolbar has [⬍ Dual Chart].
   const primary = makeChart({ extraTools: () => (SD.dualChart ? [SD.dualChart.toggleButton()] : []) });
   SD.liveChart = { record: D.record, mount: primary.mount, stats: primary.stats, setTimeframe: primary.setTimeframe, primary,
-    setLevelsVisible, levelsVisible: () => levelsOn, levelsOf, create: makeChart };
+    setLevelsVisible: primary.setLevelsVisible, levelsVisible: primary.levelsVisible, levelsOf, create: makeChart };
 })();

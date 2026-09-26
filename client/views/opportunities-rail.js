@@ -36,10 +36,14 @@
     const live = state.prices && state.prices[p.asset];
     const m = SD.portfolioMetrics.mark(p, live);
     const venue = p.adopted ? 'Adopted' : p.execution === 'LIVE' ? 'Live' : 'Paper';
-    const pnl = m.gross === null || m.gross === undefined
+    // Phase 64: the TRUE net (the server's exit quote, as on the HUD and the position card); gross only when no net is known.
+    const f = SD.netPnl.figures(p, m);
+    const shown = f ? (Number.isFinite(f.net) ? f.net : f.gross) : null;
+    const isNet = !!f && Number.isFinite(f.net);
+    const pnl = !Number.isFinite(shown)
       ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: p.market === 'options' && !(p.optionsData && p.optionsData.contract) ? 'Simulated'
         : m.live && p.market !== 'options' ? '—' : 'No price' })
-      : el('span', { className: `opp-pos-pnl ${pnlClass(m.gross)}`, textContent: signed(m.gross, money) });
+      : el('span', { className: `opp-pos-pnl ${pnlClass(shown)}`, textContent: signed(shown, money) });
     const active = view.isWatch && view.watchSymbol === p.asset;
     const btn = el('button', { type: 'button', className: `opp-watch opp-pos${active ? ' is-active' : ''}` }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(p) }),
@@ -49,8 +53,8 @@
       pnl,
     ]);
     btn.title = m.optionBasis
-      ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}) vs ${p.optionsData.debit} paid · P/L before fees`
-      : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${m.live ? ' · P/L before fees' : ''}`;
+      ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}) vs ${p.optionsData.debit} paid · ${isNet ? 'net P/L after fees' : 'P/L before fees'}`
+      : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${isNet ? ` · net P/L after fees (gross ${signed(f.gross, money)})` : m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));
     btn.onclick = (e) => (e.shiftKey && SD.dualChart.isOn() ? SD.dualChart.setSecondary(p.asset) : view.onOpenPosition(p)); // Shift: the Dual Chart's bottom pane
     return btn;

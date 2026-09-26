@@ -188,8 +188,8 @@
     const analysis = SD.setupAnalysis.analysis(active, { state, livePrice: ctx.livePrice, refPrice: ctx.refPrice, rerender });
     // Desktop (Phase 62B): the context card sits under the Setup / position panel in the right column;
     // the center is the chart(s) + Catalyst & News Feed. iPhone panes keep it on the chart pane.
-    const side = M().isMobile() ? [M().tag(SD.oppDetail.right(active, ctx), 'order'), M().tag(analysis, 'chart')]
-      : [el('div', { className: 'opp-side' }, [SD.oppDetail.right(active, ctx), analysis])];
+    const cards = SD.dualChart.side(SD.oppDetail.right(active, ctx), state, active.asset, ctx); // + Chart 2's card while split (Phase 64)
+    const side = M().isMobile() ? [...cards.map((c) => M().tag(c, 'order')), M().tag(analysis, 'chart')] : [el('div', { className: 'opp-side' }, [...cards, analysis])];
     const grid = el('div', { className: 'opp-grid m-panes', dataset: { pane: M().pane() } }, [M().tag(rail, 'queue'), M().tag(SD.oppDetail.center(active, ctx), 'chart'), ...side]);
     return M().wrap(grid, { rerender, bar: SD.oppDetail.actionBar(active, ctx) });
   }
