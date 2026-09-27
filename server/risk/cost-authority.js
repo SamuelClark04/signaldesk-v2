@@ -10,6 +10,8 @@
 // Phase 65: the ACCOUNT's real fee tier (Coinbase /transaction_summary, coinbase-fees.js)
 // replaces these once fetched (setCoinbaseFees); coinbaseFees() is always the one in force.
 // Crypto setups are held to MAX_FEE_DRAG_CRYPTO (0.30R) and their stop floor budgets under it.
+// Phase 69A: a setup routed to Kraken / OKX is costed on that venue's schedule (VENUE_FEES,
+// feeKey); strategy stop floors stay on Coinbase's (dearer) rates, so they are never too tight.
 // Legs are costed by how they really execute:
 //   entry   maker when the strategy rests a limit inside its entry zone
 //           (candidate.entryLiquidity = 'maker'), on paper AND live: live
@@ -37,15 +39,33 @@ const COINBASE_TAKER_FEE = feeFromEnv('COINBASE_TAKER_FEE', DEFAULT_TAKER_FEE, 0
 // Never above the taker rate (a maker leg cannot cost more than crossing the spread).
 const COINBASE_MAKER_FEE = Math.min(COINBASE_TAKER_FEE, feeFromEnv('COINBASE_MAKER_FEE', DEFAULT_MAKER_FEE, 0.05));
 const COINBASE_SPREAD_BUFFER = feeFromEnv('COINBASE_SPREAD_BUFFER', DEFAULT_SPREAD_BUFFER, 0.02);
-
-// Cost of one leg as a fraction of that leg's notional.
-const LEG_RATE = {
-  crypto: { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE + COINBASE_SPREAD_BUFFER },
-  stocks: { maker: 0.0005, taker: 0.0005 }, // slippage per leg (no commission)
-};
 // The Coinbase rates in force: the .env / default ones until the account's own tier is read.
 let cbFees = { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)', at: null };
 const coinbaseFees = () => ({ ...cbFees, buffer: COINBASE_SPREAD_BUFFER });
+
+// Phase 69A: the other crypto venues' fee schedules (the crypto router's waterfall, cheapest
+// first): Kraken Pro 0.25% / 0.40% (KRAKEN_MAKER_FEE / KRAKEN_TAKER_FEE), OKX US 0.08% / 0.10%
+// (connector in Phase 69B). Coinbase keeps its account tier (coinbaseFees below).
+const VENUE_FEES = {
+  kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.0025, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.004, 0.05) },
+  okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.0008, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.001, 0.05) },
+};
+
+// Cost of one leg as a fraction of that leg's notional. Keys are markets, plus 'crypto:<venue>'
+// for crypto routed to a venue other than Coinbase (feeKey).
+const LEG_RATE = {
+  crypto: { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE + COINBASE_SPREAD_BUFFER },
+  stocks: { maker: 0.0005, taker: 0.0005 }, // slippage per leg (no commission)
+  ...Object.fromEntries(Object.entries(VENUE_FEES).map(([v, f]) => [`crypto:${v}`, { maker: f.maker, taker: f.taker + COINBASE_SPREAD_BUFFER }])),
+};
+// The fee table an order / position is costed on: 'crypto:kraken' / 'crypto:okx' when it is
+// routed to (or held at) that venue; otherwise its market ('crypto' = Coinbase).
+const venueOf = (x) => (x && (x.venue || x.routeVenue || (x.broker === 'Kraken' ? 'kraken' : null))) || null;
+const feeKey = (x) => { const v = venueOf(x); return x && x.market === 'crypto' && VENUE_FEES[v] ? `crypto:${v}` : x && x.market; };
+// A venue's exact rates { maker, taker } (Coinbase: the account tier in force).
+const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { maker: coinbaseFees().maker, taker: coinbaseFees().taker });
+// The Coinbase rates in force: the .env / default ones until the account's own tier is read.
+
 function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
   const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
   if (!ok(maker) || !ok(taker) || !(taker > 0)) return false;
@@ -128,7 +148,7 @@ function evaluateCosts(candidate, dollarRisk) {
   const spreadCost = od && od.ask > od.bid && od.bid > 0 ? (od.ask - od.bid) * od.multiplier * candidate.positionSize : 0;
   const estimatedFees = (od
     ? estimateRoundTripFees('options', candidate.positionSize, 0, 0, { optionLegs: (od.legs || []).length || 1 })
-    : candidate.positionSize * candidate.entryPrice * blendedRoundTripRate(candidate.market, candidate.entryLiquidity)) + spreadCost;
+    : candidate.positionSize * candidate.entryPrice * blendedRoundTripRate(feeKey(candidate), candidate.entryLiquidity)) + spreadCost; // the routed venue's fees (69A)
   const feeDrag = estimatedFees / dollarRisk;
 
   if (feeDrag > maxFeeDrag(candidate.market, !!candidate.speculative)) {
@@ -149,6 +169,9 @@ module.exports = {
   maxFeeDrag,
   coinbaseFees,
   setCoinbaseFees,
+  feeKey,
+  venueFees,
+  VENUE_FEES,
   COINBASE_MAKER_FEE,
   COINBASE_TAKER_FEE,
   COINBASE_SPREAD_BUFFER,

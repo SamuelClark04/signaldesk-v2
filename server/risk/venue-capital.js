@@ -1,5 +1,6 @@
 // Venue capital: the bankroll a candidate is sized against, by the venue it
-// would execute on (the same routing as message-handler's VENUES).
+// would execute on (order-router.js; Phase 69A: crypto by its ROUTED venue, crypto-router.js:
+// 'coinbase-live' or 'kraken-live').
 //   paper venue -> the configured paper bankroll (Settings)
 //   LIVE crypto -> the Coinbase account value: every spot balance incl. USD/USDC
 //   LIVE stocks -> the Alpaca account equity (options follow the stock venue)
@@ -35,6 +36,12 @@ const FETCHERS = {
     const cash = (r.positions || []).filter((p) => p.is_cash).reduce((s, p) => s + num(p.total_balance_fiat), 0);
     return value > 0 ? { ok: true, value, cash } : { ok: false, error: 'Coinbase account value is zero' };
   },
+  // Phase 69A: Kraken Pro cash (ZUSD + USD + USDC) + every spot holding at its USD price.
+  async kraken() {
+    const r = await require('../connectors/kraken-api').getPortfolioValue();
+    if (!r.ok) return { ok: false, error: r.error };
+    return r.value > 0 ? { ok: true, value: r.value, cash: r.cash } : { ok: false, error: 'Kraken account value is zero' };
+  },
   async alpaca() {
     const r = await alpacaApi.getAccount();
     if (!r.ok) return { ok: false, error: r.error };
@@ -63,8 +70,11 @@ async function liveValue(broker, now = Date.now()) {
 
 // { ok: true, bankroll, basis: 'paper'|'coinbase-live'|'alpaca-live', fetchedAt? }
 // or { ok: false, reason: 'LIVE_CAPITAL_UNAVAILABLE: <why>', basis }.
-async function sizingBankroll(market, settings) {
-  const [modeKey, broker] = VENUE_OF[market] || [];
+// venue: the crypto venue the order is routed to ('kraken'; default Coinbase).
+const brokerOf = (market, venue) => (market === 'crypto' && FETCHERS[venue] ? venue : (VENUE_OF[market] || [])[1]);
+async function sizingBankroll(market, settings, venue = null) {
+  const [modeKey] = VENUE_OF[market] || [];
+  const broker = brokerOf(market, venue);
   if (!modeKey || settings[modeKey] !== 'live') {
     return settings.bankroll > 0 ? { ok: true, bankroll: settings.bankroll, basis: 'paper' }
       : { ok: false, reason: 'Invalid bankroll', basis: 'paper' };
@@ -86,9 +96,9 @@ function manualValue() {
 }
 
 // The basis an order MUST have been sized with to execute on its venue now.
-function requiredBasis(market, settings) {
-  const [modeKey, broker] = VENUE_OF[market] || [];
-  return modeKey && settings[modeKey] === 'live' ? `${broker}-live` : 'paper';
+function requiredBasis(market, settings, venue = null) {
+  const [modeKey] = VENUE_OF[market] || [];
+  return modeKey && settings[modeKey] === 'live' ? `${brokerOf(market, venue)}-live` : 'paper';
 }
 
 const clearCache = () => cache.clear(); // tests / after settings changes

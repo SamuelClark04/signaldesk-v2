@@ -5,8 +5,10 @@ const ledger = require('./paper-ledger');
 const { validateApproval, stackingConflict } = require('./order-guard');
 const prices = require('../market/latest-prices');
 const { recordRejection } = require('./rejection-stats');
-const { requiredBasis } = require('../risk/venue-capital');
-const { resizeOrder } = require('../risk/risk-engine');
+const { requiredBasis, sizingBankroll } = require('../risk/venue-capital');
+const { resizeOrder, processCandidate } = require('../risk/risk-engine');
+const cryptoRouter = require('./crypto-router'); // Phase 69A: OKX -> Kraken -> Coinbase
+const cryptoVenues = require('./crypto-venues');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
@@ -18,8 +20,29 @@ const coinbaseSocket = require('../connectors/coinbase-socket');
 const VENUES = {
   stocks: { modeKey: 'stockMode', broker: 'Alpaca', api: alpacaApi },
   options: { modeKey: 'stockMode', broker: 'Alpaca', api: null },
-  crypto: { modeKey: 'cryptoMode', broker: 'Coinbase', api: coinbaseApi },
+  crypto: { modeKey: 'cryptoMode', broker: 'Coinbase', api: coinbaseApi }, // Phase 69A: the ROUTED venue's (routeCrypto)
 };
+
+// Phase 69A: a LIVE crypto order goes to the cheapest venue that lists it AND has the cash now
+// (crypto-router.liveRoute). A venue other than the one it was staged / sized on re-sizes it on
+// that venue's account (the risk engine again, same id), keeping a Trade Amount the user set.
+async function routeCrypto(order, settings, livePrice) {
+  const r = await cryptoRouter.liveRoute(order.asset, order.positionSize * livePrice);
+  const staged = cryptoVenues.idOf(order);
+  const v = cryptoVenues.VENUES[r.venue];
+  const venue = { modeKey: 'cryptoMode', broker: v.broker, venueId: r.venue, route: r,
+    api: { submitOrder: (...a) => (r.venue === 'coinbase' ? coinbaseApi.submitOrder(...a) : v.orders().submitOrder(...a)) } };
+  if (r.venue === staged) return { venue, order, resized: null };
+  const capital = await sizingBankroll('crypto', settings, r.venue);
+  if (!capital.ok) throw new Error(capital.reason);
+  const s = processCandidate({ ...order, ...cryptoRouter.fields(r) }, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash });
+  if (!s.approved) throw new Error(`ROUTE_CHANGED: ${r.reason}; re-sized for ${v.label}: ${s.reason}`);
+  // The user's Trade Amount ($) is kept on the new venue (re-applied by the risk engine).
+  const z = order.amountOverride ? resizeOrder(s, order.notional || order.positionSize * order.entryPrice, { confirmed: true }) : s;
+  if (!z.approved) throw new Error(`ROUTE_CHANGED: ${r.reason}; the Trade Amount on ${v.label}: ${z.reason}`);
+  console.warn(`[LIVE] ${order.id}: re-routed ${staged} -> ${r.venue} (${r.reason}); re-sized ${order.positionSize} -> ${z.positionSize}`);
+  return { venue, order: z, resized: z };
+}
 
 // Route a guard-approved order by its venue's mode (`order` may be the user's
 // resized copy: risk-engine.js resizeOrder, same id, a new quantity).
@@ -28,15 +51,20 @@ const VENUES = {
 //          ledger (tagged execution LIVE + brokerId). A failed submit leaves the
 //          order pending and nothing is filled anywhere.
 async function routeApproved(order, livePrice) {
-  const venue = VENUES[order.market];
+  let venue = VENUES[order.market];
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
   const settings = ledger.getSettings();
-  const resized = order.amountOverride ? order : null;
+  let resized = order.amountOverride ? order : null;
   if (settings[venue.modeKey] === 'paper' || order.forcePaper) return ledger.executeOrder(order.id, livePrice, {}, resized); // forcePaper: a manual PAPER ticket (manual-trade.js)
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
+  if (order.market === 'crypto') {
+    const rc = await routeCrypto(order, settings, livePrice);
+    ({ venue } = rc);
+    if (rc.resized) { order = rc.resized; resized = rc.resized; }
+  }
   // A LIVE order must have been sized from that live account. One staged while
   // the venue was on paper (or before this check existed) is refused, never sent.
-  const needed = requiredBasis(order.market, settings);
+  const needed = requiredBasis(order.market, settings, venue.venueId);
   if (order.sizingBasis !== needed) throw new Error(`SIZED_FOR_OTHER_VENUE: sized from ${order.sizingBasis || 'the paper bankroll'}, venue needs ${needed}`);
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
@@ -58,6 +86,7 @@ async function routeApproved(order, livePrice) {
       brokerEnvironment: result.environment,
       fillEstimated: true, // the broker's actual fill price is not fetched yet
       ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}), ...(result.product ? { brokerProduct: result.product } : {}),
+      ...(venue.route ? cryptoRouter.fields(venue.route) : {}), // Phase 69A: venue 'kraken' | 'coinbase' + the route taken
     }, resized);
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.

@@ -143,7 +143,7 @@
       ...(p.t2Net !== null ? [kv('Net at T2 / plan', `${pnl(p.t2Net)} / ${pnl(p.planNet)}`, cls(p.t2Net))] : []),
       kv('Fees (blended est.)', money(p.fees)), // the risk gate's: T1 limit or stop; the market round trip is the hurdle below
       kv('Net R:R (T1)', p.rr ? `${p.rr.toFixed(2)} : 1` : '—'),
-    ]), ...SD.netPnl.hurdle(p.hurdle, 'mt-note mt-hurdle'), // Phase 63: the round-trip fee hurdle, before opening
+    ]), ...SD.netPnl.route({ routeReason: p.route }, 'mt-note'), ...SD.netPnl.hurdle(p.hurdle, 'mt-note mt-hurdle'), // fee hurdle (63), venue route (69A)
     ...(p.aboveEngineMax ? [el('p', { className: 'mt-note is-warn', textContent: `Above the risk engine's ${money(p.engineMax)} max safe size.` })] : [])];
   }
 

@@ -5,12 +5,15 @@
 const ledger = require('./paper-ledger');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
+const krakenApi = require('../connectors/kraken-api');
 
 const CACHE_MS = 15000;
 
 const VENUES = [
   { name: 'alpaca', modeKey: 'stockMode', label: 'Alpaca', markets: 'stocks / options', api: alpacaApi },
   { name: 'coinbase', modeKey: 'cryptoMode', label: 'Coinbase', markets: 'crypto', api: coinbaseApi },
+  // Phase 69A: shown once KRAKEN_API_KEY / KRAKEN_API_SECRET are set (the router's cheaper crypto venue).
+  { name: 'kraken', modeKey: 'cryptoMode', label: 'Kraken Pro', markets: 'crypto (routed first)', api: krakenApi, when: () => krakenApi.configured() },
 ];
 
 const cache = new Map(); // venue name -> { at, value }
@@ -34,11 +37,12 @@ async function venueState(venue, mode, force) {
 // live balances are displayed, not yet used by the risk engine.
 async function getBrokerState({ force = false } = {}) {
   const settings = ledger.getSettings();
-  const venues = await Promise.all(VENUES.map((v) => venueState(v, settings[v.modeKey], force)));
+  const list = VENUES.filter((v) => !v.when || v.when());
+  const venues = await Promise.all(list.map((v) => venueState(v, settings[v.modeKey], force)));
   return {
     bankroll: settings.bankroll,
     sizingBasis: 'paper-bankroll',
-    venues: Object.fromEntries(VENUES.map((v, i) => [v.name, venues[i]])),
+    venues: Object.fromEntries(list.map((v, i) => [v.name, venues[i]])),
   };
 }
 

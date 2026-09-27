@@ -11,7 +11,7 @@
 // Exposes window.SignalDesk.portfolioMetrics.
 (() => {
   const SD = window.SignalDesk;
-  const { clock } = SD.ui;
+  const { clock, money } = SD.ui; // money: the two-venue cash note (69A)
   const QTY_DUST = 1e-8;
 
   const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`;
@@ -91,11 +91,11 @@
   // ledger's LIVE Coinbase trades are part of the synced balance, so they are
   // never added on top of it (they annotate the matching holding instead).
   // 'crypto' is the "Live / External" filter: synced broker accounts + manual holdings.
-  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase', 'alpaca', 'external'], combined: ['paper', 'coinbase', 'alpaca', 'external'] };
+  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase', 'kraken', 'alpaca', 'external'], combined: ['paper', 'coinbase', 'kraken', 'alpaca', 'external'] }; // + Kraken Pro (69A)
 
   function ledgerVenue(p) {
     if (p.execution !== 'LIVE') return 'paper';
-    return p.broker === 'Coinbase' ? 'coinbase-ledger' : 'alpaca-ledger';
+    return p.broker === 'Coinbase' ? 'coinbase-ledger' : p.broker === 'Kraken' ? 'kraken-ledger' : 'alpaca-ledger';
   }
 
   // External rows' "Next step": a pending Pilot card for it, else its matrix verdict.
@@ -111,7 +111,7 @@
   // adopted positions of that coin) and which part is external. Its alert is the
   // most urgent one of the managed positions inside it, else a plain info line.
   function brokerRow(p, ledger, alerts, state) {
-    const venue = p.broker === 'Alpaca' ? 'alpaca' : 'coinbase';
+    const venue = p.broker === 'Alpaca' ? 'alpaca' : p.broker === 'Kraken' ? 'kraken' : 'coinbase';
     const tracked = ledger.filter((x) => x.key === `${venue}-ledger` && x.p.asset === p.asset).map((x) => x.p);
     const ext = ((state.external && state.external.positions) || []).find((x) => x.id === `ext:${venue}:${p.asset}`);
     const managedQty = Math.min(p.positionSize, tracked.reduce((s, t) => s + t.positionSize, 0));
@@ -136,15 +136,18 @@
     const alerts = new Map(((state.intelligence && state.intelligence.attention) || []).filter((a) => a.positionId).map((a) => [a.positionId, a]));
     const cb = state.holdings && state.holdings.coinbase;
     const al = state.holdings && state.holdings.alpaca;
+    const kr = state.holdings && state.holdings.kraken;
     const synced = !!(cb && cb.ok);
     const alSynced = !!(al && al.ok);
+    const krSynced = !!(kr && kr.ok);
     const ledger = (state.positions || []).map((p) => ({ p, key: ledgerVenue(p) }));
-    const broker = [...(synced ? cb.positions : []), ...(alSynced ? al.positions : [])].map((p) => brokerRow(p, ledger, alerts, state));
+    const broker = [...(synced ? cb.positions : []), ...(krSynced ? kr.positions : []), ...(alSynced ? al.positions : [])].map((p) => brokerRow(p, ledger, alerts, state));
     const manual = ((state.external && state.external.positions) || []).filter((p) => p.external === 'manual')
       .map((p) => ({ p, key: 'external', alert: externalAlert(state, p.id, p.asset) }));
     const keys = new Set(VENUE_KEYS[venue] || VENUE_KEYS.paper);
     if (!synced && keys.has('coinbase')) keys.add('coinbase-ledger'); // no snapshot yet: show what the ledger knows
     if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
+    if (!krSynced && keys.has('kraken')) keys.add('kraken-ledger');
     const rows = [...ledger, ...broker, ...manual].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
       // No live price: the latest session close, else the server's markPrice (external holdings, Phase 55).
@@ -152,12 +155,14 @@
 
     const paper = rows.filter((r) => r.key === 'paper');
     const cbRows = rows.filter((r) => r.key === 'coinbase');
+    const krRows = rows.filter((r) => r.key === 'kraken');
     const alRows = rows.filter((r) => r.key === 'alpaca');
     const extRows = rows.filter((r) => r.key === 'external');
-    const counted = [...paper, ...cbRows, ...alRows, ...extRows];
+    const counted = [...paper, ...cbRows, ...krRows, ...alRows, ...extRows];
     const usePaper = keys.has('paper');
     const useCb = keys.has('coinbase') && synced;
     const useAl = keys.has('alpaca') && alSynced;
+    const useKr = keys.has('kraken') && krSynced;
     const alCash = useAl ? al.cash || 0 : 0;
     const sum = (list) => list.reduce((s, r) => s + r.m.marketValue, 0);
     const managedOf = (list) => list.reduce((s, r) => s + (r.p.positionSize > 0 ? (r.m.marketValue * r.p.managedQty) / r.p.positionSize : 0), 0);
@@ -167,6 +172,8 @@
     const bankroll = usePaper ? (state.settings && state.settings.bankroll) || 0 : 0;
     const realized = usePaper ? (state.journal || []).filter((t) => t.execution !== 'LIVE').reduce((s, t) => s + (t.netPnl || 0), 0) : 0;
     const cbCash = useCb ? cb.cash || 0 : 0;
+    const krCash = useKr ? kr.cash || 0 : 0;
+    const krValue = krRows.reduce((s, r) => s + r.m.marketValue, 0);
     const paperCost = paper.reduce((s, r) => s + r.m.cost, 0);
     const paperValue = paper.reduce((s, r) => s + r.m.marketValue, 0);
     const cbValue = cbRows.reduce((s, r) => s + r.m.marketValue, 0);
@@ -177,11 +184,11 @@
     const paperCash = usePaper ? bankroll + realized - paperCost : 0;
     const totals = {
       venue, bankroll, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
-      holdingsValue: paperValue + cbValue + alValue + extValue,
-      managedValue: paperValue + cbManaged + managedOf(alRows),
-      externalValue: cbValue - cbManaged + outside,
-      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useAl ? alValue + alCash : 0) + extValue,
-      cash: paperCash + cbCash + alCash, alCash, extValue,
+      holdingsValue: paperValue + cbValue + krValue + alValue + extValue,
+      managedValue: paperValue + cbManaged + managedOf(krRows) + managedOf(alRows),
+      externalValue: cbValue - cbManaged + krValue - managedOf(krRows) + outside,
+      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0) + (useAl ? alValue + alCash : 0) + extValue,
+      cash: paperCash + cbCash + krCash + alCash, alCash, krCash, extValue,
       unrealizedPct: committed > 0 ? unrealized / committed : null,
       exitFees: counted.reduce((s, r) => s + (r.m.fees || 0), 0),
       fresh: rows.filter((r) => r.m.live).length,
@@ -190,10 +197,10 @@
       live: rows.length - counted.length,
       // Venue-isolated bankroll: paper = configured bankroll; Live Crypto = the
       // Coinbase account's value (holdings + cash); Combined = both.
-      liveAccountValue: useCb ? cbValue + cbCash : 0,
+      liveAccountValue: (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0),
     };
     totals.currentBankroll = (usePaper ? bankroll : 0) + totals.liveAccountValue;
-    totals.bankrollLabel = [usePaper ? 'paper bankroll' : '', useCb ? 'Coinbase account value' : ''].filter(Boolean).join(' + ');
+    totals.bankrollLabel = [usePaper ? 'paper bankroll' : '', useCb ? 'Coinbase account value' : '', useKr ? 'Kraken account value' : ''].filter(Boolean).join(' + ');
     totals.deployedPct = totals.accountValue > 0 ? totals.holdingsValue / totals.accountValue : null;
     return { rows, totals };
   }
@@ -220,6 +227,10 @@
   function fundingSource(state, key) {
     if (key === 'coinbase') {
       const v = state.broker && state.broker.venues && state.broker.venues.coinbase;
+      const k = state.broker && state.broker.venues && state.broker.venues.kraken; // Phase 69A: both crypto venues' cash
+      if (v && v.ok && Number.isFinite(v.buyingPower) && k && k.ok && Number.isFinite(k.buyingPower)) {
+        return { amount: v.buyingPower + k.buyingPower, label: 'Coinbase + Kraken USD + USDC cash', note: `Coinbase ${money(v.buyingPower)} · Kraken ${money(k.buyingPower)} · as of ${clock(v.fetchedAt)}` };
+      }
       if (v && v.ok && Number.isFinite(v.buyingPower)) return { amount: v.buyingPower, label: 'Coinbase USD + USDC cash', note: `as of ${clock(v.fetchedAt)}` };
       const cb = state.holdings && state.holdings.coinbase;
       if (cb && cb.ok) return { amount: cb.cash, label: 'Coinbase USD + USDC cash', note: `last sync ${clock(cb.syncedAt)}` };

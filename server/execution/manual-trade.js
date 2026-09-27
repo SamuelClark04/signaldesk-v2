@@ -29,6 +29,7 @@ const { minStopPct } = require('../risk/cost-authority');
 const { getDailyBars } = require('../connectors/daily-bars');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
+const cryptoRouter = require('./crypto-router'); // Phase 69A: the ticket's crypto venue
 const { atr } = require('../strategies/options-signals');
 const manualOptions = require('./manual-options');
 const { exitSpreadCap } = require('../strategies/5-options-system');
@@ -125,7 +126,10 @@ async function toCandidate(t, now, { preview = false } = {}) {
   const live = livePrice(mode, asset);
   const px = live || (preview ? prices.getMarkPrice(asset) : null);
   if (!(px > 0)) throw new Error(`NO_LIVE_PRICE: no fresh ${asset} price right now`);
-  const capital = await sizingBankroll(market, venue === 'paper' ? { ...settings, cryptoMode: 'paper', stockMode: 'paper' } : settings);
+  // Phase 69A: the crypto venue it goes to (LIVE: listing + cash for the amount now; else listing).
+  if (market === 'crypto') await cryptoRouter.prepare().catch(() => {});
+  const route = market !== 'crypto' ? null : venue === 'live' ? await cryptoRouter.liveRoute(asset, num(t.amount) || 0) : cryptoRouter.preRoute(asset);
+  const capital = await sizingBankroll(market, venue === 'paper' ? { ...settings, cryptoMode: 'paper', stockMode: 'paper' } : settings, route && route.venue);
   if (!capital.ok) throw new Error(capital.reason);
   if (mode === 'options') {
     const priced = await manualOptions.price(asset, t.spec || {}, px, now);
@@ -149,11 +153,11 @@ async function toCandidate(t, now, { preview = false } = {}) {
   const candidate = {
     id: `manual:${kind}:${asset}:${now}`, asset, market, strategyId: 'manual', setupType: moon ? `Manual · Moonshot ${direction}` : `Manual ${direction}`, direction, timeframe: 'manual',
     ...(moon ? { speculative: true, tag: 'Speculative Moonshot', conviction: moon.conviction, convictionScore: moon.score } : {}),
-    tradeType: 'Manual', expectedDuration: 'Your call (exits at the stop or targets)', manual: true, forcePaper: venue === 'paper', entryLiquidity: 'taker',
+    tradeType: 'Manual', expectedDuration: 'Your call (exits at the stop or targets)', manual: true, forcePaper: venue === 'paper', entryLiquidity: 'taker', ...(route ? cryptoRouter.fields(route) : {}),
     entryZone: { min: round(px * (1 - ZONE), px), max: round(px * (1 + ZONE), px) }, invalidation: stop,
     targets: [{ level: 1, price: t1, allocation: hasT2 ? 0.5 : 1 }, ...(hasT2 ? [{ level: 2, price: t2, allocation: 0.5 }] : [])],
     catalyst: { type: 'manual', headline: 'Manual trade ticket', sentimentScore: 0 },
-    thesis: `Manual ${direction} ${asset} from the trade ticket (${venue === 'live' ? 'LIVE @ Coinbase' : 'paper'}): entry near ${px}, stop ${stop}, T1 ${t1}${hasT2 ? `, T2 ${t2}` : ''}.`,
+    thesis: `Manual ${direction} ${asset} from the trade ticket (${venue === 'live' ? `LIVE @ ${route ? route.label : 'Coinbase'}` : 'paper'}): entry near ${px}, stop ${stop}, T1 ${t1}${hasT2 ? `, T2 ${t2}` : ''}.`,
     confirmationCriteria: [`Manual ${direction} at ${px}`], timestamp: new Date(now).toISOString(),
   };
   return { candidate, capital, settings, amount, px, venue, live: !!live };
@@ -164,7 +168,7 @@ function size({ candidate, capital, settings, amount, venue }) {
   const r = processCandidate(candidate, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash });
   if (!r.approved && r.reason === 'Cost ceiling exceeded' && candidate.market !== 'options') {
     const e = candidate.entryZone.max;
-    const pct = minStopPct(candidate.market, candidate.entryLiquidity);
+    const pct = minStopPct(require('../risk/cost-authority').feeKey(candidate), candidate.entryLiquidity); // the routed venue's fees (69A)
     const at = candidate.direction === 'short' ? e * (1 + pct) : e * (1 - pct);
     return { ok: false, error: `COST_CEILING: fees are ${r.feeDrag.toFixed(2)}R of this stop's risk (max 0.35R). Widen the stop to ${(pct * 100).toFixed(1)}% or more (${candidate.direction === 'short' ? 'at/above' : 'at/below'} ${round(at, e)}).` };
   }
@@ -179,14 +183,15 @@ async function preview(t, now = Date.now()) {
   const opt = b.priced ? manualOptions.summarize(b.candidate.asset, b.priced.plan, b.px, exitSpreadCap(b.settings), now) : null;
   const s = size(b);
   const basis = b.live ? 'live' : 'last close (market closed: opening needs a live price)';
-  if (!s.ok) return { ok: false, error: s.error, price: b.px, priceBasis: basis, options: opt };
+  if (!s.ok) return { ok: false, error: `${s.error}${b.candidate.routeReason ? ` (${b.candidate.routeReason})` : ''}`, price: b.px, priceBasis: basis, options: opt, route: b.candidate.routeReason || null };
   const z = s.sized;
   const sc = priceScenarios(z);
   const loss = sc.stop ? -sc.stop.net : z.dollarRisk;
   return { ok: true, price: b.px, priceBasis: basis, live: b.live, venue: b.venue, qty: z.positionSize, notional: z.notional, dollarRisk: z.dollarRisk, fees: z.estimatedFees, stopNet: sc.stop ? sc.stop.net : null,
     t1Net: sc.t1 ? sc.t1.net : null, t2Net: sc.t2 ? sc.t2.net : null, planNet: sc.plan ? sc.plan.net : null, rr: sc.t1 && loss > 0 ? sc.t1.net / loss : null,
     aboveEngineMax: z.positionSize > s.order.positionSize, engineMax: s.order.notional, cash: b.capital.cash ?? null, bankroll: b.capital.bankroll, options: opt,
-    hurdle: feeHurdle({ market: z.market, price: b.px, notional: z.notional, direction: z.direction, entryLiquidity: z.entryLiquidity, quote: z.market === 'crypto' ? liveQuote(z.asset, now) : null }) };
+    route: b.candidate.routeReason || null, // Phase 69A: "Route: Kraken Pro (0.25%/0.40%)"
+    hurdle: feeHurdle({ market: z.market, venue: z.venue || null, price: b.px, notional: z.notional, direction: z.direction, entryLiquidity: z.entryLiquidity, quote: z.market === 'crypto' ? liveQuote(z.asset, now) : null }) };
 }
 
 // Open: stage the sized order, then the guarded approval (paper, or LIVE @ Coinbase).

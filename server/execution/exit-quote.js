@@ -27,7 +27,7 @@
 const prices = require('../market/latest-prices');
 const { saleValue } = require('./option-marks');
 const { grossPnl, feeLegs } = require('../risk/scenarios');
-const { estimateRoundTripFees, legRate, OPTIONS_COMMISSION_PER_LEG } = require('../risk/cost-authority');
+const { estimateRoundTripFees, legRate, OPTIONS_COMMISSION_PER_LEG, feeKey } = require('../risk/cost-authority');
 const be = require('../risk/break-even');
 
 const QUOTE_MAX_AGE_MS = 45 * 1000;
@@ -66,10 +66,11 @@ function quote(pos, price, kind = 'stop', at = Date.now(), bid = null) {
   const legs = opt ? ((pos.optionsData.legs || []).length || 1) : 0;
   const atBid = !opt && bid > 0 && kind === 'stop';
   const sellPrice = atBid ? bid : price;
-  const exitRate = opt ? 0 : atBid ? be.exactRate(pos.market, 'taker') : legRate(pos.market, 'taker');
+  const fk = feeKey(pos); // Phase 69A: the venue it is held at ('crypto:kraken' / 'crypto' = Coinbase / market)
+  const exitRate = opt ? 0 : atBid ? be.exactRate(fk, 'taker') : legRate(fk, 'taker');
   const exitFee = opt ? OPTIONS_COMMISSION_PER_LEG * legs * size : sellPrice * size * exitRate;
-  const modelled = estimateRoundTripFees(pos.market, size, pos.fillPrice, price, feeLegs(pos, kind));
-  const entryFee = opt ? OPTIONS_COMMISSION_PER_LEG * legs * size : Number.isFinite(pos.entryFeeActual) ? pos.entryFeeActual : size * pos.fillPrice * legRate(pos.market, pos.entryLiquidity);
+  const modelled = estimateRoundTripFees(opt ? 'options' : fk, size, pos.fillPrice, price, feeLegs(pos, kind));
+  const entryFee = opt ? OPTIONS_COMMISSION_PER_LEG * legs * size : Number.isFinite(pos.entryFeeActual) ? pos.entryFeeActual : size * pos.fillPrice * legRate(fk, pos.entryLiquidity);
   const spreadCost = atBid ? (price - bid) * size : 0; // information only (the last-to-bid gap)
   const lastGross = q.gross;
   if (atBid) q.gross = grossPnl(pos, pos.fillPrice, bid); // gross at the bid: what a sell really realizes
@@ -78,7 +79,7 @@ function quote(pos, price, kind = 'stop', at = Date.now(), bid = null) {
   const cashout = opt ? q.exitValue * pos.optionsData.multiplier * size - exitFee : pos.direction === 'long' ? sellPrice * size - exitFee : null;
   const cost = opt ? pos.optionsData.debit * pos.optionsData.multiplier * size : pos.fillPrice * size;
   // Fixed: the sell price that nets $0 (exact taker exit fee for crypto; no live spread term).
-  const beRate = opt ? 0 : pos.market === 'crypto' ? be.exactRate('crypto', 'taker') : legRate(pos.market, 'taker');
+  const beRate = opt ? 0 : pos.market === 'crypto' ? be.exactRate(fk, 'taker') : legRate(fk, 'taker');
   const breakEven = opt ? null : be.breakEvenPrice({ direction: pos.direction, fillPrice: pos.fillPrice, size, entryFee, exitRate: beRate });
   return { id: pos.id, at, underlying: price > 0 ? price : null, ...q, fees, net, exitFee, cashout, r: pos.dollarRisk > 0 ? net / pos.dollarRisk : null, kind,
     entryFee, entryFeeActual: Number.isFinite(pos.entryFeeActual), exitCost: fees - entryFee, spreadCost, sellPrice, sellBasis: atBid ? 'best bid' : 'last price', bid: atBid ? bid : null,

@@ -24,7 +24,7 @@ const be = require('../risk/break-even'); // Phase 63: expected vs actual exit (
 const coinbaseApi = require('../connectors/coinbase-api');
 const { entryShare } = require('./ledger-live');
 
-const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi };
+const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi, Kraken: require('../connectors/kraken-api') }; // Phase 69A: + Kraken Pro
 const QTY_EPSILON = 1e-9;
 const ENTRY_TTL_MS = 30 * 60 * 1000; // same window as the order guard
 const DUST_USD = 1; // below any order minimum: an ended exit leaving less than this unsold closes the record
@@ -55,7 +55,7 @@ function exitBooking(current, kind, qty, exit, entryFee) {
   const exitFees = Number.isFinite(exit.fees) ? exit.fees : undefined;
   const actualFees = Number.isFinite(entryFee) && exitFees !== undefined ? entryFee * Math.min(1, qty / current.positionSize) + exitFees : undefined;
   const level = kind === 'take_profit' ? current.targets && current.targets[0] && current.targets[0].price : current.invalidation;
-  const rate = current.broker === 'Coinbase' ? be.exactRate('crypto', kind === 'take_profit' ? 'maker' : 'taker') : 0;
+  const rate = current.market === 'crypto' ? be.exactRate(require('../risk/cost-authority').feeKey(current), kind === 'take_profit' ? 'maker' : 'taker') : 0;
   const cashoutAudit = current.direction === 'short' || !(level > 0) ? null : be.cashoutVariance({ expected: level * qty * (1 - rate), expectedQty: qty,
     filledQty: qty, avgFillPrice: exit.avgFillPrice, fees: exitFees !== undefined ? exitFees : level * qty * rate, expectedBid: level,
     basis: kind === 'take_profit' ? 'take-profit limit' : 'stop trigger' });
@@ -85,8 +85,9 @@ async function reconcileOne(pos, ledger) {
 
   // A manual [Close at Coinbase] sell whose outcome was unknown (timeout / 429 / 5xx, P0-2), or
   // one still working when it returned (coinbase-exit.js).
-  if (pos.marketExitPending && pos.broker === 'Coinbase') return require('./coinbase-exit').resolvePending(pos, ledger);
-  if (pos.brokerManualExitId && pos.broker === 'Coinbase') return require('./coinbase-exit').settle(pos, ledger);
+  const venued = require('./crypto-venues').isLiveCrypto(pos); // Coinbase / Kraken (Phase 69A)
+  if (pos.marketExitPending && venued) return require('./coinbase-exit').resolvePending(pos, ledger);
+  if (pos.brokerManualExitId && venued) return require('./coinbase-exit').settle(pos, ledger);
   if (pos.adopted) return { id: pos.id, action: 'unchanged' };
 
   const s = await api.getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId }); // a re-armed stand-alone bracket, if any

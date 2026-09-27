@@ -170,4 +170,4 @@ async function findOrderByClientId(product, clientOrderId, sinceMs) {
   return { ok: true, order: r.orders.find((o) => o.clientOrderId === String(clientOrderId)) || null };
 }
 
-module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId, listOrders };
+module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId, listOrders, clientIdOf: (id) => String(id) };

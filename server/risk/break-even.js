@@ -19,7 +19,7 @@
 //   volumeGate       Phase 65B: standard crypto needs >= $1.5M of 24h volume (ticker base volume x price).
 //   cashoutVariance  a live close's expected cashout (best bid x qty - fee, right
 //                    before the sell) vs the actual fill (qty x avg price - real fee).
-const { legRate, coinbaseFees } = require('./cost-authority');
+const { legRate, coinbaseFees, VENUE_FEES, feeKey } = require('./cost-authority');
 
 const WIDE_HURDLE = 0.025;
 const QUOTE_MAX_AGE_MS = 60 * 1000;
@@ -28,7 +28,13 @@ const MAX_MOONSHOT_SPREAD = 0.008;
 const MIN_CRYPTO_VOLUME_USD = 1500000;
 
 // A leg's fee rate: Coinbase's exact fee in force (the account's tier once read), else the model's.
-const exactRate = (market, liquidity = 'taker') => (market === 'crypto' ? coinbaseFees()[liquidity === 'maker' ? 'maker' : 'taker'] : legRate(market, liquidity));
+// Phase 69A: `market` may be a venue fee key ('crypto:kraken', cost-authority.feeKey).
+const exactRate = (market, liquidity = 'taker') => {
+  const side = liquidity === 'maker' ? 'maker' : 'taker';
+  if (market === 'crypto') return coinbaseFees()[side];
+  const v = String(market).startsWith('crypto:') ? VENUE_FEES[market.slice(7)] : null;
+  return v ? v[side] : legRate(market, liquidity);
+};
 
 // spread: last trade minus the price the close fills at (long: last - bid; short: ask - last).
 function breakEvenPrice({ direction = 'long', fillPrice, size, entryFee = 0, exitRate, spread = 0 }) {
@@ -49,7 +55,7 @@ function liveQuote(product, now = Date.now()) {
 
 // Round-trip fee hurdle for opening `notional` at `price` (the live / reference price).
 // quote: { bid, ask } or null. -> { entryFee, exitFee, fees, spreadCost, hurdlePct, breakEven, wide, basis }
-function feeHurdle({ market, price, notional, direction = 'long', entryLiquidity = 'taker', quote = null }) {
+function feeHurdle({ market, venue = null, price, notional, direction = 'long', entryLiquidity = 'taker', quote = null }) {
   if (!(price > 0 && notional > 0) || market === 'options') return null;
   const real = market === 'crypto' && quote && quote.bid > 0 && quote.ask >= quote.bid;
   const mid = real ? (quote.bid + quote.ask) / 2 : price;
@@ -57,8 +63,9 @@ function feeHurdle({ market, price, notional, direction = 'long', entryLiquidity
   const long = direction !== 'short';
   const taker = entryLiquidity !== 'maker';
   const fill = long ? (taker ? mid + half : mid - half) : (taker ? mid - half : mid + half); // taker crosses, maker rests
-  const inRate = real ? exactRate(market, entryLiquidity) : legRate(market, entryLiquidity);
-  const outRate = real ? exactRate(market, 'taker') : legRate(market, 'taker');
+  const key = feeKey({ market, venue }); // the routed venue's fees (Phase 69A)
+  const inRate = real ? exactRate(key, entryLiquidity) : legRate(key, entryLiquidity);
+  const outRate = real ? exactRate(key, 'taker') : legRate(key, 'taker');
   const size = notional / fill;
   const entryFee = notional * inRate;
   const breakEven = breakEvenPrice({ direction, fillPrice: fill, size, entryFee, exitRate: outRate, spread: half });
@@ -73,7 +80,7 @@ function feeHurdle({ market, price, notional, direction = 'long', entryLiquidity
 function hurdleFor(order, now = Date.now()) {
   if (!order || order.market === 'options' || !(order.positionSize > 0 && order.entryPrice > 0)) return null;
   const quote = order.market === 'crypto' ? liveQuote(order.brokerProduct || order.asset, now) : null;
-  return feeHurdle({ market: order.market, price: order.entryPrice, notional: order.positionSize * order.entryPrice, direction: order.direction, entryLiquidity: order.entryLiquidity, quote });
+  return feeHurdle({ market: order.market, venue: order.venue || order.routeVenue || null, price: order.entryPrice, notional: order.positionSize * order.entryPrice, direction: order.direction, entryLiquidity: order.entryLiquidity, quote });
 }
 
 // Phase 65 hard gate: { ok, spreadPct, reason } for a crypto product's live book (no fresh book: ok, unjudged).

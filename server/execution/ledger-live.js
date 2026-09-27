@@ -16,7 +16,7 @@ let L = null; // { pendingOrders, activePositions, tradeJournal, discardedOrders
 function bind(ctx) { L = ctx; }
 
 // A sell working (or unconfirmed) for this record: never carried over to an unsold remainder.
-const MANUAL_EXIT_FIELDS = ['brokerManualExitId', 'brokerManualExitQty', 'brokerManualExitExpected', 'marketExitPending', 'marketExitClientId', 'marketExitAt', 'marketExitError'];
+const MANUAL_EXIT_FIELDS = ['brokerManualExitId', 'brokerManualExitQty', 'brokerManualExitExpected', 'brokerManualExitReason', 'brokerManualExitLeg', 'marketExitPending', 'marketExitClientId', 'marketExitAt', 'marketExitError'];
 // The share of the ORIGINAL entry order (and so of its real fee) this record holds.
 const entryShare = (p) => (p && p.entryFeeShare > 0 ? p.entryFeeShare : 1);
 

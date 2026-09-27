@@ -15,7 +15,8 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
 - **Never read-modify-write the real ledger** `server/data/ledger-state.json` (or
   `external-holdings.json`). Tests and harnesses set `LEDGER_STATE_PATH`, `WATCHLIST_PATH`
   and `EXTERNAL_HOLDINGS_PATH` to scratch copies *before* requiring any server module.
-- **No real orders, no real email.** The harness points Coinbase at a local mock
+- **No real orders, no real email.** The harness points Kraken at a local signature-verifying
+  mock (`KRAKEN_API_BASE_URL`, scratchpad `krakenmock.js`) and Coinbase at a local mock
   (`COINBASE_API_BASE_URL=http://127.0.0.1:<mock port>`, a throwaway EC key; public market
   data is proxied) and SMTP at a local sink (`SMTP_HOST=127.0.0.1`, `SMTP_PORT=2525`). The
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
@@ -38,7 +39,8 @@ Server (`server/`)
   `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm), `bracket-ops.js`
   (shared cancel / verify / re-arm / replaceStop), `ratchet.js` (+1R / +1.5R stop locks,
   STOP_GAP_UNFILLED), `order-recovery.js` (orders Coinbase took that the ledger never recorded),
-  `chart-ticks.js` (1 s TICKS for charted symbols),
+  `chart-ticks.js` (1 s TICKS for charted symbols), `crypto-router.js` + `crypto-venues.js`
+  (Phase 69A: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
   `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
   `rejection-stats.js` (reason buckets), `scan-log.js`
@@ -49,7 +51,9 @@ Server (`server/`)
 - `strategies/` `1-equity-day` `2-crypto-swing` `2-crypto-intraday` `3-equity-swing`
   `5-options-system` `6-speculative-crypto` (Moonshots) + helpers (`gem-triggers.js`, ...)
 - `intelligence/` `moonshot-radar.js` (100-pt score), `catalyst-summary.js` (why + verdict)
-- `connectors/` `coinbase-api.js` `coinbase-socket.js` (ticker: bid/ask/qty)
+- `connectors/` `kraken-api.js` `kraken-orders.js` `kraken-pairs.js` (Kraken Pro: HMAC-SHA512
+  auth, AssetPairs, conditional-close stops; KRAKEN_API_KEY / SECRET / BASE_URL)
+  `coinbase-api.js` `coinbase-socket.js` (ticker: bid/ask/qty)
   `coinbase-fees.js` (account fee tier) `coinbase-discovery.js` (gem catalog)
   `crypto-social.js` (Reddit RSS + CoinGecko trending) `news-sentiment.js` `alpaca-*.js`
 - `data/news-feed.js` Catalyst & News Feed (Alpaca + crypto RSS + Reddit + trending, 48 h,
@@ -73,6 +77,9 @@ Client (`client/`)
   <= 0.80%, fee drag <= 0.35R, T1 >= 1.35 : 1. Crypto positions >= $20 notional.
 - Break-even is the fixed sell price after the entry fee and the exit taker fee; P&L gross is
   measured at the best bid so gross + fees = net.
+- Crypto routing: the cheapest configured venue that lists the pair (and, at approval, has the
+  cash); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:kraken'
+  0.25/0.40%, Coinbase = its account tier). Kraken rests only the stop; SignalDesk sells at T1.
 - Stops only move UP (ratchet.js): +1.0R -> break-even + 0.05R, +1.5R -> entry + 0.5R; 1R
   (dollarRisk) stays the original risk. No automated setup on a symbol with an open LIVE /
   adopted record (order-guard.stackingConflict); Manual Trade Ticket orders are exempt.

@@ -1,7 +1,7 @@
 // P/L maths shared by the ledger (bookings) and the Setups view (previews), so a
 // scenario shown before approval is computed exactly like the trade would be
 // booked. Pure functions: no state, no I/O.
-const { estimateRoundTripFees, legRate } = require('./cost-authority');
+const { estimateRoundTripFees, legRate, feeKey } = require('./cost-authority'); // feeKey: the routed venue's fees (69A)
 const { exitValue, modelled } = require('./option-pricing');
 
 // Options value per share of underlying: each leg's intrinsic value at the
@@ -58,7 +58,7 @@ function priceScenarios(order) {
   for (const [name, price, kind] of levels) {
     if (!(price > 0) || !(entry > 0) || !(order.positionSize > 0)) continue;
     const gross = ruleValue[name] > 0 ? (ruleValue[name] - od.debit) * od.multiplier * order.positionSize : grossPnl(order, entry, price);
-    const fees = estimateRoundTripFees(order.market, order.positionSize, entry, price, feeLegs(order, kind));
+    const fees = estimateRoundTripFees(order.market === 'options' ? 'options' : feeKey(order), order.positionSize, entry, price, feeLegs(order, kind));
     const net = gross - fees;
     out[name] = { price, gross, fees, net, r: order.dollarRisk > 0 ? net / order.dollarRisk : null };
   }
@@ -83,8 +83,8 @@ function costBreakdown(order) {
     const perLeg = estimateRoundTripFees('options', q, 0, 0, feeLegs(order, 'target')) / 2;
     return { entry: perLeg, exitT1: t1 > 0 ? perLeg : null, breakEvenPct: null };
   }
-  const kIn = legRate(order.market, order.entryLiquidity);
-  const kOut = legRate(order.market, 'maker');
+  const kIn = legRate(feeKey(order), order.entryLiquidity);
+  const kOut = legRate(feeKey(order), 'maker');
   const breakEvenPct = order.direction === 'short' ? 1 - (1 - kOut) / (1 + kIn) : (1 + kIn) / (1 - kOut) - 1;
   return { entry: kIn * q * e, exitT1: t1 > 0 ? kOut * q * t1 : null, breakEvenPct };
 }

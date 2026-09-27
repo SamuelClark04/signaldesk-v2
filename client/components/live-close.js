@@ -11,6 +11,8 @@
 //   - armor(p): the UNARMORED warning (no stop/target working at the broker) or the SELL
 //     UNCONFIRMED notice, for the position card and the trade HUD; watch(positions) toasts
 //     each position the moment it becomes UNARMORED
+// Phase 69A: Kraken Pro positions close the same way (the server acts on the position's venue);
+// every label names the position's broker.
 // Exposes window.SignalDesk.liveClose: { can(p), button(p, m, ctx), received(result), reset(), armor(p), watch(list) }.
 (() => {
   const SD = window.SignalDesk;
@@ -19,7 +21,8 @@
   const TIMEOUT_MS = 35000;
   const busy = new Set();
   const timers = new Map(); // position id -> its close's timeout
-  const can = (p) => p.execution === 'LIVE' && p.broker === 'Coinbase' && p.market === 'crypto';
+  const can = (p) => p.execution === 'LIVE' && (p.broker === 'Coinbase' || p.broker === 'Kraken') && p.market === 'crypto';
+  const B = (p) => (p && p.broker) || 'Coinbase';
   const coin = (p) => p.asset.replace(/-USDC?$/, '');
 
   function toast(text, ok) {
@@ -39,17 +42,17 @@
     const live = m && m.price > 0 ? m.price : null;
     const q = p.exitQuote;
     const f = SD.netPnl.figures(p, m); // Phase 65: the same tick as the button
-    const est = f && Number.isFinite(f.cashout) ? `~${money(f.cashout)} into your Coinbase cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(f.net, money)} after all fees`
-      : q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your Coinbase cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(q.net, money)} after all fees`
+    const est = f && Number.isFinite(f.cashout) ? `~${money(f.cashout)} into your ${B(p)} cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(f.net, money)} after all fees`
+      : q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your ${B(p)} cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(q.net, money)} after all fees`
       : live ? `~${money(p.positionSize * live)} at ${price(live, p)} before fees (${signed((live - p.fillPrice) * p.positionSize, money)} vs entry)` : 'at the market price';
-    const steps = p.adopted ? 'It has no SignalDesk stop/target at Coinbase, so this is a plain market sell.'
-      : '1) cancel its stop/target bracket at Coinbase, 2) wait until Coinbase releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.';
-    if (!window.confirm(`SELL ${p.positionSize} ${coin(p)} at Coinbase now (LIVE, real money)?\n\n${steps}\n\nProceeds ${est}.`)) return;
+    const steps = p.adopted ? `It has no SignalDesk stop/target at ${B(p)}, so this is a plain market sell.`
+      : `1) cancel its stop${p.broker === 'Kraken' ? '' : '/target bracket'} at ${B(p)}, 2) wait until ${B(p)} releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.`;
+    if (!window.confirm(`SELL ${p.positionSize} ${coin(p)} at ${B(p)} now (LIVE, real money)?\n\n${steps}\n\nProceeds ${est}.`)) return;
     busy.add(p.id);
     timers.set(p.id, setTimeout(() => {
       if (!busy.has(p.id)) return;
       free(p.id);
-      toast('Close request timed out — check Coinbase or retry', false);
+      toast(`Close request timed out — check ${B(p)} or retry`, false);
       SD.app.refresh();
     }, TIMEOUT_MS));
     SD.app.send({ type: 'CLOSE_LIVE_COINBASE_POSITION', id: p.id });
@@ -60,10 +63,11 @@
     if (!r) return;
     free(r.id);
     const t = r.trade;
-    if (!r.ok) toast(`Close at Coinbase failed for ${String(r.id || '').split(':')[2] || r.id}: ${r.error}`, false);
-    else if (r.pending) toast('Sell sent to Coinbase and still working: it is booked as soon as it fills.', true);
-    else if (r.alreadyClosed) toast(`Already closed at Coinbase: ${r.detail}`, true);
-    else if (t) toast(`Sold ${t.positionSize} ${coin(t)} at Coinbase @ ${price(t.exitPrice, t)}: net ${signed(t.netPnl, money)} (fees ${money(t.fees)}). In the Journal as MANUAL_CLOSE @ Coinbase.${r.detail ? ` ${r.detail}` : ''}`, !r.detail);
+    const where = t ? B(t) : 'the broker';
+    if (!r.ok) toast(`Close at ${where === 'the broker' ? 'Coinbase / Kraken' : where} failed for ${String(r.id || '').split(':')[2] || r.id}: ${r.error}`, false);
+    else if (r.pending) toast(`Sell sent to ${where} and still working: it is booked as soon as it fills.`, true);
+    else if (r.alreadyClosed) toast(`Already closed at ${where}: ${r.detail}`, true);
+    else if (t) toast(`Sold ${t.positionSize} ${coin(t)} at ${where} @ ${price(t.exitPrice, t)}: net ${signed(t.netPnl, money)} (fees ${money(t.fees)}). In the Journal as ${t.exitReason}.${r.detail ? ` ${r.detail}` : ''}`, !r.detail);
     SD.app.refresh();
   }
 
@@ -71,7 +75,7 @@
   function reset() {
     if (!busy.size) return;
     for (const id of [...busy]) free(id);
-    toast('Connection was lost during a Close at Coinbase: check the position (and Coinbase) before retrying.', false);
+    toast('Connection was lost during a Close at Coinbase / Kraken: check the position (and the broker) before retrying.', false);
     SD.app.refresh();
   }
 
@@ -108,9 +112,9 @@
     const f = SD.netPnl.figures(p, m); // Phase 65: re-marked on the client's current tick (same as the hero)
     const cash = f && Number.isFinite(f.cashout) ? f.cashout : q && q.cashout;
     const net = f && Number.isFinite(f.net) ? f.net : q && q.net;
-    if (!Number.isFinite(cash) || !Number.isFinite(net)) return ['Close at Coinbase'];
+    if (!Number.isFinite(cash) || !Number.isFinite(net)) return [`Close at ${B(p)}`];
     const nw = (t) => el('span', { className: 'no-wrap', textContent: t });
-    return ['Close at Coinbase (', nw(`${money(cash)} cashout`), ' · ', nw(`${signed(net, money)} net`), ')'];
+    return [`Close at ${B(p)} (`, nw(`${money(cash)} cashout`), ' · ', nw(`${signed(net, money)} net`), ')'];
   };
 
   function button(p, m, ctx) {
@@ -118,8 +122,8 @@
     const math = SD.netPnl.cashoutMath(p, m); // Phase 63: the cashout arithmetic (best bid − the exact Coinbase fee) on hover
     const b = el('button', { type: 'button', className: 'btn hud-exit is-armed is-live-close', disabled: closing || !ctx.online || !!p.marketExitPending,
       title: `${math ? `${math}
-` : ''}${p.adopted ? 'Market-sell this holding at Coinbase (real money)' : 'Cancel its stop/target at Coinbase, then market-sell it (real money)'}` },
-    closing ? ['Closing at Coinbase…'] : p.marketExitPending ? ['Sell being confirmed at Coinbase…'] : label(p, m));
+` : ''}${p.adopted ? `Market-sell this holding at ${B(p)} (real money)` : `Cancel its stop/target at ${B(p)}, then market-sell it (real money)`}` },
+    closing ? [`Closing at ${B(p)}…`] : p.marketExitPending ? [`Sell being confirmed at ${B(p)}…`] : label(p, m));
     b.onclick = () => request(p, m);
     return b;
   }

@@ -102,5 +102,7 @@
     return [line, ...(h.wide ? [el('p', { className: `${cls} is-warn`, textContent: `Wide spread / high fee drag: requires +${(h.hurdlePct * 100).toFixed(2)}% gain to reach break-even` })] : [])];
   }
 
-  SD.netPnl = { figures, live, hero, breakEven, cashoutMath, hurdle };
+  // Phase 69A: the crypto venue the router chose ("Route: Kraken Pro (0.25%/0.40%)"), as a note.
+  const route = (o, cls = 'np-hurdle') => (o && o.routeReason ? [el('p', { className: `${cls} np-route`, textContent: o.routeReason })] : []);
+  SD.netPnl = { figures, live, hero, breakEven, cashoutMath, hurdle, route };
 })();

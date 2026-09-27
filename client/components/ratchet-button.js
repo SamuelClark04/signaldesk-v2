@@ -16,7 +16,7 @@
   const busy = new Map(); // position id -> its timeout
   const toast = (text, ok) => SD.liveClose.toast(text, ok);
   const bidOf = (p, m) => { const b = SD.app && SD.app.state && SD.app.state.bids; return b && b[p.asset] > 0 ? b[p.asset] : m && m.price > 0 ? m.price : null; };
-  const live = (p) => p.execution === 'LIVE' && !p.adopted && p.broker === 'Coinbase';
+  const live = (p) => p.execution === 'LIVE' && !p.adopted && (p.broker === 'Coinbase' || p.broker === 'Kraken'); // + Kraken Pro (69A)
 
   // Mirror of ratchet.offer on the server: 'B' over 'A'.
   function offer(p, bid) {
@@ -34,8 +34,8 @@
   function request(p, k) {
     if (busy.has(p.id) || !SD.app.isOnline()) return;
     const s = p.ratchet[k];
-    if (live(p) && !window.confirm(`${s.label}: move the Coinbase stop on ${p.positionSize} ${p.asset.replace(/-USDC?$/, '')} from ${price(p.invalidation, p)} UP to ${price(s.stop, p)}?\n\n`
-      + 'SignalDesk cancels the stop/target bracket at Coinbase, waits for the coins to be released and places a new one at the new stop (same target). '
+    if (live(p) && !window.confirm(`${s.label}: move the ${p.broker} stop on ${p.positionSize} ${p.asset.replace(/-USDC?$/, '')} from ${price(p.invalidation, p)} UP to ${price(s.stop, p)}?\n\n`
+      + `SignalDesk cancels the stop${p.broker === 'Kraken' ? '' : '/target bracket'} at ${p.broker}, waits for the coins to be released and places a new one at the new stop${p.broker === 'Kraken' ? '' : ' (same target)'}. `
       + 'If Coinbase refuses the new stop, the original stop is put back.')) return;
     busy.set(p.id, setTimeout(() => {
       if (!busy.has(p.id)) return;
@@ -70,7 +70,7 @@
     free(r.id);
     if (!r.ok) toast(`Stop move failed: ${r.error}`, false);
     else if (r.alreadyClosed) toast(`Not moved: ${r.detail}`, true);
-    else toast(`${r.label}: stop ${r.from} → ${r.stop}${r.venue === 'coinbase' ? ' (Coinbase bracket re-placed)' : ''}.`, true);
+    else toast(`${r.label}: stop ${r.from} → ${r.stop}${r.venue !== 'ledger' ? ` (${r.broker || 'Coinbase'} ${r.venue === 'kraken' ? 'stop' : 'bracket'} re-placed)` : ''}.`, true);
     SD.app.refresh();
   }
 

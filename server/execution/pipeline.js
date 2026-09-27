@@ -18,7 +18,8 @@ const { computeTriggers } = require('../intelligence/watch-triggers');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { stackingConflict } = require('./order-guard');
-const exitPass = require('./exit-pass'); // broker reconciliation (first in every pass) + paper exits (Phase 67)
+const exitPass = require('./exit-pass');
+const cryptoRouter = require('./crypto-router'); // Phase 69A: OKX -> Kraken -> Coinbase waterfall // broker reconciliation (first in every pass) + paper exits (Phase 67)
 const { recordRejection: recordStat } = require('./rejection-stats');
 const scanLog = require('./scan-log');
 const watchlist = require('./watchlist');
@@ -134,6 +135,7 @@ async function pipelinePass() {
   counts.generated = candidates.length;
 
   afterHours.begin();
+  if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare().catch(() => {}); // Kraken's pair list before routing (69A)
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
     // No live price, or an option with the US session closed (market-session.js: the
@@ -153,7 +155,8 @@ async function pipelinePass() {
     const depth = candidate.market === 'crypto' && !candidate.speculative ? volumeGate(candidate.asset) : null;
     const thin = [book, depth].find((g) => g && !g.ok);
     if (thin) { recordRejection(candidate.id, thin.reason, candidate); continue; }
-    const capital = await sizingBankroll(candidate.market, settings);
+    if (candidate.market === 'crypto') Object.assign(candidate, cryptoRouter.fields(cryptoRouter.preRoute(candidate.asset))); // Phase 69A: cheapest venue listing it
+    const capital = await sizingBankroll(candidate.market, settings, candidate.venue);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.
       console.warn(`[pipeline] rejected ${candidate.id}: ${capital.reason}`);

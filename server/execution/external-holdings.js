@@ -149,7 +149,7 @@ function brokerFree() {
   const snap = brokerSync.getSnapshot();
   const open = ledger().getActivePositions().filter((p) => p.execution === 'LIVE');
   const out = [];
-  for (const [venue, broker] of [['coinbase', 'Coinbase'], ['alpaca', 'Alpaca']]) {
+  for (const [venue, broker] of [['coinbase', 'Coinbase'], ['alpaca', 'Alpaca'], ['kraken', 'Kraken']]) { // + Kraken Pro (69A)
     const s = snap[venue];
     if (!s || !s.ok) continue;
     for (const p of s.positions) {

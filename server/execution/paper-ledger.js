@@ -6,7 +6,7 @@
 // Trading mechanics only: every change is persisted through ledger-store.js,
 // which also owns the user-editable settings (currently the paper bankroll).
 const { isApproved } = require('../risk/risk-engine');
-const { estimateRoundTripFees } = require('../risk/cost-authority');
+const { estimateRoundTripFees, feeKey } = require('../risk/cost-authority'); // feeKey: the venue's fees (69A)
 const store = require('./ledger-store');
 const { grossPnl, priceScenarios, costBreakdown, feeModel, feeLegs } = require('../risk/scenarios');
 const { optionMark } = require('./option-marks');
@@ -106,7 +106,7 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}, booked = 
   // Broker-reconciled closes pass the broker's actual fees; real fill prices already
   // include slippage, so the estimate would double-count it.
   const fees = Number.isFinite(extra.actualFees) ? extra.actualFees
-    : q ? q.fees : estimateRoundTripFees(pos.market, pos.positionSize, pos.fillPrice, exitPrice, feeLegs(pos, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop'));
+    : q ? q.fees : estimateRoundTripFees(feeKey(pos), pos.positionSize, pos.fillPrice, exitPrice, feeLegs(pos, /^TAKE_PROFIT/.test(exitReason) ? 'target' : 'stop'));
   const netPnl = Number.isFinite(extra.actualFees) || !q ? grossPnl - fees : q.net;
 
   const entry = {
@@ -164,7 +164,7 @@ const getPendingOrders = () => pendingOrders.map((o) => ({ ...o, scenarios: pric
 // and real option contracts their current value (optionMark, option-marks.js).
 // exitQuote: what a manual close would book right now ("Net if closed now"), and its cashout.
 const getActivePositions = () => activePositions.map((p) => {
-  const v = { ...p, feeModel: feeModel(p.market, p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
+  const v = { ...p, feeModel: feeModel(p.market === 'options' ? 'options' : feeKey(p), p.entryLiquidity, p.optionsData && p.optionsData.legs ? p.optionsData.legs.length : 1), optionMark: optionMark(p),
     exitQuote: exitQuotes.issue(p, prices.getLatestPrice(p.asset)) }; // LIVE too (display: [Close at Coinbase] cashout; closing refuses LIVE)
   return { ...v, ratchet: ratchet.plan(v) }; // Phase 68: +1.0R / +1.5R stop locks (ratchet.js)
 });

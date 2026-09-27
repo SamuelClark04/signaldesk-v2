@@ -35,7 +35,7 @@
   function positionRow(p, state, view) {
     const live = state.prices && state.prices[p.asset];
     const m = SD.portfolioMetrics.mark(p, live);
-    const venue = p.adopted ? 'Adopted' : p.execution === 'LIVE' ? 'Live' : 'Paper';
+    const venue = p.adopted ? 'Adopted' : p.execution === 'LIVE' ? (p.broker === 'Kraken' ? 'Live · Kraken' : 'Live') : 'Paper'; // 69A: the venue when not Coinbase
     // Phase 64: the TRUE net (the server's exit quote, as on the HUD and the position card); gross only when no net is known.
     const f = SD.netPnl.figures(p, m);
     const shown = f ? (Number.isFinite(f.net) ? f.net : f.gross) : null;

@@ -66,7 +66,7 @@ function realHoldings() { return [...ledger.getActivePositions().filter(isReal),
 // bankroll is never part of it (it has its own book: paperEquity()).
 function realEquity(real) {
   const snap = brokerSync.getSnapshot();
-  const cash = ['coinbase', 'alpaca'].reduce((s, v) => s + (snap[v] && snap[v].ok && snap[v].cash > 0 ? snap[v].cash : 0), 0);
+  const cash = ['coinbase', 'alpaca', 'kraken'].reduce((s, v) => s + (snap[v] && snap[v].ok && snap[v].cash > 0 ? snap[v].cash : 0), 0);
   return real.reduce((s, p) => s + valueOf(p), 0) + cash;
 }
 
