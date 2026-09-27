@@ -71,7 +71,8 @@ async function getAccount() {
     const base = pairs.baseOfCode(code);
     if (base && qty > 0) holdings.push({ asset: base, code, qty });
   }
-  return { ok: true, buyingPower: balances.USD + balances.USDC, balances, holdings, currency: 'USD', environment: 'kraken-live' };
+  // spendable: the most ONE order can pay (a buy settles in the USD or the USDC book, not both).
+  return { ok: true, buyingPower: balances.USD + balances.USDC, spendable: Math.max(balances.USD, balances.USDC), balances, holdings, currency: 'USD', environment: 'kraken-live' };
 }
 
 // Account value for sizing: cash + every holding at its live (else mark) USD price.
@@ -80,7 +81,7 @@ async function getPortfolioValue() {
   if (!a.ok) return a;
   const prices = require('../market/latest-prices');
   const priced = a.holdings.map((h) => ({ ...h, price: prices.getLatestPrice(`${h.asset}-USD`) || prices.getMarkPrice(`${h.asset}-USD`) || 0 }));
-  return { ok: true, value: a.buyingPower + priced.reduce((s, h) => s + h.qty * h.price, 0), cash: a.buyingPower, holdings: priced };
+  return { ok: true, value: a.buyingPower + priced.reduce((s, h) => s + h.qty * h.price, 0), cash: a.buyingPower, spendable: a.spendable, holdings: priced };
 }
 
 // Available (not on hold) and held quantity of a SignalDesk base ('ETH'): { ok, available, hold }.

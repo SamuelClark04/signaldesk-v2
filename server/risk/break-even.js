@@ -73,7 +73,7 @@ function feeHurdle({ market, venue = null, price, notional, direction = 'long', 
   const exitFee = breakEven * size * outRate;
   const hurdlePct = long ? breakEven / mid - 1 : 1 - breakEven / mid;
   return { entryFee, exitFee, fees: entryFee + exitFee, spreadCost: 2 * half * size, spreadPct: real ? (quote.ask - quote.bid) / mid : null,
-    hurdlePct, breakEven, wide: hurdlePct > WIDE_HURDLE, basis: real ? 'live bid / ask + Coinbase fees' : 'fee model' };
+    hurdlePct, breakEven, wide: hurdlePct > WIDE_HURDLE, basis: real ? `live bid / ask + ${key === 'crypto:okx' ? 'OKX US' : key === 'crypto:kraken' ? 'Kraken Pro' : 'Coinbase'} fees` : 'fee model' };
 }
 
 // A staged order's hurdle at its own size (crypto: the live Coinbase book).

@@ -30,6 +30,7 @@ const { getDailyBars } = require('../connectors/daily-bars');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
 const cryptoRouter = require('./crypto-router'); // Phase 69A: the ticket's crypto venue
+const cryptoVenues = require('./crypto-venues'); // Phase 69B: live cash across the venues
 const { atr } = require('../strategies/options-signals');
 const manualOptions = require('./manual-options');
 const { exitSpreadCap } = require('../strategies/5-options-system');
@@ -46,10 +47,14 @@ const round = (x, px) => Number(x.toFixed(px >= 1000 ? 2 : px >= 1 ? 4 : 8).repl
 const num = (x) => (x === '' || x === null || x === undefined ? NaN : Number(x));
 
 let cashCache = { at: 0, value: null };
+// Live crypto cash across the configured venues (Coinbase + Kraken Pro + OKX US, Phase 69B): a
+// live ticket goes to whichever the router picks.
 async function coinbaseCash() {
   if (Date.now() - cashCache.at < 30000) return cashCache.value;
-  const a = await coinbaseApi.getAccount().catch(() => null);
-  cashCache = { at: Date.now(), value: a && a.ok ? a.buyingPower : null };
+  const ids = cryptoVenues.ORDER.filter((id) => cryptoVenues.VENUES[id].configured());
+  const all = await Promise.all(ids.map((id) => (id === 'coinbase' ? coinbaseApi : cryptoVenues.VENUES[id].api()).getAccount().catch(() => null)));
+  const ok = all.filter((a) => a && a.ok);
+  cashCache = { at: Date.now(), value: ok.length ? ok.reduce((s, a) => s + a.buyingPower, 0) : null };
   return cashCache.value;
 }
 

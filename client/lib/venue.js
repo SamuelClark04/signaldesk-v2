@@ -55,8 +55,10 @@
     if (h.notice) return h.notice;
     const al = h.alpaca;
     const manual = ((state.external && state.external.holdings) || []).length;
-    const kr = h.kraken; // Phase 69A
-    const krText = kr && kr.ok ? ` · Kraken ${kr.positions.length} · ${money(kr.cash)} cash` : kr && kr.status === 'error' ? ' · Kraken sync failed' : '';
+    const krText = [['okx', 'OKX'], ['kraken', 'Kraken']].map(([k, name]) => { // Phases 69A / 69B
+      const v = h[k];
+      return v && v.ok ? ` · ${name} ${v.positions.length} · ${money(v.cash)} cash` : v && v.status === 'error' ? ` · ${name} sync failed` : '';
+    }).join('');
     const extra = `${krText}${al && al.ok ? ` · Alpaca ${al.positions.length}` : al && al.status === 'error' ? ' · Alpaca sync failed' : ''}${manual ? ` · ${manual} manual` : ''}`;
     if (!cb || cb.status === 'never') return `Coinbase not synced yet · paper prices are live${extra}`;
     if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}${extra}`;

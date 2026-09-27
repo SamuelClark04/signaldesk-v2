@@ -135,7 +135,7 @@ async function pipelinePass() {
   counts.generated = candidates.length;
 
   afterHours.begin();
-  if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare().catch(() => {}); // Kraken's pair list before routing (69A)
+  if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare().catch(() => {}); // OKX / Kraken pair lists before routing (69A / 69B)
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
     // No live price, or an option with the US session closed (market-session.js: the

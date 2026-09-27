@@ -56,20 +56,21 @@ function offer(p, bid = bidOf(p), pl = plan(p)) {
   return null;
 }
 
-const bracketed = (p) => p.execution === 'LIVE' && !p.adopted && (p.broker === 'Coinbase' || p.broker === 'Kraken');
-// Phase 69A: Kraken holds only the stop (one resting sell per coin); SignalDesk sells at T1 itself
-// (closeLive with reason TAKE_PROFIT), at most one attempt per position per T1_RETRY_MS.
+const venues = require('./crypto-venues');
+const bracketed = (p) => p.execution === 'LIVE' && !p.adopted && venues.isLiveCrypto(p);
+// Phase 69A / 69B: Kraken and OKX hold only the stop; SignalDesk sells at T1 itself (closeLive
+// with reason TAKE_PROFIT), at most one attempt per position per T1_RETRY_MS.
 const T1_RETRY_MS = 60 * 1000;
 const t1Tries = new Map(); // position id -> last attempt (ms)
-function takeKrakenT1(ledger, p, bid, now) {
+function takeT1(ledger, p, bid, now) {
   const t1 = p.targets && p.targets[0] && p.targets[0].price;
-  if (p.broker !== 'Kraken' || p.adopted || !(t1 > 0) || !(bid >= t1) || p.marketExitPending || p.brokerManualExitId || ops.isBusy(p.id)) return;
+  if (venues.of(p).restsTarget || p.adopted || !(t1 > 0) || !(bid >= t1) || p.marketExitPending || p.brokerManualExitId || ops.isBusy(p.id)) return;
   if (now - (t1Tries.get(p.id) || 0) < T1_RETRY_MS) return;
   t1Tries.set(p.id, now);
-  console.warn(`[ratchet] ${p.id}: T1 ${t1} reached at ${bid} on Kraken: market sell (take profit)`);
+  console.warn(`[ratchet] ${p.id}: T1 ${t1} reached at ${bid} on ${p.broker}: market sell (take profit)`);
   require('./coinbase-exit').closeLive(ledger, p.id, { reason: 'TAKE_PROFIT', leg: 'take_profit' })
     .then((r) => console.warn(`[ratchet] ${p.id}: T1 sell ${r.pending ? 'working' : r.alreadyClosed ? 'not needed (already closed)' : 'booked'}`))
-    .catch((err) => console.error(`[ratchet] ${p.id}: T1 sell at Kraken FAILED: ${err.message}`));
+    .catch((err) => console.error(`[ratchet] ${p.id}: T1 sell at ${p.broker} FAILED: ${err.message}`));
 }
 
 // Every MARK tick: triggers touched, stop gaps. true when something was saved (broadcast then).
@@ -86,8 +87,8 @@ function watch(ledger, positions = ledger.getActivePositions(), now = Date.now()
       changed = true;
     }
     if (!bracketed(p)) continue;
-    takeKrakenT1(ledger, p, bid, now);
-    if (p.broker !== 'Coinbase') continue; // a Kraken stop-loss sells at market: no stop-limit gap
+    takeT1(ledger, p, bid, now);
+    if (p.broker !== 'Coinbase') continue; // a Kraken / OKX stop sells at market: no stop-limit gap
     const gap = bid < GAP * p.invalidation;
     if (gap !== !!p.stopGap) {
       const detail = `STOP_GAP_UNFILLED: Live price fell > 5% below stop threshold without fill; check Coinbase order book (bid ${bid}, stop ${p.invalidation})`;
@@ -117,7 +118,7 @@ async function apply(ledger, id, step) {
     let r;
     try { r = await ops.replaceStop(ledger, pos, s.stop, `ratchet${step}`); } finally { ops.release(id); }
     if (r.alreadyClosed) return { id, alreadyClosed: true, detail: 'its stop/target already filled at Coinbase; the reconciler books it' };
-    venue = pos.broker.toLowerCase(); // 'coinbase' | 'kraken' (Phase 69A)
+    venue = venues.idOf(pos); // 'coinbase' | 'kraken' | 'okx' (69A / 69B)
   }
   const history = [...(pos.stopHistory || []), { at: Date.now(), from: pos.invalidation, to: s.stop, step, venue }];
   ops.patch(ledger, id, { invalidation: s.stop, initialStop: pl.initialStop, ratchetStep: step, stopHistory: history });

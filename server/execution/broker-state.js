@@ -6,14 +6,16 @@ const ledger = require('./paper-ledger');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const krakenApi = require('../connectors/kraken-api');
+const okxApi = require('../connectors/okx-api');
 
 const CACHE_MS = 15000;
 
 const VENUES = [
   { name: 'alpaca', modeKey: 'stockMode', label: 'Alpaca', markets: 'stocks / options', api: alpacaApi },
   { name: 'coinbase', modeKey: 'cryptoMode', label: 'Coinbase', markets: 'crypto', api: coinbaseApi },
-  // Phase 69A: shown once KRAKEN_API_KEY / KRAKEN_API_SECRET are set (the router's cheaper crypto venue).
-  { name: 'kraken', modeKey: 'cryptoMode', label: 'Kraken Pro', markets: 'crypto (routed first)', api: krakenApi, when: () => krakenApi.configured() },
+  // Phases 69A / 69B: shown once their keys are set (the router's cheaper crypto venues, in route order).
+  { name: 'okx', modeKey: 'cryptoMode', label: 'OKX US', markets: 'crypto (routed 1st)', api: okxApi, when: () => okxApi.configured() },
+  { name: 'kraken', modeKey: 'cryptoMode', label: 'Kraken Pro', markets: 'crypto (routed 2nd)', api: krakenApi, when: () => krakenApi.configured() },
 ];
 
 const cache = new Map(); // venue name -> { at, value }

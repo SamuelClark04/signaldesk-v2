@@ -44,8 +44,8 @@ let cbFees = { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'de
 const coinbaseFees = () => ({ ...cbFees, buffer: COINBASE_SPREAD_BUFFER });
 
 // Phase 69A: the other crypto venues' fee schedules (the crypto router's waterfall, cheapest
-// first): Kraken Pro 0.25% / 0.40% (KRAKEN_MAKER_FEE / KRAKEN_TAKER_FEE), OKX US 0.08% / 0.10%
-// (connector in Phase 69B). Coinbase keeps its account tier (coinbaseFees below).
+// first): OKX US 0.08% / 0.10% (OKX_MAKER_FEE / OKX_TAKER_FEE, Phase 69B), Kraken Pro 0.25% / 0.40%
+// (KRAKEN_MAKER_FEE / KRAKEN_TAKER_FEE). Coinbase keeps its account tier (coinbaseFees below).
 const VENUE_FEES = {
   kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.0025, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.004, 0.05) },
   okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.0008, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.001, 0.05) },
@@ -60,7 +60,8 @@ const LEG_RATE = {
 };
 // The fee table an order / position is costed on: 'crypto:kraken' / 'crypto:okx' when it is
 // routed to (or held at) that venue; otherwise its market ('crypto' = Coinbase).
-const venueOf = (x) => (x && (x.venue || x.routeVenue || (x.broker === 'Kraken' ? 'kraken' : null))) || null;
+const BROKER_VENUE = { Kraken: 'kraken', OKX: 'okx' };
+const venueOf = (x) => (x && (x.venue || x.routeVenue || BROKER_VENUE[x.broker])) || null;
 const feeKey = (x) => { const v = venueOf(x); return x && x.market === 'crypto' && VENUE_FEES[v] ? `crypto:${v}` : x && x.market; };
 // A venue's exact rates { maker, taker } (Coinbase: the account tier in force).
 const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { maker: coinbaseFees().maker, taker: coinbaseFees().taker });

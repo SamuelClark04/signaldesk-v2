@@ -15,8 +15,10 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
 - **Never read-modify-write the real ledger** `server/data/ledger-state.json` (or
   `external-holdings.json`). Tests and harnesses set `LEDGER_STATE_PATH`, `WATCHLIST_PATH`
   and `EXTERNAL_HOLDINGS_PATH` to scratch copies *before* requiring any server module.
-- **No real orders, no real email.** The harness points Kraken at a local signature-verifying
-  mock (`KRAKEN_API_BASE_URL`, scratchpad `krakenmock.js`) and Coinbase at a local mock
+- **No real orders, no real email.** The user's `.env` has REAL Kraken and OKX keys: every test /
+  harness sets `KRAKEN_*` and `OKX_*` (keys + `KRAKEN_API_BASE_URL` / `OKX_BASE_URL`) to local
+  signature-verifying mocks (scratchpad `krakenmock.js`, `okxmock.js`) BEFORE requiring any module
+  (dotenv never overrides a set variable). Coinbase at a local mock
   (`COINBASE_API_BASE_URL=http://127.0.0.1:<mock port>`, a throwaway EC key; public market
   data is proxied) and SMTP at a local sink (`SMTP_HOST=127.0.0.1`, `SMTP_PORT=2525`). The
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
@@ -40,7 +42,7 @@ Server (`server/`)
   (shared cancel / verify / re-arm / replaceStop), `ratchet.js` (+1R / +1.5R stop locks,
   STOP_GAP_UNFILLED), `order-recovery.js` (orders Coinbase took that the ledger never recorded),
   `chart-ticks.js` (1 s TICKS for charted symbols), `crypto-router.js` + `crypto-venues.js`
-  (Phase 69A: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
+  (Phases 69A / 69B: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
   `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
   `rejection-stats.js` (reason buckets), `scan-log.js`
@@ -51,7 +53,11 @@ Server (`server/`)
 - `strategies/` `1-equity-day` `2-crypto-swing` `2-crypto-intraday` `3-equity-swing`
   `5-options-system` `6-speculative-crypto` (Moonshots) + helpers (`gem-triggers.js`, ...)
 - `intelligence/` `moonshot-radar.js` (100-pt score), `catalyst-summary.js` (why + verdict)
-- `connectors/` `kraken-api.js` `kraken-orders.js` `kraken-pairs.js` (Kraken Pro: HMAC-SHA512
+- `config.js` venue credentials read from the environment on each call (OKX keys, `OKX_BASE_URL`,
+  default `https://us.okx.com`)
+- `connectors/` `okx-api.js` `okx-orders.js` `okx-pairs.js` (OKX US v5: HMAC-SHA256 + passphrase
+  auth, SPOT instruments, attached / algo stop-losses, ids `ETH-USD:<ordId>` / `ETH-USD:algo:<id>`)
+  `kraken-api.js` `kraken-orders.js` `kraken-pairs.js` (Kraken Pro: HMAC-SHA512
   auth, AssetPairs, conditional-close stops; KRAKEN_API_KEY / SECRET / BASE_URL)
   `coinbase-api.js` `coinbase-socket.js` (ticker: bid/ask/qty)
   `coinbase-fees.js` (account fee tier) `coinbase-discovery.js` (gem catalog)
@@ -78,8 +84,10 @@ Client (`client/`)
 - Break-even is the fixed sell price after the entry fee and the exit taker fee; P&L gross is
   measured at the best bid so gross + fees = net.
 - Crypto routing: the cheapest configured venue that lists the pair (and, at approval, has the
-  cash); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:kraken'
-  0.25/0.40%, Coinbase = its account tier). Kraken rests only the stop; SignalDesk sells at T1.
+  cash); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx'
+  0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX and Kraken rest only the
+  stop (a market stop: no STOP_GAP); SignalDesk sells at T1. OKX charges a BUY's fee in the coin:
+  the position size is what was received. Cash checks use one currency (`spendable`).
 - Stops only move UP (ratchet.js): +1.0R -> break-even + 0.05R, +1.5R -> entry + 0.5R; 1R
   (dollarRisk) stays the original risk. No automated setup on a symbol with an open LIVE /
   adopted record (order-guard.stackingConflict); Manual Trade Ticket orders are exempt.

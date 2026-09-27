@@ -1,6 +1,6 @@
 // Venue capital: the bankroll a candidate is sized against, by the venue it
 // would execute on (order-router.js; Phase 69A: crypto by its ROUTED venue, crypto-router.js:
-// 'coinbase-live' or 'kraken-live').
+// 'coinbase-live', 'kraken-live' or 'okx-live').
 //   paper venue -> the configured paper bankroll (Settings)
 //   LIVE crypto -> the Coinbase account value: every spot balance incl. USD/USDC
 //   LIVE stocks -> the Alpaca account equity (options follow the stock venue)
@@ -40,7 +40,13 @@ const FETCHERS = {
   async kraken() {
     const r = await require('../connectors/kraken-api').getPortfolioValue();
     if (!r.ok) return { ok: false, error: r.error };
-    return r.value > 0 ? { ok: true, value: r.value, cash: r.cash } : { ok: false, error: 'Kraken account value is zero' };
+    return r.value > 0 ? { ok: true, value: r.value, cash: Number.isFinite(r.spendable) ? r.spendable : r.cash } : { ok: false, error: 'Kraken account value is zero' }; // cash one order can use
+  },
+  // Phase 69B: OKX US trading-account cash (USD + USDC + USDT) + every spot holding at its USD price.
+  async okx() {
+    const r = await require('../connectors/okx-api').getPortfolioValue();
+    if (!r.ok) return { ok: false, error: r.error };
+    return r.value > 0 ? { ok: true, value: r.value, cash: Number.isFinite(r.spendable) ? r.spendable : r.cash } : { ok: false, error: 'OKX trading account value is zero' }; // cash one order can use
   },
   async alpaca() {
     const r = await alpacaApi.getAccount();
@@ -70,7 +76,7 @@ async function liveValue(broker, now = Date.now()) {
 
 // { ok: true, bankroll, basis: 'paper'|'coinbase-live'|'alpaca-live', fetchedAt? }
 // or { ok: false, reason: 'LIVE_CAPITAL_UNAVAILABLE: <why>', basis }.
-// venue: the crypto venue the order is routed to ('kraken'; default Coinbase).
+// venue: the crypto venue the order is routed to ('okx' / 'kraken'; default Coinbase).
 const brokerOf = (market, venue) => (market === 'crypto' && FETCHERS[venue] ? venue : (VENUE_OF[market] || [])[1]);
 async function sizingBankroll(market, settings, venue = null) {
   const [modeKey] = VENUE_OF[market] || [];

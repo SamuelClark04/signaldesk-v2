@@ -1,27 +1,36 @@
-// Crypto execution venues (Phase 69A), cheapest first: OKX US -> Kraken Pro -> Coinbase.
+// Crypto execution venues (Phase 69A; OKX live in 69B), cheapest first: OKX US -> Kraken Pro -> Coinbase.
 // Each venue exposes the SAME connector surface, so the reconciler, [Close], re-arm, the profit
 // ratchet and order recovery act on a position through its venue alone:
 //   api()     getOrderStatus / getOrder / cancelOrder / getAvailable / getAccount
 //   orders()  submitOrder / placeBracket / sellMarket / findOrderByClientId / listOrders / clientIdOf
-// A position's venue: pos.venue ('coinbase' | 'kraken' | 'okx'), else its broker ('Kraken');
+// A position's venue: pos.venue ('coinbase' | 'kraken' | 'okx'), else its broker ('Kraken' / 'OKX');
 // anything older is Coinbase. The connectors are returned as their module objects, so tests
 // that stub a connector function are honoured wherever it is called.
-//   okx       fee slot prepared (0.08% / 0.10%); connector in Phase 69B: never configured yet
+//   okx       configured when OKX_API_KEY + OKX_API_SECRET + OKX_API_PASSPHRASE are set (Phase 69B);
+//             lists its live USD / USDC / USDT spot instruments
 //   kraken    configured when KRAKEN_API_KEY + KRAKEN_API_SECRET are set; lists its USD / USDC pairs
 //   coinbase  always available (the fallback, micro-cap Moonshots, existing positions)
+// restsTarget: the venue holds the T1 limit too (Coinbase's bracket). OKX / Kraken rest only the
+// stop; SignalDesk sells at T1 itself (ratchet.watch).
 const cost = require('../risk/cost-authority');
 
 const VENUES = {
-  okx: { id: 'okx', label: 'OKX US', broker: 'OKX', note: 'connector arrives in Phase 69B', configured: () => false, lists: () => false, api: () => null, orders: () => null },
+  okx: {
+    id: 'okx', label: 'OKX US', broker: 'OKX', restsTarget: false,
+    configured: () => require('../connectors/okx-api').configured(),
+    lists: (symbol) => require('../connectors/okx-pairs').lists(symbol),
+    api: () => require('../connectors/okx-api'),
+    orders: () => require('../connectors/okx-orders'),
+  },
   kraken: {
-    id: 'kraken', label: 'Kraken Pro', broker: 'Kraken',
+    id: 'kraken', label: 'Kraken Pro', broker: 'Kraken', restsTarget: false,
     configured: () => require('../connectors/kraken-api').configured(),
     lists: (symbol) => require('../connectors/kraken-pairs').lists(symbol),
     api: () => require('../connectors/kraken-api'),
     orders: () => require('../connectors/kraken-orders'),
   },
   coinbase: {
-    id: 'coinbase', label: 'Coinbase', broker: 'Coinbase',
+    id: 'coinbase', label: 'Coinbase', broker: 'Coinbase', restsTarget: true,
     configured: () => true,
     lists: (symbol) => /^[A-Z0-9]{1,10}-USDC?$/.test(String(symbol)),
     api: () => require('../connectors/coinbase-api'),
@@ -29,7 +38,7 @@ const VENUES = {
   },
 };
 const ORDER = ['okx', 'kraken', 'coinbase'];
-const BROKERS = new Set(['Coinbase', 'Kraken']); // live crypto brokers SignalDesk trades at
+const BROKERS = new Set(['Coinbase', 'Kraken', 'OKX']); // live crypto brokers SignalDesk trades at
 
 const idOf = (p) => (p && VENUES[p.venue] ? p.venue : p && p.broker === 'Kraken' ? 'kraken' : p && p.broker === 'OKX' ? 'okx' : 'coinbase');
 const of = (p) => VENUES[idOf(p)];

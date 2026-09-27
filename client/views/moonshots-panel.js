@@ -44,7 +44,7 @@
   }
   function tradeButton(symbol, row, label, cls) {
     const b = el('button', { type: 'button', className: `btn ${cls}`, textContent: label,
-      title: `Manual trade ticket for ${symbol.replace('-', '/')}${row ? ` (Smart Investment Amount at ${row.score}/100)` : ''}: Paper or Live @ Coinbase` });
+      title: `Manual trade ticket for ${symbol.replace('-', '/')}${row ? ` (Smart Investment Amount at ${row.score}/100)` : ''}: Paper or Live` });
     b.onclick = (e) => { e.stopPropagation(); trade(symbol, row); };
     return b;
   }

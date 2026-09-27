@@ -1,4 +1,4 @@
-// Multi-venue crypto waterfall router (Phase 69A). Every crypto setup / Trade Ticket order goes
+// Multi-venue crypto waterfall router (Phase 69A; OKX US live in 69B). Every crypto setup / Trade Ticket order goes
 // to the CHEAPEST configured venue (crypto-venues.ORDER: OKX US -> Kraken Pro -> Coinbase) that
 //   (a) lists the pair, and
 //   (b) at approval (liveRoute): has the spendable USD / USDC for the order + its taker fee.
@@ -17,7 +17,7 @@ async function cashOf(id, now = Date.now()) {
   const hit = cashCache.get(id);
   if (hit && now - hit.at < CASH_TTL_MS) return hit.value;
   const a = await venues.VENUES[id].api().getAccount().catch((err) => ({ ok: false, error: err.message }));
-  const value = a.ok ? { ok: true, cash: a.buyingPower } : { ok: false, error: a.error };
+  const value = a.ok ? { ok: true, cash: Number.isFinite(a.spendable) ? a.spendable : a.buyingPower } : { ok: false, error: a.error }; // one order pays in one currency
   cashCache.set(id, { at: Date.now(), value });
   return value;
 }
@@ -41,10 +41,13 @@ function preRoute(asset) {
   return build(venues.VENUES.coinbase, skipped);
 }
 
-// The venues' pair lists loaded (Kraken's AssetPairs, cached 6 h): before any routing, so the
-// first route after a restart never falls back to Coinbase for want of the list.
+// The venues' pair lists loaded (OKX's instruments, Kraken's AssetPairs, cached 6 h): before any
+// routing, so the first route after a restart never falls back for want of a list.
 async function prepare() {
-  if (venues.VENUES.kraken.configured()) await require('../connectors/kraken-pairs').refresh();
+  await Promise.all([
+    venues.VENUES.okx.configured() ? require('../connectors/okx-pairs').refresh() : null,
+    venues.VENUES.kraken.configured() ? require('../connectors/kraken-pairs').refresh() : null,
+  ]);
 }
 
 // At approval: listing AND enough cash for `notional` + the taker fee (Coinbase: the fallback).

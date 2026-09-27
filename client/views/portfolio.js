@@ -87,7 +87,7 @@
       card('Capital deployed', usd(t.holdingsValue), `${n} position${n === 1 ? '' : 's'} · ${t.deployedPct === null ? '—' : `${(t.deployedPct * 100).toFixed(0)}%`} of the account; `
         + `${usd(t.cash)} in cash${t.unmarked ? ` · ${t.unmarked} without a live mark` : ''}`),
       // Cash is isolated per venue: paper money never counts as live buying power.
-      card('Spendable cash', usd(t.cash), !t.usePaper ? `Live Coinbase USD + USDC balance (sync ${clock(t.syncedAt)})`
+      card('Spendable cash', usd(t.cash), !t.usePaper ? `Live cash: ${t.venueCash.map(([v, c]) => `${v} ${usd(c)}`).join(' + ') || 'none synced'} (sync ${clock(t.syncedAt)})`
         : t.useCb ? `Paper cash ${usd(t.paperCash)} + live Coinbase USD/USDC ${usd(t.cbCash)} (kept separate when trading)`
           : t.cash >= 0 ? 'Paper cash available: bankroll + realized − open paper positions'
             : `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll`, t.cash < 0 ? 'pnl-neg' : ''),
@@ -116,7 +116,8 @@
       const failed = live && !v.ok;
       const value = !live ? money(b.bankroll) : failed ? '—' : money(v.buyingPower);
       const sub = !live ? 'Paper bankroll: approvals fill in the paper ledger' : failed ? `Account unavailable: ${v.error}`
-        : `${v.balances ? `USD ${money(v.balances.USD)} + USDC ${money(v.balances.USDC)}` : `Cash ${money(v.cash)} · equity ${money(v.equity)}${v.tradingBlocked ? ' · TRADING BLOCKED' : ''}`} · as of ${clock(v.fetchedAt)}`;
+        : `${v.balances ? Object.entries(v.balances).filter(([k, x]) => k === 'USD' || x > 0).map(([k, x]) => `${k} ${money(x)}`).join(' + ')
+          + (v.fundingCash > 0 ? ` · ${money(v.fundingCash)} in Funding (move to Trading to use)` : '') : `Cash ${money(v.cash)} · equity ${money(v.equity)}${v.tradingBlocked ? ' · TRADING BLOCKED' : ''}`} · as of ${clock(v.fetchedAt)}`;
       return el('div', { className: `pf-venue-tile${live ? ' is-live' : ''}${failed ? ' is-error' : ''}` }, [
         el('span', { className: 'pf-kpi-label', textContent: `${live ? 'LIVE' : 'Paper'} · ${v.label} · ${v.markets}` }),
         el('strong', { className: 'pf-kpi-value', textContent: value }), el('span', { className: 'pf-kpi-sub', textContent: sub })]);

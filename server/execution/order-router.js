@@ -86,7 +86,7 @@ async function routeApproved(order, livePrice) {
       brokerEnvironment: result.environment,
       fillEstimated: true, // the broker's actual fill price is not fetched yet
       ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}), ...(result.product ? { brokerProduct: result.product } : {}),
-      ...(venue.route ? cryptoRouter.fields(venue.route) : {}), // Phase 69A: venue 'kraken' | 'coinbase' + the route taken
+      ...(venue.route ? cryptoRouter.fields(venue.route) : {}), // Phase 69A: venue 'okx' | 'kraken' | 'coinbase' + the route taken
     }, resized);
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.

@@ -21,7 +21,7 @@
   const TIMEOUT_MS = 35000;
   const busy = new Set();
   const timers = new Map(); // position id -> its close's timeout
-  const can = (p) => p.execution === 'LIVE' && (p.broker === 'Coinbase' || p.broker === 'Kraken') && p.market === 'crypto';
+  const can = (p) => p.execution === 'LIVE' && ['Coinbase', 'Kraken', 'OKX'].includes(p.broker) && p.market === 'crypto'; // + Kraken (69A), OKX (69B)
   const B = (p) => (p && p.broker) || 'Coinbase';
   const coin = (p) => p.asset.replace(/-USDC?$/, '');
 
@@ -46,7 +46,7 @@
       : q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your ${B(p)} cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(q.net, money)} after all fees`
       : live ? `~${money(p.positionSize * live)} at ${price(live, p)} before fees (${signed((live - p.fillPrice) * p.positionSize, money)} vs entry)` : 'at the market price';
     const steps = p.adopted ? `It has no SignalDesk stop/target at ${B(p)}, so this is a plain market sell.`
-      : `1) cancel its stop${p.broker === 'Kraken' ? '' : '/target bracket'} at ${B(p)}, 2) wait until ${B(p)} releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.`;
+      : `1) cancel its stop${B(p) !== 'Coinbase' ? '' : '/target bracket'} at ${B(p)}, 2) wait until ${B(p)} releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.`;
     if (!window.confirm(`SELL ${p.positionSize} ${coin(p)} at ${B(p)} now (LIVE, real money)?\n\n${steps}\n\nProceeds ${est}.`)) return;
     busy.add(p.id);
     timers.set(p.id, setTimeout(() => {
@@ -64,7 +64,7 @@
     free(r.id);
     const t = r.trade;
     const where = t ? B(t) : 'the broker';
-    if (!r.ok) toast(`Close at ${where === 'the broker' ? 'Coinbase / Kraken' : where} failed for ${String(r.id || '').split(':')[2] || r.id}: ${r.error}`, false);
+    if (!r.ok) toast(`Close at ${where === 'the broker' ? 'the broker' : where} failed for ${String(r.id || '').split(':')[2] || r.id}: ${r.error}`, false);
     else if (r.pending) toast(`Sell sent to ${where} and still working: it is booked as soon as it fills.`, true);
     else if (r.alreadyClosed) toast(`Already closed at ${where}: ${r.detail}`, true);
     else if (t) toast(`Sold ${t.positionSize} ${coin(t)} at ${where} @ ${price(t.exitPrice, t)}: net ${signed(t.netPnl, money)} (fees ${money(t.fees)}). In the Journal as ${t.exitReason}.${r.detail ? ` ${r.detail}` : ''}`, !r.detail);
@@ -75,7 +75,7 @@
   function reset() {
     if (!busy.size) return;
     for (const id of [...busy]) free(id);
-    toast('Connection was lost during a Close at Coinbase / Kraken: check the position (and the broker) before retrying.', false);
+    toast('Connection was lost during a Close at the broker: check the position (and the broker) before retrying.', false);
     SD.app.refresh();
   }
 

@@ -1,7 +1,7 @@
 // Manual Trade Ticket (Phase 60): the [+ Manual Trade] button next to the symbol
 // picker opens this ticket, pre-filled with the charted asset.
 //   Stock (Paper)   long / short, $ size (default $300), stop (1.5 x ATR) + T1 / T2
-//   Crypto          Paper or Live @ Coinbase (live USD cash shown; only while Settings
+//   Crypto          Paper or Live (routed OKX US -> Kraken Pro -> Coinbase; live cash shown; only while Settings
 //                   has Coinbase on LIVE; long only), $ size (default $20), stop / T1
 //   Options         the 25 optionables (manual-options-ticket.js)
 // Every number shown comes from the SERVER (MANUAL_TRADE_PREVIEW: the real risk engine,
@@ -108,10 +108,10 @@
     const rows = [];
     if (t.mode === 'crypto') {
       rows.push(el('div', { className: 'mt-row' }, [el('span', { className: 'mt-label', textContent: 'Venue' }),
-        seg([['paper', 'Paper'], ['live', `Live @ Coinbase${d && d.ok && live && d.coinbaseCash !== null ? ` · ${money(d.coinbaseCash)} USD cash` : ''}`, !(d && d.liveAllowed)]], t.venue, (v) => {
+        seg([['paper', 'Paper'], ['live', `Live${d && d.ok && live && d.coinbaseCash !== null ? ` · ${money(d.coinbaseCash)} cash` : ''}`, !(d && d.liveAllowed)]], t.venue, (v) => {
           t.venue = v; if (v === 'live') t.direction = 'long'; t.preview = null; loadDefaults(); render();
         })]));
-      if (d && d.ok && !d.liveAllowed) rows.push(el('p', { className: 'mt-note', textContent: 'Live @ Coinbase is off: Settings has Coinbase on PAPER.' }));
+      if (d && d.ok && !d.liveAllowed) rows.push(el('p', { className: 'mt-note', textContent: 'Live crypto is off: Settings has crypto on PAPER.' }));
       const ms = d && d.moonshot;
       if (ms) rows.push(el('p', { className: `mt-note mt-moon${ms.error ? ' is-warn' : ''}`, textContent: ms.error ? `Moonshot sizing unavailable: ${ms.error}`
         : `Moonshot Smart Investment Amount: ${money(ms.amount)} = ${Math.round(ms.scale * 100)}% of normal risk (radar ${ms.score ?? '—'}/100; risks ${money(ms.risk)} at the stop).` }));
@@ -121,7 +121,7 @@
     rows.push(el('div', { className: 'mt-grid' }, [
       field('amount', 'Dollar size', 'amount', { prefix: '$' }),
       field('stop', `Stop loss${d && d.stopBasis === 'fee floor' ? ' (fee-gate minimum)' : d && d.atr ? ` (1.5 × ATR ${d.atr.toFixed(d.price >= 1 ? 2 : 6)})` : ''}`, 'stop'),
-      field('t1', live ? 'Take profit (bracket)' : 'Target T1', 't1'),
+      field('t1', live ? 'Take profit (T1)' : 'Target T1', 't1'),
       ...(live ? [] : [field('t2', 'Target T2 (optional)', 't2')]),
     ]));
     return rows;
@@ -150,7 +150,7 @@
   function actions() {
     const tk = ticket();
     const live = t.venue === 'live' && t.mode === 'crypto';
-    const label = t.mode === 'stock' ? 'Open Paper Stock Trade' : t.mode === 'options' ? 'Open Paper Options Trade' : live ? 'Place LIVE Order @ Coinbase' : 'Open Paper Crypto Trade';
+    const label = t.mode === 'stock' ? 'Open Paper Stock Trade' : t.mode === 'options' ? 'Open Paper Options Trade' : live ? `Place LIVE Order @ ${((t.preview && t.preview.route) || '').replace(/^Route: (.+?) \(.*$/, '$1') || 'Coinbase'}` : 'Open Paper Crypto Trade'; // the routed venue (69B)
     const ok = t.preview && t.preview.ok && t.preview.live !== false && SD.app.isOnline() && !t.busy && (t.mode !== 'options' || tk.spec);
     const b = el('button', { type: 'button', id: 'mt-open', className: `btn btn-solid mt-go${live ? ' is-live' : ''}`, textContent: t.busy ? 'Opening…' : label, disabled: !ok });
     b.onclick = () => {
@@ -187,7 +187,7 @@
       seg(modes, t.mode, setMode, 'mt-modes'),
       el('div', { className: 'mt-body' }, body),
       actions(),
-      el('p', { className: 'mt-foot', textContent: 'Sized and checked by the risk engine and the order guard, like any setup. Paper unless you pick Live @ Coinbase.' }),
+      el('p', { className: 'mt-foot', textContent: 'Sized and checked by the risk engine and the order guard, like any setup. Paper unless you pick Live (routed to the cheapest venue: OKX US, Kraken Pro, then Coinbase).' }),
     ]);
     const next = el('div', { className: 'mt-overlay', id: 'mt-overlay' }, [panel]);
     next.onclick = (e) => { if (e.target === next) close(); };

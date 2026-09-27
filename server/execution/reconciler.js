@@ -24,7 +24,7 @@ const be = require('../risk/break-even'); // Phase 63: expected vs actual exit (
 const coinbaseApi = require('../connectors/coinbase-api');
 const { entryShare } = require('./ledger-live');
 
-const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi, Kraken: require('../connectors/kraken-api') }; // Phase 69A: + Kraken Pro
+const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi, Kraken: require('../connectors/kraken-api'), OKX: require('../connectors/okx-api') }; // + Kraken Pro (69A), OKX US (69B)
 const QTY_EPSILON = 1e-9;
 const ENTRY_TTL_MS = 30 * 60 * 1000; // same window as the order guard
 const DUST_USD = 1; // below any order minimum: an ended exit leaving less than this unsold closes the record
@@ -85,7 +85,7 @@ async function reconcileOne(pos, ledger) {
 
   // A manual [Close at Coinbase] sell whose outcome was unknown (timeout / 429 / 5xx, P0-2), or
   // one still working when it returned (coinbase-exit.js).
-  const venued = require('./crypto-venues').isLiveCrypto(pos); // Coinbase / Kraken (Phase 69A)
+  const venued = require('./crypto-venues').isLiveCrypto(pos); // Coinbase / Kraken / OKX (69A / 69B)
   if (pos.marketExitPending && venued) return require('./coinbase-exit').resolvePending(pos, ledger);
   if (pos.brokerManualExitId && venued) return require('./coinbase-exit').settle(pos, ledger);
   if (pos.adopted) return { id: pos.id, action: 'unchanged' };

@@ -1,4 +1,4 @@
-// Broker sync: real holdings from the live broker accounts (Coinbase, Alpaca, Kraken Pro),
+// Broker sync: real holdings from the live broker accounts (Coinbase, Alpaca, Kraken Pro, OKX US),
 // mapped to the ledger's open-position shape so the Portfolio tab can list them
 // beside SignalDesk's own trades. A read-only SNAPSHOT: it is never written into
 // the ledger (the ledger only holds positions SignalDesk itself opened), and it
@@ -12,6 +12,7 @@
 // 'Alpaca', venue 'Live Stocks', id alpaca:<SYMBOL>; cash from the account.
 const coinbaseApi = require('./coinbase-api');
 const krakenApi = require('./kraken-api'); // Phase 69A: Kraken Pro holdings + cash (when KRAKEN_API_KEY is set)
+const okxApi = require('./okx-api'); // Phase 69B: OKX US holdings + cash (when OKX_API_KEY is set)
 const alpacaApi = require('./alpaca-api');
 const { feeModel } = require('../risk/scenarios');
 
@@ -25,7 +26,7 @@ const num = (x) => {
 };
 
 const NEVER = { ok: false, status: 'never', syncedAt: null, positions: [], cash: null, error: null };
-let snapshot = { coinbase: NEVER, alpaca: NEVER, kraken: NEVER };
+let snapshot = { coinbase: NEVER, alpaca: NEVER, kraken: NEVER, okx: NEVER };
 let running = null;
 let lastStart = 0;
 
@@ -74,15 +75,16 @@ async function fetchAlpaca(now) {
   return { ok: true, status: 'ok', syncedAt: now, environment: pos.environment, positions, cash: acct && acct.ok ? acct.cash : null, error: null };
 }
 
-// Kraken Pro (Phase 69A): spot balances at their USD price; Kraken reports no cost basis.
-async function fetchKraken(now) {
-  if (!krakenApi.configured()) return { ...NEVER, status: 'not configured' };
-  const r = await krakenApi.getPortfolioValue().catch((err) => ({ ok: false, error: err.message }));
+// Kraken Pro (Phase 69A) / OKX US (69B): spot balances at their USD price; neither reports a
+// cost basis. OKX's funding-account cash (fundingCash) is shown; only trading cash is spendable.
+async function fetchVenue(api, id, broker, now) {
+  if (!api.configured()) return { ...NEVER, status: 'not configured' };
+  const r = await api.getPortfolioValue().catch((err) => ({ ok: false, error: err.message }));
   if (!r.ok) return { ok: false, status: 'error', syncedAt: now, positions: [], cash: null, error: r.error };
   const positions = r.holdings.filter((h) => h.qty > 0 && h.qty * h.price >= DUST_USD).map((h) => ({
-    id: `kraken:${h.asset}`, asset: `${h.asset}-USD`, market: 'crypto', direction: 'long', positionSize: h.qty, fillPrice: null, costBasis: null, invalidation: null, targets: [],
-    execution: 'BROKER', broker: 'Kraken', venue: 'Live Crypto', brokerValue: h.qty * h.price, brokerUnrealizedPnl: null, syncedAt: now, openedAt: null, feeModel: feeModel('crypto:kraken') }));
-  return { ok: true, status: 'ok', syncedAt: now, positions, cash: r.cash, error: null };
+    id: `${id}:${h.asset}`, asset: `${h.asset}-USD`, market: 'crypto', direction: 'long', positionSize: h.qty, fillPrice: null, costBasis: null, invalidation: null, targets: [],
+    execution: 'BROKER', broker, venue: 'Live Crypto', brokerValue: h.qty * h.price, brokerUnrealizedPnl: null, syncedAt: now, openedAt: null, feeModel: feeModel(`crypto:${id}`) }));
+  return { ok: true, status: 'ok', syncedAt: now, positions, cash: r.cash, fundingCash: r.fundingCash ?? null, error: null };
 }
 
 const getSnapshot = () => JSON.parse(JSON.stringify(snapshot));
@@ -92,10 +94,10 @@ const getSnapshot = () => JSON.parse(JSON.stringify(snapshot));
 async function syncPortfolio(now = Date.now()) {
   if (running || now - lastStart < MIN_GAP_MS) return { ok: false, busy: true, snapshot: getSnapshot() };
   lastStart = now;
-  running = Promise.all([fetchCoinbase(now), fetchAlpaca(now), fetchKraken(now)]);
+  running = Promise.all([fetchCoinbase(now), fetchAlpaca(now), fetchVenue(krakenApi, 'kraken', 'Kraken', now), fetchVenue(okxApi, 'okx', 'OKX', now)]);
   try {
-    const [coinbase, alpaca, kraken] = await running;
-    snapshot = { coinbase, alpaca, kraken };
+    const [coinbase, alpaca, kraken, okx] = await running;
+    snapshot = { coinbase, alpaca, kraken, okx };
   } finally {
     running = null;
   }
@@ -103,10 +105,12 @@ async function syncPortfolio(now = Date.now()) {
   if (cb.ok) console.log(`[broker-sync] Coinbase: ${cb.positions.length} holding(s), cash ${cb.cash.toFixed(2)}`);
   else console.warn(`[broker-sync] Coinbase sync failed: ${cb.error}`);
   if (al.ok) console.log(`[broker-sync] Alpaca: ${al.positions.length} holding(s)`);
-  const kr = snapshot.kraken;
-  if (kr.ok) console.log(`[broker-sync] Kraken: ${kr.positions.length} holding(s), cash ${kr.cash.toFixed(2)}`);
-  else if (kr.status !== 'not configured') console.warn(`[broker-sync] Kraken sync failed: ${kr.error}`);
   else if (al.status !== 'not configured') console.warn(`[broker-sync] Alpaca sync failed: ${al.error}`);
+  for (const [key, name] of [['kraken', 'Kraken'], ['okx', 'OKX']]) {
+    const v = snapshot[key];
+    if (v.ok) console.log(`[broker-sync] ${name}: ${v.positions.length} holding(s), cash ${v.cash.toFixed(2)}${v.fundingCash > 0 ? `, funding ${v.fundingCash.toFixed(2)}` : ''}`);
+    else if (v.status !== 'not configured') console.warn(`[broker-sync] ${name} sync failed: ${v.error}`);
+  }
   return { ok: true, snapshot: getSnapshot() };
 }
 

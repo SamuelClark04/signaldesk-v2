@@ -165,7 +165,7 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
   // its zone is maker on PAPER and on live Coinbase (a post-only limit entry,
   // coinbase-api.js); anything else (e.g. live Alpaca market entries) is taker.
   const basis = options.sizingBasis || 'paper';
-  const entryLiquidity = candidate.entryLiquidity === 'maker' && (basis === 'paper' || basis === 'coinbase-live' || basis === 'kraken-live') ? 'maker' : 'taker'; // Kraken: post-only too (69A)
+  const entryLiquidity = candidate.entryLiquidity === 'maker' && (basis === 'paper' || basis === 'coinbase-live' || basis === 'kraken-live' || basis === 'okx-live') ? 'maker' : 'taker'; // Kraken / OKX: post-only too (69A / 69B)
   const sized = { ...candidate, entryPrice, positionSize, dollarRisk, entryLiquidity };
 
   const cost = evaluateCosts(sized, dollarRisk);

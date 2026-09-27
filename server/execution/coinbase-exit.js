@@ -1,5 +1,5 @@
 // [Close at Coinbase] (Phase 60): close a LIVE Coinbase position from SignalDesk.
-// Phase 69A: ANY live crypto venue (crypto-venues.js: Coinbase, Kraken Pro) through the same
+// Phase 69A: ANY live crypto venue (crypto-venues.js: Coinbase, Kraken Pro, OKX US) through the same
 // steps; its connectors come from the position's venue (on Kraken the resting exit is the
 // stop-loss alone; the T1 sell is closeLive(..., { reason: 'TAKE_PROFIT' }) from ratchet.watch).
 // A live position's exits sit at Coinbase as ONE trigger-bracket order (take-profit
@@ -107,7 +107,7 @@ async function verifySell(pos, product, clientId, qty, since, deadlineMs) {
 async function closeLive(ledger, id, opts = {}) {
   const pos = ledger.getActivePositions().find((p) => p.id === id);
   if (!pos) throw fail('NO_POSITION', `no open position ${id}`);
-  if (!venues.isLiveCrypto(pos)) throw fail('NOT_LIVE_COINBASE', `${id} is not a live Coinbase / Kraken crypto position`);
+  if (!venues.isLiveCrypto(pos)) throw fail('NOT_LIVE_COINBASE', `${id} is not a live Coinbase / Kraken / OKX crypto position`);
   const reason = opts.reason || `MANUAL_CLOSE @ ${B(pos)}`;
   const leg = opts.leg || 'manual';
   if (pos.marketExitPending) throw fail('SELL_UNCONFIRMED', `an earlier sell of this position is still being checked at ${B(pos)}; SignalDesk re-checks every pass`);
