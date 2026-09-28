@@ -7,6 +7,9 @@
 // carries [⬍ Dual Chart]. A pane's host node is handed back on every re-render, so
 // its canvas survives. mount() returns null if the library failed to load (offline),
 // and the view falls back to the static level chart.
+// Phase 70C: the price scale fits the CANDLES (components/chart-levels.js: level lines far from the
+// price get rail badges instead of flattening the candles); [⤢ Fit] snaps back to that view at the
+// default bar width, [⇕ Levels] fits every level line.
 // Exposes window.SignalDesk.liveChart: the primary pane's API + create(opts) for more.
 (() => {
   const SD = window.SignalDesk;
@@ -22,52 +25,14 @@
   // minMove matches it so the axis ticks never collapse onto one rounded value.
   const priceFormat = (p) => { const precision = SD.ui.decimalsFor(p); return { type: 'price', precision, minMove: Number((10 ** -precision).toFixed(precision)) }; };
   const volBar = (b) => ({ time: b.time, value: b.volume || 0, color: b.close >= b.open ? 'rgba(38, 166, 154, 0.35)' : 'rgba(239, 83, 80, 0.35)' });
-  const cyan = () => css('--accent', '#38bdf8');
 
-  // Level lines (Phase 58C), shared switch: the charted setup's, else the overlay (an
-  // open position or an after-hours options plan). Options map the UNDERLYING levels,
-  // labelled with the spread's value there: ENTRY · paid, SL, T1 / T2, BE (expiry).
-  // Each pane has its own switch (Phase 64: Chart 2's [Lines] never touches Chart 1), remembered per device.
+  // Level lines (Phase 58C), shared switch: the charted setup's, else the overlay (an open position
+  // or an after-hours options plan): components/chart-levels.js. Each pane has its own switch
+  // (Phase 64: Chart 2's [Lines] never touches Chart 1), remembered per device.
   const readLevels = (key) => { try { return localStorage.getItem(key) !== 'off'; } catch { return true; } };
   const panes = new Set();
-  // { entry, entryMin, stop, t1, t2, be, debit, stopValue, t1Value, t2Value, option } from an order / plan / position.
-  function levelsOf(x) {
-    if (!x) return null;
-    const od = x.optionsData || null;
-    const rule = od && od.exitRule;
-    const t = x.targets || [];
-    const plan = x.t1Value !== undefined; // an after-hours plan (after-hours-plans.js)
-    return {
-      option: !!od || plan, entry: plan ? x.refSpot : x.fillPrice || (x.entryZone && x.entryZone.max), entryMin: x.entryZone && x.entryZone.min !== x.entryZone.max ? x.entryZone.min : 0,
-      stop: x.invalidation, t1: plan ? x.t1 : t[0] && t[0].price, t2: plan ? x.t2 : t[1] && t[1].price,
-      // BE: options at expiry; a stock / crypto position the price where closing now nets $0 (Phase 63), a staged order its fee hurdle.
-      be: plan ? x.stats && x.stats.breakeven : od ? od.breakeven || (od.stats && od.stats.breakeven) : (x.exitQuote && x.exitQuote.breakEven) || (x.hurdle && x.hurdle.breakEven),
-      debit: plan ? x.debit : od && od.debit, stopValue: plan ? x.stopValue : rule && rule.stopValue, t1Value: plan ? x.t1Value : rule && rule.targetValue, t2Value: plan ? x.t2Value : rule && rule.t2Value,
-    };
-  }
-  const optionSpecs = (L) => [
-    { title: `T2 · spread ${L.t2Value || '—'}`, price: L.t2, color: '#14b8a6', style: 2 },
-    { title: `T1 · spread ${L.t1Value}`, price: L.t1, color: css('--long', '#2dd4bf'), style: 0 },
-    { title: `BE (expiry)`, price: L.be, color: css('--warn', '#fbbf24'), style: 1 },
-    { title: `ENTRY · paid ${L.debit}`, price: L.entry, color: cyan(), style: 2 },
-    { title: `SL · spread ${L.stopValue}`, price: L.stop, color: css('--short', '#fb7185'), style: 0 },
-  ];
-  function specsFor(o, withLevels, overlay, levelsOn) {
-    const t = o.targets || [];
-    const L = withLevels ? levelsOf(o) : levelsOf(overlay);
-    return (!levelsOn || !L ? [] : L.option ? optionSpecs(L) : !withLevels ? [
-      { title: 'T2', price: L.t2, color: css('--long', '#2dd4bf') }, { title: 'T1', price: L.t1, color: css('--long', '#2dd4bf') },
-      { title: 'BE', price: L.be, color: css('--warn', '#fbbf24') }, // dashed: breakeven after both fees (+ the bid gap)
-      { title: 'Entry', price: L.entry, color: cyan() }, { title: 'SL', price: L.stop, color: css('--short', '#fb7185') },
-    ] : [
-      { title: 'T2', price: t[1] && t[1].price, color: css('--long', '#2dd4bf') },
-      { title: 'T1', price: t[0] && t[0].price, color: css('--long', '#2dd4bf') },
-      { title: 'BE', price: o.hurdle && o.hurdle.breakEven, color: css('--warn', '#fbbf24') },
-      { title: 'Entry', price: o.entryZone.max, color: cyan() },
-      { title: 'Entry', price: o.entryZone.min !== o.entryZone.max ? o.entryZone.min : 0, color: cyan() },
-      { title: 'Stop', price: o.invalidation, color: css('--short', '#fb7185') },
-    ]).filter((s) => s.price > 0);
-  }
+  const LV = SD.chartLevels;
+  const BAR_SPACING = 8; // px per candle at the default zoom ([⤢ Fit] returns here)
 
   // One chart pane. opts: { tf, extraTools: () => [nodes] for its toolbar, levelsKey: its [Lines] storage key }.
   function makeChart(paneOpts = {}) {
@@ -76,6 +41,7 @@
     let tf = paneOpts.tf || '15m';
     let follow = true;
     let view = null;
+    let scaleMode = 'candles'; // 'candles' (default) | 'levels' (every level line on screen)
 
     function toolbar() {
       const tfs = el('div', { className: 'lwc-tfs', role: 'group' }, TIMEFRAMES.map(([key, label]) => {
@@ -85,11 +51,13 @@
       }));
       const followBox = el('input', { type: 'checkbox', checked: follow });
       followBox.onchange = () => { follow = followBox.checked; view.chart.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: follow }); if (follow) view.chart.timeScale().scrollToRealTime(); };
-      const fitBtn = el('button', { type: 'button', className: 'lwc-tool', textContent: '⤢ Fit', title: 'Fit all bars and every level line (entry, stop, targets, breakeven)' });
-      fitBtn.onclick = () => { view.chart.priceScale('right').applyOptions({ autoScale: true }); view.chart.timeScale().fitContent(); };
+      const fitBtn = el('button', { type: 'button', className: 'lwc-tool', textContent: '⤢ Fit', title: 'Fit the candles (default zoom, latest bars); far level lines show as badges on the edges' });
+      fitBtn.onclick = () => fitCandles();
+      const lvBtn = el('button', { type: 'button', className: 'lwc-tool lwc-levels', textContent: '⇕ Levels', title: 'Fit every level line (entry, stop, targets, breakeven) on the price scale' });
+      lvBtn.onclick = () => setScale(scaleMode === 'levels' ? 'candles' : 'levels');
       const full = el('button', { type: 'button', className: 'lwc-tool', textContent: '⛶', title: 'Full screen' });
       full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : view.host.requestFullscreen && view.host.requestFullscreen());
-      return el('div', { className: 'lwc-bar' }, [tfs, el('label', { className: 'lwc-tool lwc-follow' }, [followBox, 'Follow price']), fitBtn, full, ...(paneOpts.extraTools ? paneOpts.extraTools() : [])]);
+      return el('div', { className: 'lwc-bar' }, [tfs, el('label', { className: 'lwc-tool lwc-follow' }, [followBox, 'Follow price']), fitBtn, lvBtn, full, ...(paneOpts.extraTools ? paneOpts.extraTools() : [])]);
     }
 
     function create() {
@@ -109,7 +77,7 @@
         rightPriceScale: { borderColor: css('--border', '#1f2a3c'), scaleMargins: { top: 0.08, bottom: 0.22 } },
         localization: { timeFormatter: (t) => localTime(t, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }, // viewer's local time
         timeScale: {
-          borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4, shiftVisibleRangeOnNewBar: follow,
+          borderColor: css('--border', '#1f2a3c'), timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: BAR_SPACING, shiftVisibleRangeOnNewBar: follow,
           tickMarkFormatter: (t, type) => (type < 3 ? localTime(t, { month: 'short', day: 'numeric' }) : localTime(t, { hour: '2-digit', minute: '2-digit' })),
         },
         crosshair: { mode: LWC.CrosshairMode.Normal },
@@ -118,19 +86,40 @@
       chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       const series = chart.addSeries(LWC.CandlestickSeries, {
         upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false,
-        autoscaleInfoProvider: (original) => { // keep every level line on screen
-          const res = original();
-          const lv = (view && view.levels) || [];
-          if (!res || !lv.length) return res;
-          const { minValue, maxValue } = res.priceRange;
-          return { ...res, priceRange: { minValue: Math.min(minValue, ...lv), maxValue: Math.max(maxValue, ...lv) } };
-        },
+        autoscaleInfoProvider: (original) => LV.range(original(), (view && view.levels) || [], scaleMode), // candles first (70C)
       });
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => rails());
       new ResizeObserver(() => fit()).observe(canvas);
       // Toolbar height (it wraps to 2+ rows when narrow): the trade HUD floats under it (Phase 61).
       const bar = host.firstChild;
       new ResizeObserver(() => { if (view && bar.offsetHeight) { view.barH = bar.offsetHeight; const w = host.closest('.opp-chart-wrap'); if (w) w.style.setProperty('--lwc-bar-h', `${view.barH}px`); } }).observe(bar);
-      return { host, box, canvas, note, banner, chart, series, volume, o: null, opts: {}, shown: '', histRef: null, lastTime: 0, levelsKey: '', lines: [], levels: [] };
+      return { host, box, canvas, note, banner, chart, series, volume, o: null, opts: {}, shown: '', histRef: null, lastTime: 0, levelsKey: '', lines: [], levels: [], specs: [] };
+    }
+
+    // [⤢ Fit]: the candle view (default bar width, latest bars, scale on the candles).
+    function fitCandles() {
+      scaleMode = 'candles';
+      view.chart.priceScale('right').applyOptions({ autoScale: true });
+      view.chart.timeScale().applyOptions({ barSpacing: BAR_SPACING });
+      view.chart.timeScale().scrollToRealTime();
+      markMode();
+    }
+    function setScale(mode) {
+      scaleMode = mode;
+      view.chart.priceScale('right').applyOptions({ autoScale: true });
+      markMode();
+    }
+    function markMode() {
+      const b = view.host.querySelector('.lwc-levels');
+      if (b) b.classList.toggle('is-active', scaleMode === 'levels');
+      rails();
+    }
+    // Off-scale level badges, once per frame (after the chart has laid the new scale out).
+    let railsQueued = false;
+    function rails() {
+      if (railsQueued || !view) return;
+      railsQueued = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => { railsQueued = false; if (view && view.o) LV.badges(view, () => setScale('levels')); }));
     }
 
     // Re-renders detach and re-attach the host; the first layout can happen while hidden.
@@ -141,13 +130,14 @@
     }
 
     function setLevels() {
-      const specs = specsFor(view.o, view.opts.withLevels, view.opts.overlay, levelsOn);
+      const specs = LV.specsFor(view.o, view.opts.withLevels, view.opts.overlay, levelsOn);
       const key = JSON.stringify(specs);
       if (key === view.levelsKey) return;
       view.levelsKey = key;
       for (const line of view.lines) view.series.removePriceLine(line);
       view.lines = specs.map((s) => view.series.createPriceLine({ price: s.price, color: s.color, title: s.title, lineWidth: s.style === 0 ? 2 : 1, lineStyle: s.style ?? 2, axisLabelVisible: true }));
       view.levels = specs.map((s) => s.price);
+      view.specs = specs;
     }
 
     // Full reload when the symbol, timeframe or history changes; else update the forming candle.
@@ -168,6 +158,8 @@
       view.shown = shown;
       view.histRef = h;
       view.lastTime = last ? last.time : 0;
+      view.lastClose = last ? last.close : 0;
+      rails();
     }
 
     function noteText(o) {
@@ -255,5 +247,5 @@
   // The primary pane (Opportunities center, Moonshot Radar): its toolbar has [⬍ Dual Chart].
   const primary = makeChart({ extraTools: () => (SD.dualChart ? [SD.dualChart.toggleButton()] : []) });
   SD.liveChart = { record: D.record, mount: primary.mount, stats: primary.stats, setTimeframe: primary.setTimeframe, primary,
-    setLevelsVisible: primary.setLevelsVisible, levelsVisible: primary.levelsVisible, levelsOf, create: makeChart, announce, tick };
+    setLevelsVisible: primary.setLevelsVisible, levelsVisible: primary.levelsVisible, levelsOf: LV.levelsOf, create: makeChart, announce, tick };
 })();
