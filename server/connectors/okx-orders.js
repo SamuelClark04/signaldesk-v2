@@ -59,6 +59,12 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
 }
 
 const bookOf = (product) => pairs.get(product) || pairs.books(product)[0] || null;
+// OKX's minimum for a SELL of `qty` (minSz): a reason, or null when fine (Phase 71).
+async function sellMinimum(product, qty) {
+  await pairs.refresh();
+  const e = bookOf(product);
+  return e ? pairs.minProblem(e, Number(pairs.size(e, qty))) : null;
+}
 
 // A BUY's fee is charged in the coin: a stop / sell for a little more than is free (the gross size,
 // a rounding step) would be refused (51008). Within FEE_SLACK of the size: what is free instead.
@@ -112,4 +118,4 @@ async function findOrderByClientId(product, clientOrderId) {
   return { ok: true, order: r };
 }
 
-module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf: api.clientIdOf, bookFor };
+module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf: api.clientIdOf, bookFor, sellMinimum };

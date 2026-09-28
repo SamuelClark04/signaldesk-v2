@@ -20,7 +20,11 @@ const baseOf = (product) => String(product).replace(/[-/]USDC?$/, '');
 const fail = (code, msg) => Object.assign(new Error(`${code}: ${msg}`), { code });
 const log = (msg) => console.warn(`[LIVE] ${msg}`);
 const patch = (ledger, id, fields) => ledger.updatePositions((p) => (p.id === id ? Object.assign(p, fields) && true : false));
-const coinsFree = (bal, qty) => bal.ok && bal.available + QTY_EPS >= qty * (1 - 1e-6);
+// Phase 71: a venue may take a BUY's fee in the coin (Kraken, OKX): a balance within COIN_FEE_TOL
+// under the position is the position (sellable() then sells / protects what is really free).
+const COIN_FEE_TOL = 0.01;
+const coinsFree = (bal, qty) => bal.ok && bal.available + QTY_EPS >= qty * (1 - COIN_FEE_TOL);
+const sellable = (bal, qty) => (bal && bal.ok && bal.available > 0 ? Math.min(qty, bal.available) : qty);
 // The coins a position really holds: its size, capped at what its entry filled. OKX charges a BUY's
 // fee in the coin, so until the reconciler syncs the fill the ledger may still carry the gross size;
 // a stop / sell for it would be refused. (Split and adopted records keep their own size.)
@@ -101,7 +105,7 @@ async function replaceStop(ledger, pos, stop, label, { allowSame = false } = {})
     const msg = bal.ok ? `${pos.broker || 'Coinbase'} shows ${bal.available} available (${bal.hold} on hold) for ${qty}` : bal.error;
     await rearmThenFail(ledger, pos, qty, 'the hold was not released', 'HOLD_NOT_RELEASED', `${msg}; the stop was not changed`, 'The coins were not released');
   }
-  const r = await venues.orders(pos).placeBracket(product, qty, tp, stop, `${pos.id}:${label}:${Date.now()}`);
+  const r = await venues.orders(pos).placeBracket(product, sellable(bal, qty), tp, stop, `${pos.id}:${label}:${Date.now()}`);
   if (!r.ok) {
     await rearmThenFail(ledger, pos, qty, `a refused ${label} bracket (${r.error})`, 'RATCHET_REFUSED',
       `${pos.broker || 'Coinbase'} refused the new stop ${stop} (${r.error}); the ORIGINAL stop ${pos.invalidation} is back`, `The new stop ${stop} was refused`);
@@ -112,4 +116,4 @@ async function replaceStop(ledger, pos, stop, label, { allowSame = false } = {})
   return { moved: true, bracketId: r.brokerId };
 }
 
-module.exports = { heldQty, timing, claim, release, isBusy: (id) => busy.has(id), pollUntil, cancelBracket, freeCoins, rearm, rearmThenFail, replaceStop, patch, coinsFree, baseOf, fail, log, sleep, QTY_EPS };
+module.exports = { sellable, COIN_FEE_TOL, heldQty, timing, claim, release, isBusy: (id) => busy.has(id), pollUntil, cancelBracket, freeCoins, rearm, rearmThenFail, replaceStop, patch, coinsFree, baseOf, fail, log, sleep, QTY_EPS };

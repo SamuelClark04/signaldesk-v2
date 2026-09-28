@@ -97,6 +97,15 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
     product: route.product, quoteCurrency: route.quote };
 }
 
+// Coinbase's minimum for a SELL of `qty` at `px` (base_min_size, quote_min_size): a reason or null (Phase 71).
+async function sellMinimum(product, qty, px) {
+  const inc = await productIncrements(product);
+  if (!inc) return null;
+  if (inc.minBase && qty < inc.minBase) return `${qty} is under Coinbase's ${product} minimum of ${inc.minBase}`;
+  if (inc.minQuote && px > 0 && qty * px < inc.minQuote) return `$${(qty * px).toFixed(2)} is under Coinbase's ${product} minimum of $${inc.minQuote}`;
+  return null;
+}
+
 async function sellMarket(product, size, clientOrderId) {
   if (!/^[A-Z0-9]{1,10}-USDC?$/.test(String(product)) || !(size > 0)) return { ok: false, error: `Coinbase sell not sent: invalid ${product} ${size}` };
   const inc = await productIncrements(product);
@@ -170,4 +179,4 @@ async function findOrderByClientId(product, clientOrderId, sinceMs) {
   return { ok: true, order: r.orders.find((o) => o.clientOrderId === String(clientOrderId)) || null };
 }
 
-module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId, listOrders, clientIdOf: (id) => String(id) };
+module.exports = { submitOrder, sellMarket, placeBracket, routeProduct, findOrderByClientId, listOrders, clientIdOf: (id) => String(id), sellMinimum };

@@ -139,6 +139,7 @@
       ...[SD.ratchet.status(p), SD.ratchet.button(p, m, ctx), SD.levelEditor.block(p, m, ctx)].filter(Boolean), // Phase 68 ratchet; 70D [✎ Edit stop / T1]
       exitButton(p, m, ctx),
       ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p, m) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p, m) })] : []),
+      ...(SD.liveClose.can(p) ? [SD.liveClose.externalButton(p)] : []), // Phase 71: sold in the venue's app
     ]);
   }
 

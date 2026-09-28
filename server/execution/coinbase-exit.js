@@ -118,6 +118,9 @@ async function closeLive(ledger, id, opts = {}) {
     // 1. Look up the bracket.
     const b = await bracketOf(pos);
     const qty = ops.heldQty(pos, b.status); // what the entry really filled (OKX: net of its coin fee)
+    // Phase 71: under the venue's minimum sell, nothing is canceled (the stop keeps protecting it).
+    const mp = O(pos).sellMinimum ? await O(pos).sellMinimum(product, qty, prices.getLatestPrice(pos.asset) || pos.fillPrice) : null;
+    if (mp) throw fail('BELOW_MINIMUM', `${mp}: ${B(pos)} refuses a sell this small, so nothing was canceled or sold. Sell it in the ${B(pos)} app, then use [Mark closed externally]`);
     const reconcile = async (why) => {
       ops.release(id); // the reconciler skips positions mid-close
       const r = await require('./reconciler').reconcileLivePositions([ledger.getActivePositions().find((p) => p.id === id)].filter(Boolean), ledger);
@@ -145,12 +148,13 @@ async function closeLive(ledger, id, opts = {}) {
       if (b.bracketId) await rearmThenFail(ledger, pos, qty, 'the hold was not released', 'HOLD_NOT_RELEASED', msg, 'The coins were not released');
       throw fail('HOLD_NOT_RELEASED', msg);
     }
-    // 4. Sell (the expected cashout recorded first: the execution audit).
-    const expected = expectedCashout(pos, product, qty);
+    // 4. Sell what is really free (a coin fee can leave it just under the size, Phase 71; the expected cashout first: the audit).
+    const sellQty = ops.sellable(bal, qty);
+    const expected = expectedCashout(pos, product, sellQty);
     const clientId = `${id}:manual-close:${Date.now()}`; // P1-6: unique per attempt
     const sentAt = Date.now();
-    let sell = await O(pos).sellMarket(product, qty, clientId);
-    if (!sell.ok && sell.uncertain) sell = await confirmUncertain(ledger, pos, { product, qty, clientId, sentAt, expected, error: sell.error, bracketId: b.bracketId });
+    let sell = await O(pos).sellMarket(product, sellQty, clientId);
+    if (!sell.ok && sell.uncertain) sell = await confirmUncertain(ledger, pos, { product, qty: sellQty, clientId, sentAt, expected, error: sell.error, bracketId: b.bracketId });
     if (!sell.ok) {
       if (b.bracketId) await rearmThenFail(ledger, pos, qty, `a refused sell (${sell.error})`, 'SELL_FAILED', sell.error, 'Market sell failed');
       throw fail('SELL_FAILED', sell.error);

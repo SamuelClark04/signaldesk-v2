@@ -47,7 +47,8 @@ Server (`server/`)
   `chart-ticks.js` (1 s TICKS for charted symbols), `paper-pools.js` (Phase 70: separate stocks / options and
   crypto PAPER bankrolls + cash), `crypto-waterfall.js` (Settings venue status strip), `crypto-router.js` + `crypto-venues.js`
   (Phases 69A / 69B: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
-  `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
+  `reconciler.js` (broker truth, UNARMORED, ended partial exits), `external-close.js` (Phase 71: coins sold in
+  the venue's app -> CLOSED_EXTERNALLY, auto when the balance is gone twice, or [Mark closed externally]), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
   `rejection-stats.js` (reason buckets), `scan-log.js`
 - `risk/` `risk-engine.js` (sizing, $20 crypto minimum, gates), `cost-authority.js`
@@ -98,6 +99,9 @@ Client (`client/`)
   market on trigger; p.brokerOco; oco-upgrade.js converts stop-only ones); Kraken only the stop
   (SignalDesk sells at T1). Market stops: no STOP_GAP. OKX charges a BUY's fee in the coin:
   the position size is what was received. Cash checks use one currency (`spendable`).
+  Kraken may take a buy fee in the coin too: closes / stops use the free balance within 1%
+  (bracket-ops.sellable); a sell under the venue minimum (orders.sellMinimum) is refused BEFORE
+  anything is canceled.
 - Crypto stop floors use the routed venue's fees (strategies/venue-floor.js); Trade Ticket crypto
   defaults: 2 x 1h ATR in a 3-5% band (Moonshots 4.5-6.5%), never under that floor
   (ticket-levels.js). [✎ Edit stop / T1] (level-edit.js) tightens a live stop at its venue.

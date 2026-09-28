@@ -153,6 +153,7 @@
     LIVE_CLOSE_RESULT: (p) => SD.liveClose.received(p),
     RATCHET_RESULT: (r) => SD.ratchet.received(r), // Phase 68: [🛡️ Lock Break-Even] / [🛡️ Lock Profit]
     LEVELS_RESULT: (r) => SD.levelEditor.received(r), // Phase 70D: [✎ Edit stop / T1]
+    EXTERNAL_CLOSE_RESULT: (r) => SD.liveClose.externalDone(r), // Phase 71: [Mark closed externally]
     TICKS: (t) => SD.liveChart.tick(t && t.prices), // Phase 68: 1 s ticks for the charted symbols (candles only)
   };
 

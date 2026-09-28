@@ -153,6 +153,10 @@ async function reconcileOne(pos, ledger) {
     const armed = !!exit && exit.status === 'open';
     const why = armed ? null : !exit ? `no stop/target order exists at ${pos.broker}`
       : exit.status === 'none' ? `no stop/target order is working at ${pos.broker}` : `the stop/target order is ${exit.status} at ${pos.broker}`;
+    if (!armed && require('./crypto-venues').isLiveCrypto(pos)) { // Phase 71: sold in the venue's own app (its balance is gone)
+      const gone = await require('./external-close').autoCheck(ledger, current);
+      if (gone) return { id: pos.id, action: 'closed', detail: `closed externally (${gone.basis})`, trade: gone.trade };
+    }
     const was = current.bracketStatus;
     // Already UNARMORED: keep the (more specific) reason it was flagged with; alarm on transitions only.
     if ((armed || was !== 'UNARMORED') && ledger.setBracketStatus(pos.id, armed ? 'ARMED' : 'UNARMORED', why)) {

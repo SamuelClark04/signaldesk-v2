@@ -64,12 +64,29 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
   return { ...r, environment: 'kraken-live', entryType: maker ? 'limit' : 'market', limitPrice: maker ? Number(pairs.price(e, limit)) : null, product: e.symbol, qty: Number(vol) };
 }
 
+// Phase 71: Kraken may take a BUY's fee in the coin, so the balance can sit just under the recorded
+// size: a stop / sell for more than is free is refused ("Insufficient funds": the stuck AZTEC close).
+// Within COIN_FEE_TOL of the size, what is free is sold / protected instead.
+const COIN_FEE_TOL = 0.01;
+async function fit(e, size) {
+  const a = await api.getAvailable(e.base);
+  return a.ok && a.available < size && a.available >= size * (1 - COIN_FEE_TOL) ? a.available : size;
+}
+// Kraken's minimum for a SELL of `qty` at `px` (ordermin, costmin): a reason, or null when fine.
+async function sellMinimum(product, qty, px) {
+  await pairs.refresh();
+  const e = pairs.get(product);
+  return e ? pairs.minProblem(e, Number(pairs.volume(e, qty)), px) : null;
+}
+
 // Stand-alone protective stop-loss SELL for `size` already held (the target is watched by SignalDesk).
 async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
   await pairs.refresh();
   const e = pairs.get(product);
   if (!e || !(size > 0) || !(stop > 0)) return { ok: false, error: `Kraken stop not sent: invalid ${product} ${size} @ ${stop}` };
-  const vol = pairs.volume(e, size);
+  const vol = pairs.volume(e, await fit(e, size));
+  const min = pairs.minProblem(e, Number(vol), stop);
+  if (min) return { ok: false, belowMinimum: true, error: `Kraken stop not sent: ${min}` };
   if (!(Number(vol) > 0)) return { ok: false, error: `Kraken stop not sent: ${size} is below ${e.wsname}'s volume step` };
   return addOrder({ pair: e.altname, type: 'sell', ordertype: 'stop-loss', price: pairs.price(e, stop), volume: vol, cl_ord_id: clientIdOf(clientOrderId) }, 'stop');
 }
@@ -78,7 +95,10 @@ async function sellMarket(product, size, clientOrderId) {
   await pairs.refresh();
   const e = pairs.get(product);
   if (!e || !(size > 0)) return { ok: false, error: `Kraken sell not sent: invalid ${product} ${size}` };
-  const vol = pairs.volume(e, size);
+  const vol = pairs.volume(e, await fit(e, size));
+  const px = require('../market/latest-prices').getLatestPrice(product) || 0;
+  const min = px > 0 ? pairs.minProblem(e, Number(vol), px) : Number(vol) < e.ordermin ? `${vol} is under Kraken's ${e.wsname} minimum of ${e.ordermin}` : null;
+  if (min) return { ok: false, belowMinimum: true, error: `Kraken sell not sent: ${min}`, qty: Number(vol) };
   if (!(Number(vol) > 0)) return { ok: false, error: `Kraken sell not sent: ${size} is below ${e.wsname}'s volume step` };
   const r = await addOrder({ pair: e.altname, type: 'sell', ordertype: 'market', volume: vol, cl_ord_id: clientIdOf(clientOrderId) }, 'sell');
   return r.ok ? { ...r, qty: Number(vol), environment: 'kraken-live' } : { ...r, qty: Number(vol) };
@@ -100,4 +120,4 @@ async function findOrderByClientId(product, clientOrderId, sinceMs) {
   return { ok: true, order: r.orders.find((o) => o.clientOrderId === want) || null };
 }
 
-module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf, userrefOf, isEntryOf };
+module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf, userrefOf, isEntryOf, sellMinimum };

@@ -80,6 +80,31 @@
     SD.app.refresh();
   }
 
+  // Phase 71: coins sold in the venue's own app (a refused / too-small sell): book the position closed.
+  function markExternal(p, force = false) {
+    if (!SD.app.isOnline()) return;
+    if (!force && !window.confirm(`Mark ${coin(p)} as CLOSED EXTERNALLY?
+
+Use this after selling it in the ${B(p)} app. SignalDesk checks ${B(p)}: the coins must be gone; `
+      + `its sell there gives the real exit price, fees and time (else the last price). Any stop SignalDesk left at ${B(p)} for it is canceled.`)) return;
+    SD.app.send({ type: 'CLOSE_EXTERNALLY', id: p.id, force });
+  }
+  function externalButton(p) {
+    const b = el('button', { type: 'button', className: 'btn lc-external', textContent: `Sold it in the ${B(p)} app? Mark closed externally` });
+    b.onclick = () => markExternal(p);
+    return b;
+  }
+  function externalDone(r) {
+    if (!r) return;
+    const p = ((SD.app.state && SD.app.state.positions) || []).find((x) => x.id === r.id);
+    if (r.ok) toast(`Marked closed externally @ ${r.exitPrice} (${r.basis}); net ${signed(r.netPnl, money)}.`, true);
+    else if (r.code === 'STILL_HELD' && p && window.confirm(`${r.error.replace(/^STILL_HELD: /, '')}.
+
+Write those coins off and close the position anyway? (They stay at ${B(p)}.)`)) markExternal(p, true);
+    else if (r.code !== 'STILL_HELD') toast(`Not marked closed: ${r.error}`, false);
+    SD.app.refresh();
+  }
+
   // Phase 67: nothing protects this position at the broker, or a sell's outcome is unknown.
   function armor(p) {
     if (p.stopGap) { // Phase 68: Coinbase's stop-limit sells at most 5% under the trigger
@@ -92,7 +117,7 @@
     }
     if (p.bracketStatus !== 'UNARMORED') return null;
     return el('div', { className: 'armor-warn', role: 'alert' }, [el('strong', { textContent: `UNARMORED: Stop/target bracket is not active on ${p.broker}` }),
-      `${p.bracketDetail ? ` (${p.bracketDetail})` : ''}. Set a stop there or close the position.`]);
+      `${p.bracketDetail ? ` (${p.bracketDetail})` : ''}. Set a stop there or close the position; sold it in the ${p.broker} app already? Use [Mark closed externally] below.`]);
   }
 
   let flagged = null; // ids UNARMORED on the last update (null: none seen yet)
@@ -129,5 +154,5 @@
     return b;
   }
 
-  SD.liveClose = { can, button, received, reset, armor, watch, toast, busy: (id) => busy.has(id), TIMEOUT_MS };
+  SD.liveClose = { can, button, received, reset, armor, watch, toast, busy: (id) => busy.has(id), TIMEOUT_MS, externalButton, externalDone };
 })();

@@ -153,7 +153,7 @@ async function productIncrements(product) {
     const quote = Number(j && j.quote_increment);
     const size = Number(j && j.base_increment);
     if (!(quote > 0 && size > 0)) return null;
-    const entry = { at: Date.now(), quote, base: size };
+    const entry = { at: Date.now(), quote, base: size, minBase: Number(j.base_min_size) || 0, minQuote: Number(j.quote_min_size) || 0 }; // + minimums (71)
     increments.set(product, entry);
     return entry;
   } catch { return null; }
