@@ -59,7 +59,7 @@ async function rearm(ledger, pos, qty, why) {
   const tp = pos.targets && pos.targets[0] && pos.targets[0].price;
   const r = await venues.orders(pos).placeBracket(pos.brokerProduct || pos.asset, qty, tp, pos.invalidation, `${pos.id}:rearm:${Date.now()}`);
   if (r.ok) {
-    patch(ledger, pos.id, { brokerBracketId: r.brokerId });
+    patch(ledger, pos.id, { brokerBracketId: r.brokerId, ...(r.oco !== undefined ? { brokerOco: !!r.oco } : {}) });
     ledger.setBracketStatus(pos.id, 'ARMED', null);
     log(`${pos.id}: bracket RE-ARMED as ${r.brokerId} (${qty} at stop ${pos.invalidation} / T1 ${tp}) after ${why}`);
   } else {
@@ -106,7 +106,7 @@ async function replaceStop(ledger, pos, stop, label, { allowSame = false } = {})
     await rearmThenFail(ledger, pos, qty, `a refused ${label} bracket (${r.error})`, 'RATCHET_REFUSED',
       `${pos.broker || 'Coinbase'} refused the new stop ${stop} (${r.error}); the ORIGINAL stop ${pos.invalidation} is back`, `The new stop ${stop} was refused`);
   }
-  patch(ledger, pos.id, { brokerBracketId: r.brokerId });
+  patch(ledger, pos.id, { brokerBracketId: r.brokerId, ...(r.oco !== undefined ? { brokerOco: !!r.oco } : {}) }); // 70E: OKX OCO or stop alone
   ledger.setBracketStatus(pos.id, 'ARMED', null);
   log(`${pos.id}: stop RAISED ${pos.invalidation} -> ${stop} (${label}) as bracket ${r.brokerId} (${qty}, T1 ${tp})`);
   return { moved: true, bracketId: r.brokerId };

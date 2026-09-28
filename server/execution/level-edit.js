@@ -1,9 +1,9 @@
 // Edit an open long's levels (Phase 70D): TIGHTEN its stop (up only, still under the live bid)
 // and / or move its T1 (above the bid). For a manual trade whose default levels were too wide
 // (MORPHO: -12.8% / +31.8%), without waiting for the +1R ratchet.
-//   LIVE OKX US / Kraken Pro  a new stop is cancel -> verify -> re-placed at the venue
-//                             (bracket-ops.replaceStop: a refused new stop re-arms the old one);
-//                             T1 is SignalDesk's to take (ratchet T1 watcher): a ledger change
+//   LIVE OKX US               stop and / or T1: the OCO (T1 + stop) is canceled -> verified ->
+//                             re-placed with both (70E; bracket-ops.replaceStop: refused -> the old one)
+//   LIVE Kraken Pro           a new stop is re-placed the same way; T1 is SignalDesk's (a ledger change)
 //   LIVE Coinbase             stop and T1 live in one bracket: either change re-places it
 //   PAPER / adopted           the ledger's levels (the exit monitor / alerts use them)
 // 1R (dollarRisk, initialStop) stays the original risk, as with the ratchet.
@@ -36,7 +36,7 @@ async function apply(ledger, id, { stop, t1 } = {}) {
   const targets = t === null ? pos.targets : [{ level: 1, allocation: 1, ...((pos.targets || [])[0] || {}), price: t }, ...(pos.targets || []).slice(1)];
   const newStop = s ?? pos.invalidation;
   let venue = 'ledger';
-  if (live && (s !== null || (t !== null && venues.of(pos).restsTarget))) {
+  if (live && (s !== null || (t !== null && (venues.of(pos).restsTarget || venues.of(pos).ocoBrackets)))) { // OKX: the OCO carries T1 (70E)
     ops.claim(id);
     let r;
     try { r = await ops.replaceStop(ledger, { ...pos, targets }, newStop, 'edit', { allowSame: s === null }); } finally { ops.release(id); }

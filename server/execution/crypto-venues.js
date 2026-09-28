@@ -19,7 +19,7 @@ const best = (balances, ccys) => Math.max(0, ...ccys.map((c) => Number(balances 
 
 const VENUES = {
   okx: {
-    id: 'okx', label: 'OKX US', broker: 'OKX', restsTarget: false,
+    id: 'okx', label: 'OKX US', broker: 'OKX', restsTarget: false, ocoBrackets: true, // T1 at OKX when the bracket is an OCO (70E: p.brokerOco)
     configured: () => require('../connectors/okx-api').configured(),
     lists: (symbol) => require('../connectors/okx-pairs').lists(symbol),
     // The currencies `symbol`'s OKX books settle in (ETH-USD: USD / USDC; ETH-USDT: USDT): the most in one.

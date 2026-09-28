@@ -1,16 +1,18 @@
 // OKX US LIVE orders (Phase 69B). Never throws: { ok, ... } or { ok: false, error, uncertain? }
 // (uncertain: timeout / 429 / 5xx / OKX busy: the order may exist: coinbase-exit.js verifies).
 //   submitOrder   BUY (market, sized in the coin: tgtCcy base_ccy; or a POST-ONLY limit for
-//                 'maker' candidates) with an ATTACHED stop-loss (attachAlgoOrds: slTriggerPx =
-//                 the stop, slOrdPx -1 = sell at market when triggered): OKX places the
-//                 protective stop as the entry fills, so the position is protected even if
-//                 SignalDesk is offline. As on Kraken, the resting exit is the stop; the T1
-//                 target is taken by SignalDesk (ratchet.watch -> a market sell at T1).
+//                 'maker' candidates) with an ATTACHED OCO bracket (Phase 70E; attachAlgoOrds:
+//                 tpTriggerPx = T1 + slTriggerPx = the stop, both *OrdPx -1 = sell at market when
+//                 triggered): OKX places it as the entry fills and holds BOTH exits on the spot
+//                 balance, so T1 and the stop fire even while SignalDesk is offline. Without a
+//                 T1: the stop alone (SignalDesk then takes T1: ratchet.watch).
 //                 An OKX stop triggers a MARKET sell (no 5% stop-limit gap as on Coinbase).
 //                 Book: the X-USD instrument paying with USD, else with USDC (OKX's USD books
 //                 settle in either: tradeQuoteCcy), else the X-USDC / X-USDT book the cash covers.
-//   placeBracket  a stand-alone stop (order-algo, ordType 'conditional', slOrdPx -1) for coins
-//                 already held (re-arm after a refused / partial close, the ratchet's new stop)
+//   placeBracket  a stand-alone OCO (order-algo, ordType 'oco': T1 + stop, market on trigger) for
+//                 coins already held (re-arm, ratchet, [✎ Edit stop / T1]); no T1: 'conditional'
+//                 (stop only). An OCO OKX refuses is placed again as the stop alone, so a
+//                 refused T1 never leaves the coins unprotected ({ oco: false } then).
 //   sellMarket    a market SELL ([Close], T1)
 //   listOrders / findOrderByClientId   pending + history (7 days) SPOT orders / one by clOrdId
 const api = require('./okx-api');
@@ -48,10 +50,12 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
   const problem = pairs.minProblem(e, Number(sz)) || (!(c.invalidation > 0) ? 'no stop price' : null);
   if (problem) return { ok: false, error: `OKX order not sent: ${problem}` };
   const clOrdId = api.clientIdOf(c.id);
+  const t1 = c.targets && c.targets[0] && c.targets[0].price > c.invalidation ? c.targets[0].price : null; // OCO take-profit (70E)
   const r = await place('/api/v5/trade/order', { instId: e.instId, tdMode: 'cash', side: 'buy', ordType: maker ? 'post_only' : 'market', sz, ...(maker ? { px: pairs.price(e, limit) } : { tgtCcy: 'base_ccy' }),
-    clOrdId, ...(quote !== e.quote ? { tradeQuoteCcy: quote } : {}), attachAlgoOrds: [{ attachAlgoClOrdId: api.stopIdOf(clOrdId), slTriggerPx: pairs.price(e, c.invalidation), slOrdPx: '-1' }] }, 'order', api.idOf);
+    clOrdId, ...(quote !== e.quote ? { tradeQuoteCcy: quote } : {}), attachAlgoOrds: [{ attachAlgoClOrdId: api.stopIdOf(clOrdId), slTriggerPx: pairs.price(e, c.invalidation), slOrdPx: '-1',
+      ...(t1 > 0 ? { tpTriggerPx: pairs.price(e, t1), tpOrdPx: '-1' } : {}) }] }, 'order', api.idOf);
   if (!r.ok) return r;
-  return { ...r, environment: 'okx-live', entryType: maker ? 'limit' : 'market', limitPrice: maker ? Number(pairs.price(e, limit)) : null, product: e.symbol, quoteCcy: quote, qty: Number(sz) };
+  return { ...r, environment: 'okx-live', entryType: maker ? 'limit' : 'market', limitPrice: maker ? Number(pairs.price(e, limit)) : null, product: e.symbol, quoteCcy: quote, qty: Number(sz), oco: t1 > 0 };
 }
 
 const bookOf = (product) => pairs.get(product) || pairs.books(product)[0] || null;
@@ -71,8 +75,14 @@ async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
   if (!e || !(size > 0) || !(stop > 0)) return { ok: false, error: `OKX stop not sent: invalid ${product} ${size} @ ${stop}` };
   const sz = pairs.size(e, await fit(e, size));
   if (!(Number(sz) > 0)) return { ok: false, error: `OKX stop not sent: ${size} is below ${e.instId}'s size step` };
-  return place('/api/v5/trade/order-algo', { instId: e.instId, tdMode: 'cash', side: 'sell', ordType: 'conditional', sz, slTriggerPx: pairs.price(e, stop), slOrdPx: '-1',
-    algoClOrdId: api.clientIdOf(clientOrderId) }, 'stop', api.algoIdOf);
+  const base = { instId: e.instId, tdMode: 'cash', side: 'sell', sz, slTriggerPx: pairs.price(e, stop), slOrdPx: '-1', algoClOrdId: api.clientIdOf(clientOrderId) };
+  if (takeProfit > stop) {
+    const r = await place('/api/v5/trade/order-algo', { ...base, ordType: 'oco', tpTriggerPx: pairs.price(e, takeProfit), tpOrdPx: '-1' }, 'OCO stop / T1', api.algoIdOf);
+    if (r.ok || r.uncertain) return { ...r, oco: r.ok };
+    console.warn(`[okx] OCO refused for ${e.instId} (${r.error}); placing the stop alone`);
+    return { ...(await place('/api/v5/trade/order-algo', { ...base, ordType: 'conditional', algoClOrdId: api.clientIdOf(`${clientOrderId}:sl`) }, 'stop', api.algoIdOf)), oco: false, ocoError: r.error };
+  }
+  return { ...(await place('/api/v5/trade/order-algo', { ...base, ordType: 'conditional' }, 'stop', api.algoIdOf)), oco: false };
 }
 
 async function sellMarket(product, size, clientOrderId) {

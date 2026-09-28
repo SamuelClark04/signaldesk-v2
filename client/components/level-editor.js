@@ -2,7 +2,8 @@
 // inline form (stop, T1, their % from the live bid and the R:R), with a one-click suggestion from
 // the live bid (standard crypto: stop -4%, Moonshot -5.5%; T1 at 2.5R). A stop only TIGHTENS (moves
 // up, under the bid); T1 must be above the bid. Apply sends EDIT_LEVELS; LIVE positions confirm
-// first (the venue's resting stop is canceled and re-placed: server level-edit.js). Drafts survive
+// first (the venue's resting stop is canceled and re-placed: server level-edit.js; OKX: an OCO
+// holding both the stop and T1, 70E). Drafts survive
 // the card's re-renders; no answer in TIMEOUT_MS or a reconnect frees the form.
 // Exposes window.SignalDesk.levelEditor: { block(p, m, ctx), received(r), reset() }.
 (() => {
@@ -29,8 +30,9 @@
     if (busy.has(p.id) || !SD.app.isOnline()) return;
     const ch = [stop !== p.invalidation ? `the stop from ${price(p.invalidation, p)} UP to ${price(stop, p)} (${pctOf(stop, bid)})` : '', t1 ? `T1 to ${price(t1, p)} (${pctOf(t1, bid)})` : ''].filter(Boolean).join(' and ');
     if (live(p) && !window.confirm(`Move ${ch} on ${p.positionSize} ${p.asset.replace(/-USDC?$/, '')} at ${p.broker}?\n\n`
-      + (stop !== p.invalidation || p.broker === 'Coinbase' ? `SignalDesk cancels the resting ${p.broker === 'Coinbase' ? 'stop/target bracket' : 'stop'} at ${p.broker}, waits for the coins and places the new one. If ${p.broker} refuses it, the original stop is put back. ` : '')
-      + (p.broker !== 'Coinbase' ? `T1 is taken by SignalDesk (a market sell when the bid reaches it).` : ''))) return;
+      + (p.broker === 'OKX' ? 'SignalDesk cancels the OCO at OKX, waits for the coins and places a new OCO holding BOTH the stop and T1 (they fire at OKX even while SignalDesk is off). If OKX refuses the OCO, the stop alone is placed. '
+        : `${stop !== p.invalidation || p.broker === 'Coinbase' ? `SignalDesk cancels the resting ${p.broker === 'Coinbase' ? 'stop/target bracket' : 'stop'} at ${p.broker}, waits for the coins and places the new one. If ${p.broker} refuses it, the original stop is put back. ` : ''}`
+          + (p.broker !== 'Coinbase' ? 'T1 is taken by SignalDesk (a market sell when the bid reaches it).' : '')))) return;
     busy.set(p.id, setTimeout(() => { if (!busy.has(p.id)) return; busy.delete(p.id); toast('Level edit timed out — check the position (and the broker) before retrying', false); SD.app.refresh(); }, TIMEOUT_MS));
     SD.app.send({ type: 'EDIT_LEVELS', id: p.id, ...(stop !== p.invalidation ? { stop } : {}), ...(t1 ? { t1 } : {}) });
     SD.app.refresh();
@@ -61,7 +63,7 @@
     apply.onclick = () => {
       if (!(stop > 0) || !(t1 > 0)) return toast('Enter a stop and a T1', false);
       if (stop < p.invalidation) return toast(`A stop can only be tightened: it is ${price(p.invalidation, p)}`, false);
-      send(p, stop, t1 !== t1Now ? t1 : null, bid);
+      send(p, stop, t1 !== t1Now || (p.broker === 'OKX' && !p.brokerOco) ? t1 : null, bid); // OKX stop-only: Apply re-places it as an OCO (70E)
     };
     const cancel = el('button', { type: 'button', className: 'btn', textContent: 'Cancel' });
     cancel.onclick = () => { drafts.delete(p.id); SD.app.refresh(); };

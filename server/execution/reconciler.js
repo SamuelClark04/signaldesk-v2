@@ -160,6 +160,7 @@ async function reconcileOne(pos, ledger) {
       if (!armed || was === 'UNARMORED') return { id: pos.id, action: 'flagged', detail: armed ? 'stop/target working again' : why };
     }
   }
+  if (pos.broker === 'OKX' && exit && exit.status === 'open' && !exit.tp) await require('./oco-upgrade').maybe(ledger, current, s); // 70E: stop only -> OCO
   return { id: pos.id, action: synced ? 'synced' : 'unchanged' };
 }
 

@@ -102,6 +102,7 @@ async function routeApproved(order, livePrice) {
       fillEstimated: true, // the broker's actual fill price is not fetched yet
       ...(result.entryType ? { brokerEntryType: result.entryType, limitPrice: result.limitPrice } : {}), ...(result.product ? { brokerProduct: result.product } : {}),
       ...(venue.route ? cryptoRouter.fields(venue.route) : {}), // Phase 69A: venue 'okx' | 'kraken' | 'coinbase' + the route taken
+      ...(result.oco !== undefined ? { brokerOco: !!result.oco } : {}), // 70E: T1 rests at OKX (OCO)
     }, resized);
   } catch (err) {
     // The broker holds a real position the ledger could not record. Never silent.

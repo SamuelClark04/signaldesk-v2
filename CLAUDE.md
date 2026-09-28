@@ -91,8 +91,9 @@ Client (`client/`)
   live crypto risk % is of ALL live crypto equity, the cash cap is the routed venue's and
   fee-inclusive (cash / (1 + taker) - $0.02; a cash-bound order may go down to $19.80); staged
   crypto setups re-route each pass (route-refresh.js); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx'
-  0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX and Kraken rest only the
-  stop (a market stop: no STOP_GAP); SignalDesk sells at T1. OKX charges a BUY's fee in the coin:
+  0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX rests an OCO (T1 + stop,
+  market on trigger; p.brokerOco; oco-upgrade.js converts stop-only ones); Kraken only the stop
+  (SignalDesk sells at T1). Market stops: no STOP_GAP. OKX charges a BUY's fee in the coin:
   the position size is what was received. Cash checks use one currency (`spendable`).
 - Crypto stop floors use the routed venue's fees (strategies/venue-floor.js); Trade Ticket crypto
   defaults: 2 x 1h ATR in a 3-5% band (Moonshots 4.5-6.5%), never under that floor

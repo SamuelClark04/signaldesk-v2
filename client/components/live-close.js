@@ -23,6 +23,7 @@
   const timers = new Map(); // position id -> its close's timeout
   const can = (p) => p.execution === 'LIVE' && ['Coinbase', 'Kraken', 'OKX'].includes(p.broker) && p.market === 'crypto'; // + Kraken (69A), OKX (69B)
   const B = (p) => (p && p.broker) || 'Coinbase';
+  const withT1 = (p) => B(p) === 'Coinbase' || !!p.brokerOco; // the venue holds T1 too (Coinbase bracket, OKX OCO: 70E)
   const coin = (p) => p.asset.replace(/-USDC?$/, '');
 
   function toast(text, ok) {
@@ -46,7 +47,7 @@
       : q && Number.isFinite(q.cashout) ? `~${money(q.cashout)} into your ${B(p)} cash: ${SD.netPnl.cashoutMath(p, m)}; net ${signed(q.net, money)} after all fees`
       : live ? `~${money(p.positionSize * live)} at ${price(live, p)} before fees (${signed((live - p.fillPrice) * p.positionSize, money)} vs entry)` : 'at the market price';
     const steps = p.adopted ? `It has no SignalDesk stop/target at ${B(p)}, so this is a plain market sell.`
-      : `1) cancel its stop${B(p) !== 'Coinbase' ? '' : '/target bracket'} at ${B(p)}, 2) wait until ${B(p)} releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.`;
+      : `1) cancel its stop${withT1(p) ? (B(p) === 'OKX' ? ' + T1 OCO' : '/target bracket') : ''} at ${B(p)}, 2) wait until ${B(p)} releases the coins, 3) market-sell them. If the bracket cannot be canceled nothing is sold; if the sell is refused the bracket is put back.`;
     if (!window.confirm(`SELL ${p.positionSize} ${coin(p)} at ${B(p)} now (LIVE, real money)?\n\n${steps}\n\nProceeds ${est}.`)) return;
     busy.add(p.id);
     timers.set(p.id, setTimeout(() => {

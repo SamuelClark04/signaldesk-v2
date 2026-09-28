@@ -35,7 +35,7 @@
     if (busy.has(p.id) || !SD.app.isOnline()) return;
     const s = p.ratchet[k];
     if (live(p) && !window.confirm(`${s.label}: move the ${p.broker} stop on ${p.positionSize} ${p.asset.replace(/-USDC?$/, '')} from ${price(p.invalidation, p)} UP to ${price(s.stop, p)}?\n\n`
-      + `SignalDesk cancels the stop${p.broker !== 'Coinbase' ? '' : '/target bracket'} at ${p.broker}, waits for the coins to be released and places a new one at the new stop${p.broker !== 'Coinbase' ? '' : ' (same target)'}. `
+      + `SignalDesk cancels the stop${p.broker === 'Coinbase' ? '/target bracket' : p.brokerOco ? ' + T1 OCO' : ''} at ${p.broker}, waits for the coins to be released and places a new one at the new stop${p.broker === 'Coinbase' || p.brokerOco ? ' (same target)' : ''}. `
       + `If ${p.broker} refuses the new stop, the original stop is put back.`)) return;
     busy.set(p.id, setTimeout(() => {
       if (!busy.has(p.id)) return;

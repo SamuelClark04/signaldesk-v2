@@ -64,7 +64,8 @@ const T1_RETRY_MS = 60 * 1000;
 const t1Tries = new Map(); // position id -> last attempt (ms)
 function takeT1(ledger, p, bid, now) {
   const t1 = p.targets && p.targets[0] && p.targets[0].price;
-  if (venues.of(p).restsTarget || p.adopted || (p.brokerEntryType === 'limit' && p.fillEstimated) || !(t1 > 0) || !(bid >= t1) || p.marketExitPending || p.brokerManualExitId || ops.isBusy(p.id)) return;
+  // 70E: an OKX OCO (p.brokerOco) sells at T1 itself: never a second, local T1 sell.
+  if (venues.of(p).restsTarget || p.brokerOco || p.adopted || (p.brokerEntryType === 'limit' && p.fillEstimated) || !(t1 > 0) || !(bid >= t1) || p.marketExitPending || p.brokerManualExitId || ops.isBusy(p.id)) return;
   if (now - (t1Tries.get(p.id) || 0) < T1_RETRY_MS) return;
   t1Tries.set(p.id, now);
   console.warn(`[ratchet] ${p.id}: T1 ${t1} reached at ${bid} on ${p.broker}: market sell (take profit)`);

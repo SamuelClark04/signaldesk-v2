@@ -156,7 +156,7 @@
     b.onclick = () => {
       const p = t.preview;
       const at = ((p.route || '').replace(/^Route: (.+?) \(.*$/, '$1')) || 'Coinbase'; // the routed venue (70D)
-      const exits = at === 'Coinbase' ? '(bracket at Coinbase)' : `(stop at ${at}; SignalDesk sells at T1)`;
+      const exits = at === 'Coinbase' ? '(bracket at Coinbase)' : at === 'OKX US' ? '(OCO at OKX US: stop + T1, fire even while SignalDesk is off)' : `(stop at ${at}; SignalDesk sells at T1)`;
       if (live && !window.confirm(`Place a LIVE order at ${at}?\n\nBUY ${p.qty} ${t.asset} (${money(p.notional)}) at market\nStop ${tk.stop} · Take profit ${tk.t1} ${exits}\n\nThis uses real money.`)) return;
       t.busy = true;
       t.result = null;

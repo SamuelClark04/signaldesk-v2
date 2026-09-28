@@ -12,7 +12,7 @@
 //   getAvailable     a coin's available (availBal) and frozen balance
 //   getOrder         status, accFillSz, avgPx, fee (USD), fillTime (real fill time). A BUY's fee
 //                    is charged in the coin: filledQty is what was received (accFillSz - fee)
-//   getOrderStatus   an entry + its protective stop: the re-armed stop (exitId), else the stop
+//   getOrderStatus   an entry + its protective stop / OCO (exit.tp, exit.kind by actualSide), else the stop
 //                    attached to the entry (algoClOrdId = stopIdOf(the entry's clOrdId))
 //   openOrders / closedOrders / cancelOrder (orders and algo stops)
 const crypto = require('crypto');
@@ -145,7 +145,9 @@ async function getAlgo(query) {
 }
 // A stop algo -> coinbase-api's exit shape. Triggered: its market sell's fill.
 async function exitOf(a) {
-  const x = { kind: 'stop_loss', brokerExitId: algoIdOf(a.instId, a.algoId), stopPrice: Number(a.slTriggerPx) || null, status: ALGO[a.state] || String(a.state), filledQty: 0, avgFillPrice: null, fees: 0, filledAt: null };
+  const tp = Number(a.tpTriggerPx) > 0 ? Number(a.tpTriggerPx) : null; // an OCO (70E): T1 rests at OKX too
+  const kind = a.actualSide === 'tp' ? 'take_profit' : a.actualSide === 'sl' || !tp ? 'stop_loss' : null; // the side that fired
+  const x = { kind, brokerExitId: algoIdOf(a.instId, a.algoId), stopPrice: Number(a.slTriggerPx) || null, tp, oco: !!tp, status: ALGO[a.state] || String(a.state), filledQty: 0, avgFillPrice: null, fees: 0, filledAt: null };
   if (x.status !== 'triggered') return { ok: true, exit: x };
   const ordId = a.ordId || (a.ordIdList || [])[0];
   if (!ordId) return { ok: true, exit: { ...x, status: 'open' } }; // triggered; its sell not listed yet
