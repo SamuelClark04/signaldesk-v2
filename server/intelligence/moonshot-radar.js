@@ -17,6 +17,7 @@ const social = require('../connectors/crypto-social');
 const sentiment = require('../connectors/news-sentiment');
 const discovery = require('../connectors/coinbase-discovery');
 const summary = require('./catalyst-summary'); // Phase 62: catalystSummary per row (why it scored + the gate verdict)
+const { pace } = require('../execution/loop-pace'); // Phase 72
 
 const TOP_N = 20;
 const BADGES = [[60, 'TRIGGERED'], [40, 'HEATING UP'], [0, 'WATCHING']];
@@ -61,6 +62,7 @@ async function compute(latestPrices, now = Date.now()) {
   const rows = [];
   const missing = [];
   for (const w of list) {
+    await pace(); // Phase 72: yield between gems
     try {
       const r = await rowFor(w, latestPrices, btc, now);
       if (r) rows.push(r); else missing.push(w.symbol);
@@ -72,6 +74,7 @@ async function compute(latestPrices, now = Date.now()) {
   const btcMoves = { move5: round2(spec.btcMove(btc, '5m') * 100), move15: round2(spec.btcMove(btc, '15m') * 100) };
   const ctx = summary.context();
   for (const r of rows) {
+    await pace();
     try { r.catalystSummary = summary.forRow(r, btcMoves, ctx, now); } catch (err) { console.error(`[moonshot-radar] ${r.symbol} summary failed: ${err.message}`); }
   }
   const cat = discovery.snapshot();

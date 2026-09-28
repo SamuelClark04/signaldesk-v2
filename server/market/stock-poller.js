@@ -19,6 +19,7 @@ const prices = require('./latest-prices');
 const session = require('./market-session');
 const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const hb = require('../connectors/history-bars');
+const { pace } = require('../execution/loop-pace'); // Phase 72: never starve live ticks / charts
 
 const POLL_MS = 60 * 1000;
 const STREAM_QUIET_MS = 3 * 60 * 1000;
@@ -48,13 +49,14 @@ async function poll(now = Date.now()) {
   const priced = [];
   const t = await hb.getLivePrices(symbols);
   if (t.ok) {
-    for (const [s, x] of Object.entries(t.prices)) { prices.setPolled(s, x.price, x.time); priced.push(s); }
+    for (const [s, x] of Object.entries(t.prices)) { await pace(); prices.setPolled(s, x.price, x.time); priced.push(s); }
   } else errors.push(`prices: ${t.error}`);
   const since = Math.min(...symbols.map((s) => (lastBar.has(s) ? lastBar.get(s) - BAR_OVERLAP_MS : session.sessionOpenMs(now))));
   const b = await hb.getMinuteBarsSince(symbols, since);
   let n = 0;
   if (b.ok) {
     for (const [s, bars] of Object.entries(b.bars)) {
+      await pace();
       if (!bars.length) continue;
       alpacaStocks.ingest(bars);
       lastBar.set(s, Math.max(lastBar.get(s) || 0, Date.parse(bars[bars.length - 1].time)));

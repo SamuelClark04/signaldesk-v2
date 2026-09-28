@@ -36,6 +36,12 @@
   function onClose(p, m) {
     if (!transport.isOnline()) return showNotice('Offline: cannot reach the server.');
     if (p.execution === 'LIVE') return showNotice(`${p.asset}: ${REASONS.LIVE_CLOSE_UNSUPPORTED}.`);
+    if (SD.netPnl.working(p)) { // Phase 72: a working Alpaca Paper order is canceled, not closed
+      if (!window.confirm(SD.netPnl.cancelPrompt(p))) return undefined;
+      closing.add(p.id);
+      transport.send({ type: 'CLOSE_POSITION', id: p.id, quoteAt: null });
+      return rerender();
+    }
     if (!m.live) return showNotice(`${p.asset}: ${REASONS.NO_LIVE_PRICE}.`);
     // WYSIWYG (Phase 59): the server's exit quote is what gets booked (its `at` goes with the close).
     const q = p.exitQuote;

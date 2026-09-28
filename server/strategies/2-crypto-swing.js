@@ -36,6 +36,7 @@ const { getStrictness } = require('../risk/strictness');
 const gate = require('../risk/reality-gate');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
+const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 
 const STRATEGY_ID = 'crypto-swing';
 
@@ -143,6 +144,7 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
   tally.start();
   const out = [];
   for (const symbol of CONFIG.symbols) {
+    await pace();
     tally.checked();
     const live = lookup(latestPricesMap, symbol);
     if (!(live > 0)) { tally.skip(symbol, 'No live price'); continue; }

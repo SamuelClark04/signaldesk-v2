@@ -60,8 +60,8 @@
       kv('Strike · expiry', `${od.structure === 'vertical' ? `${od.strike}/${od.shortStrike} ${od.type === 'put' ? 'put' : 'call'} spread` : `${od.strike} ${od.type === 'put' ? 'put' : 'call'}`} · ${exp} (${daysLeft(od.expiration)} days left)`),
       ...(od.exitRule ? [kv('Exits on its value', `stop ${od.exitRule.stopValue} · T1 ${od.exitRule.targetValue} (per share)`)] : []),
       kv('Premium now', premium),
-      kv('Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),
-      kv('Position value', Number.isFinite(m.optionValue) ? `${money(m.optionValue * od.multiplier * p.positionSize)} (cost basis ${money(od.debit * od.multiplier * p.positionSize)})` : '—'),
+      kv(SD.netPnl.working(p) ? 'Limit (net debit, not filled)' : 'Premium paid', `${od.debit} × ${p.positionSize} contract${p.positionSize === 1 ? '' : 's'} = ${money(od.debit * od.multiplier * p.positionSize)}`),
+      kv('Position value', SD.netPnl.working(p) ? 'Not filled yet' : Number.isFinite(m.optionValue) ? `${money(m.optionValue * od.multiplier * p.positionSize)} (cost basis ${money(od.debit * od.multiplier * p.positionSize)})` : '—'),
       kv('R multiple', Number.isFinite(m.r) ? `${m.r >= 0 ? '+' : '−'}${Math.abs(m.r).toFixed(2)}R of ${money(p.dollarRisk)} at risk` : '—'),
       ...(stats.length ? stats.map(([k, v, cls]) => kv(k, v, cls)) : [
         kv('Delta', live(om.delta, od.delta, (x) => x.toFixed(2))),
@@ -105,7 +105,7 @@
   }
   // The hero: true net P&L if closed now, gross + friction under it, then the break-even.
   const heroRow = (p, m) => el('div', { className: 'opp-kv np-row' }, [el('span', { className: 'opp-k', textContent: 'Net P&L if closed now' }), SD.netPnl.hero(p, m)]);
-  const closeText = (p) => (p.exitQuote ? `Manual Exit / Close Now (${signed(p.exitQuote.net, money)} net)` : 'Manual Exit / Close Position');
+  const closeText = (p) => (SD.netPnl.working(p) ? 'Cancel working order at Alpaca Paper' : p.exitQuote ? `Manual Exit / Close Now (${signed(p.exitQuote.net, money)} net)` : 'Manual Exit / Close Position');
 
   // Same rules as the trade panel's button: paper positions close at the live price
   // (server re-checks); LIVE / adopted ones are closed at the broker.
@@ -115,8 +115,8 @@
     const closing = !!(ctx.closing && ctx.closing.has(p.id));
     const b = el('button', { type: 'button', className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,
       textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : closeText(p),
-      disabled: atBroker || closing || !m.live || !ctx.online || !ctx.onClosePosition,
-      title: atBroker ? 'LIVE / adopted position: close it at the broker' : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price' });
+      disabled: atBroker || closing || (!m.live && !SD.netPnl.working(p)) || !ctx.online || !ctx.onClosePosition,
+      title: atBroker ? 'LIVE / adopted position: close it at the broker' : SD.netPnl.working(p) ? SD.netPnl.workingText(p) : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price' });
     b.onclick = () => ctx.onClosePosition(p, m);
     return b;
   }
@@ -153,8 +153,8 @@
       el('header', { className: 'opp-right-head' }, [
         SD.scannerDetail.badge(o.asset, true),
         el('div', { className: 'opp-title' }, [el('strong', { className: 'opp-right-symbol', textContent: SD.oppDetail.displaySymbol(o) }),
-          el('span', { className: 'opp-name', textContent: `Open position${held.length > 1 ? `s (${held.length})` : ''}` })]),
-        el('span', { className: 'opp-pill is-ready', textContent: 'In trade' }),
+          el('span', { className: 'opp-name', textContent: SD.netPnl.working(chosen) ? 'Working order (not filled yet)' : `Open position${held.length > 1 ? `s (${held.length})` : ''}` })]),
+        el('span', { className: `opp-pill${SD.netPnl.working(chosen) ? ' is-working' : ' is-ready'}`, textContent: SD.netPnl.working(chosen) ? 'Working' : 'In trade' }), // Phase 72
       ]),
       ...(held.length > 1 ? [switcher(held, chosen, ctx)] : []),
       positionBlock(chosen, ctx.livePrice, ctx),

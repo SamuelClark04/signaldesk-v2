@@ -81,7 +81,35 @@ async function sendClose(ledger, pos, reason, leg) {
   closing.add(pos.id);
   try { return await sendCloseNow(ledger, pos, reason, leg); } finally { closing.delete(pos.id); }
 }
-async function sendCloseNow(ledger, pos, reason, leg) {
+// Phase 72: an entry Alpaca has not filled (status new, filled_qty 0) is a WORKING order, not a
+// position: [Close] cancels it (never a closing trade: sell_to_close / a market sell of contracts or
+// shares not held would open the opposite side). Voided once Alpaca confirms nothing filled; filled
+// in the race: synced, then closed like any position.
+async function cancelEntry(ledger, pos) {
+  const c = await alpaca.cancelOrder(pos.brokerId);
+  if (!c.ok) throw new Error(`PAPER_CANCEL_FAILED: ${BROKER} did not cancel the working order ${pos.brokerId} (${c.error})`);
+  const until = Date.now() + FILL_WAIT_MS;
+  for (;;) {
+    const s = await alpaca.getOrderStatus(pos.brokerId);
+    if (s.ok && s.filledQty > 0) return { filled: true };
+    if (s.ok && s.terminal) { ledger.voidLivePosition(pos.id, 'ENTRY_CANCELED'); console.log(`[paper] ${pos.id}: working order ${pos.brokerId} canceled at ${BROKER} (nothing filled)`); return { canceled: true }; }
+    if (Date.now() >= until) return { pending: true, brokerExitId: pos.brokerId, cancelPending: true };
+    await sleep(700);
+  }
+}
+
+async function sendCloseNow(ledger, pos0, reason, leg) {
+  let pos = pos0;
+  if (pos.fillEstimated) {
+    const e = await alpaca.getOrderStatus(pos.brokerId);
+    if (!e.ok) throw new Error(`PAPER_CLOSE_FAILED: could not read the entry order (${e.error})`);
+    if (!(e.filledQty > 0)) { const x = await cancelEntry(ledger, pos); if (!x.filled) return x; }
+    const f = e.filledQty > 0 ? e : await alpaca.getOrderStatus(pos.brokerId); // record the real fill first
+    if (pos.market === 'options') await reconcileOwn(pos, ledger);
+    else if (f.ok && f.avgFillPrice > 0) ledger.syncLiveFill(pos.id, { fillPrice: f.avgFillPrice, filledQty: Math.min(f.filledQty, pos.positionSize) });
+    pos = ledger.getActivePositions().find((p) => p.id === pos.id);
+    if (!pos) return { alreadyClosed: true };
+  }
   let r;
   if (pos.market === 'options') r = await spreads.closeSpread(pos, `${pos.id}:close:${Date.now()}`);
   else {
@@ -125,7 +153,10 @@ function handleClose(ws, id, { send, broadcast, ledger, inFlight, publish }) {
   const pos = ledger.getActivePositions().find((p) => p.id === id);
   inFlight.add(id);
   sendClose(ledger, pos, `MANUAL_CLOSE @ ${BROKER}`, 'manual')
-    .then((r) => { if (r.pending || r.alreadyClosed) send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: r.pending ? `${BROKER} is still filling the close (${r.brokerExitId}); it is booked when it fills` : 'its bracket already filled at Alpaca Paper; the reconciler books it' }); })
+    .then((r) => {
+      if (r.cancelPending) send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: `${BROKER} has not confirmed the cancel of the working order ${r.brokerExitId} yet; it is removed once Alpaca reports it canceled` });
+      else if (r.pending || r.alreadyClosed) send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: r.pending ? `${BROKER} is still filling the close (${r.brokerExitId}); it is booked when it fills` : 'its bracket already filled at Alpaca Paper; the reconciler books it' });
+    })
     .catch((err) => send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: err.message }))
     .finally(() => { inFlight.delete(id); broadcast('POSITIONS_UPDATED', ledger.getActivePositions()); broadcast('JOURNAL_UPDATED', ledger.getTradeJournal()); if (publish) publish(); });
 }

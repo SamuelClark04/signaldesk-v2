@@ -40,7 +40,7 @@
     const f = SD.netPnl.figures(p, m);
     const shown = f ? (Number.isFinite(f.net) ? f.net : f.gross) : null;
     const isNet = !!f && Number.isFinite(f.net);
-    const pnl = !Number.isFinite(shown)
+    const pnl = SD.netPnl.working(p) ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: 'Not filled' }) : !Number.isFinite(shown)
       ? el('span', { className: 'opp-pos-pnl hud-muted', textContent: p.market === 'options' && !(p.optionsData && p.optionsData.contract) ? 'Simulated'
         : m.live && p.market !== 'options' ? '—' : 'No price' })
       : el('span', { className: `opp-pos-pnl ${pnlClass(shown)}`, textContent: signed(shown, money) });
@@ -48,13 +48,14 @@
     const btn = el('button', { type: 'button', className: `opp-watch opp-pos${active ? ' is-active' : ''}` }, [
       el('span', { className: 'asset', textContent: SD.oppDetail.displaySymbol(p) }),
       el('span', { className: `opp-heat is-position${p.execution === 'LIVE' ? ' is-live' : ''}`, textContent: `${p.direction === 'short' ? 'Short · ' : ''}${venue}` }),
+      ...(SD.netPnl.working(p) ? [el('span', { className: 'opp-heat is-working', textContent: 'Working', title: SD.netPnl.workingText(p) })] : []), // Phase 72
       ...(p.bracketStatus === 'UNARMORED' || p.marketExitPending ? [el('span', { className: 'opp-heat is-unarmored', textContent: p.marketExitPending ? 'SELL UNCONFIRMED' : 'UNARMORED',
         title: p.marketExitPending ? 'A market sell is being confirmed at the broker' : `No stop/target working at ${p.broker}${p.bracketDetail ? `: ${p.bracketDetail}` : ''}` })] : []), // Phase 67
       ...(SD.positionDetail.lowDelta(p) !== null ? [el('span', { className: 'opp-heat is-trigger', textContent: `Low Δ ${SD.positionDetail.lowDelta(p).toFixed(2)}`,
         title: 'Opened under pre-Phase 58 rules: the spread barely moves with the stock' })] : []),
       pnl,
     ]);
-    btn.title = m.optionBasis
+    btn.title = SD.netPnl.working(p) ? `${venue}: ${SD.netPnl.workingText(p)}` : m.optionBasis
       ? `${venue} ${p.optionsData.label || p.optionsData.contract}: premium ${m.optionValue.toFixed(2)} (${m.optionBasis === 'bid' ? 'live bid' : m.optionBasis === 'mid' ? 'live net mid' : 'modelled'}) vs ${p.optionsData.debit} paid · ${isNet ? 'net P/L after fees' : 'P/L before fees'}`
       : `${venue} ${p.direction} ${p.asset} @ ${price(p.fillPrice, p)} · stop ${price(p.invalidation, p)}${isNet ? ` · net P/L after fees (gross ${signed(f.gross, money)})` : m.live ? ' · P/L before fees' : ''}`;
     btn.setAttribute('aria-pressed', String(active));

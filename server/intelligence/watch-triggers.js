@@ -18,6 +18,7 @@ const { getHistory } = require('../connectors/history-bars');
 const equityDay = require('../strategies/1-equity-day');
 const cryptoSwing = require('../strategies/2-crypto-swing');
 const optionsSystem = require('../strategies/5-options-system');
+const { pace } = require('../execution/loop-pace'); // Phase 72
 
 const HOUR_TTL_MS = 15 * 60 * 1000;
 const FLUSH_PCT = 0.02;
@@ -76,6 +77,7 @@ async function computeTriggers(items, latestPrices, stockBars, now = Date.now())
   const strategy = [...equityDay.proximity(stockBars), ...cryptoSwing.proximity(latestPrices), ...optionsSystem.proximity(latestPrices)];
   const out = {};
   for (const item of items) {
+    await pace(); // Phase 72
     const { symbol } = item;
     const live = lookup(latestPrices, symbol);
     const price = live > 0 ? live : item.lastPrice;

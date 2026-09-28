@@ -75,6 +75,9 @@
 .armor-warn { margin: 6px 0; padding: 8px 10px; border: 1px solid var(--short); border-radius: 6px; background: var(--short-bg); color: var(--text); font-size: 12px; line-height: 1.4; }
 .armor-warn strong { color: var(--short); }
 .opp-heat.is-unarmored { background: var(--short-bg); color: var(--short); font-weight: 600; }
+/* Phase 72: an Alpaca Paper order Alpaca has not filled yet */
+.opp-heat.is-working, .opp-pill.is-working { color: var(--warn); border: 1px dashed var(--warn); background: transparent; }
+.np-working { color: var(--warn); }
 /* Phase 68: profit ratchet ([🛡️ Lock Break-Even] / [🛡️ Lock Profit]) and the same-symbol position switcher */
 .ratchet-btn { width: 100%; margin: 6px 0 2px; border-color: var(--long); color: var(--long); background: rgba(45, 212, 191, 0.1); font-weight: 600; }
 .ratchet-btn:hover:not(:disabled) { background: rgba(45, 212, 191, 0.18); }

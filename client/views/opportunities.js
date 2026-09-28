@@ -75,10 +75,11 @@
   // `at`, so the Journal books exactly that net (re-quoted only if it is over 45 s old).
   function onClosePosition(p, m) {
     if (!transport.isOnline() || closing.has(p.id)) return;
-    const q = p.exitQuote;
+    if (SD.netPnl.working(p) && !window.confirm(SD.netPnl.cancelPrompt(p))) return; // Phase 72: cancel, not a close
+    const q = SD.netPnl.working(p) ? null : p.exitQuote;
     const est = q ? `Books ${q.net >= 0 ? '+' : '−'}$${Math.abs(q.net).toFixed(2)} net (mid P&L ${q.midGross >= 0 ? '+' : '−'}$${Math.abs(q.midGross).toFixed(2)}, exit spread and fees included).`
       : `Mark: ${m.gross === null || m.gross === undefined ? '—' : `${m.gross >= 0 ? '+' : '−'}$${Math.abs(m.gross).toFixed(2)} gross`}.`;
-    if (!window.confirm(`Manual exit: close ${p.direction.toUpperCase()} ${p.asset} (paper) now at the live price ${price(m.price, p)}?\n\n${est}\n\nThis overrides the stop and targets.`)) return;
+    if (!SD.netPnl.working(p) && !window.confirm(`Manual exit: close ${p.direction.toUpperCase()} ${p.asset} (paper) now at the live price ${price(m.price, p)}?\n\n${est}\n\nThis overrides the stop and targets.`)) return;
     closing.add(p.id);
     transport.send({ type: 'CLOSE_POSITION', id: p.id, quoteAt: q ? q.at : null });
     rerender();

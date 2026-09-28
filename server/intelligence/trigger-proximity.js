@@ -12,10 +12,18 @@ const cryptoSwing = require('../strategies/2-crypto-swing');
 const cryptoIntraday = require('../strategies/2-crypto-intraday');
 const optionsSystem = require('../strategies/5-options-system');
 
+const { pace } = require('../execution/loop-pace');
+
 const THRESHOLD_PCT = 0.015; // 1.5%
 
-function computeProximity(stockBars, latestPrices, now = Date.now()) {
-  const all = [...equityDay.proximity(stockBars), ...cryptoSwing.proximity(latestPrices), ...cryptoIntraday.proximity(latestPrices), ...optionsSystem.proximity(latestPrices)]
+// Phase 72: async, yielding between the strategies' reports (low-vCPU hosts).
+async function computeProximity(stockBars, latestPrices, now = Date.now()) {
+  const reports = [];
+  for (const read of [() => equityDay.proximity(stockBars), () => cryptoSwing.proximity(latestPrices), () => cryptoIntraday.proximity(latestPrices), () => optionsSystem.proximity(latestPrices)]) {
+    await pace();
+    reports.push(...read());
+  }
+  const all = reports
     .filter((p) => Number.isFinite(p.distancePct) && p.distancePct >= 0 && p.distancePct <= THRESHOLD_PCT)
     .sort((a, b) => a.distancePct - b.distancePct);
   const nearest = new Map();

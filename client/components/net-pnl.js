@@ -19,6 +19,13 @@
   const pct = (x) => (Number.isFinite(x) ? `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(2)}%` : null);
   const nw = (text, cls = '') => el('span', { className: `no-wrap ${cls}`.trim(), textContent: text });
 
+  // Phase 72: an Alpaca Paper entry Alpaca has not filled yet (status new, filled_qty 0: e.g. a
+  // multi-leg spread resting at its limit debit) is a WORKING ORDER, not a trade: no P&L until the
+  // fill is reported (the server clears fillEstimated only then); [Close] cancels it.
+  const working = (p) => !!p && p.paperBroker === 'alpaca' && p.fillEstimated === true;
+  const workingText = (p) => `Order working at Alpaca Paper · not filled yet${p.market === 'options' && p.optionsData && p.optionsData.debit > 0 ? ` (limit ${money(p.optionsData.debit)} net debit)` : ''}`;
+  const cancelPrompt = (p) => `Cancel the working ${p.asset} order at Alpaca Paper?\n\nAlpaca has not filled it yet, so nothing is sold: the order is canceled and removed once Alpaca confirms. If it fills first, it is closed like any position.`;
+
   const bidOf = (asset) => { const b = SD.app && SD.app.state && SD.app.state.bids; return b && b[asset] > 0 ? b[asset] : null; };
 
   // A stock / crypto position re-marked on the client's current tick (null: not re-markable).
@@ -41,6 +48,7 @@
 
   // { net, netPct, gross, grossPct, friction, entryFee, exitCost, entryActual, atBid?, sell?, cashout? } or null.
   function figures(p, m) {
+    if (working(p)) return null;
     const q = p.exitQuote;
     const now = live(p, m);
     if (now) return now;
@@ -57,6 +65,7 @@
 
   // opts.compact: the chart panel (smaller hero, one friction line).
   function hero(p, m, opts = {}) {
+    if (working(p)) return el('div', { className: 'np np-none np-working', textContent: workingText(p) });
     const f = figures(p, m);
     if (!f) return el('div', { className: 'np np-none', textContent: m && !m.live ? 'No live price' : '—' });
     const main = f.net === null
@@ -107,5 +116,5 @@
 
   // Phase 69A: the crypto venue the router chose ("Route: Kraken Pro (0.25%/0.40%)"), as a note.
   const route = (o, cls = 'np-hurdle') => (o && o.routeReason ? [el('p', { className: `${cls} np-route`, textContent: o.routeReason })] : []);
-  SD.netPnl = { figures, live, hero, breakEven, cashoutMath, hurdle, route, venueName };
+  SD.netPnl = { working, workingText, cancelPrompt, figures, live, hero, breakEven, cashoutMath, hurdle, route, venueName };
 })();

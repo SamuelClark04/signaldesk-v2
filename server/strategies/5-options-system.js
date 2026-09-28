@@ -33,6 +33,7 @@ const builder = require('./options-spread-builder');
 const spreadStats = require('../risk/spread-stats');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
+const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 const session = require('../market/market-session');
 
 const STRATEGY_ID = 'options-system';
@@ -198,6 +199,7 @@ async function generateCandidates(marks, { live = marks, bankroll = null } = {},
   const maxExitSpread = exitSpreadCap(set);
   const afterHours = !session.isEquityMarketOpen(now);
   for (const symbol of CONFIG.symbols) {
+    await pace();
     tally.checked();
     const px = afterHours ? lookup(marks, symbol) : lookup(live, symbol);
     if (!(px > 0)) { tally.skip(symbol, afterHours ? 'No price (live or last close)' : 'Market open: no fresh price yet (next pass)'); continue; }

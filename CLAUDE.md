@@ -28,8 +28,11 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   live holdings, cash, sizing or orders; alpaca-api.dataOnly). They ARE the PAPER broker
   (alpaca-api.paper -> execution/alpaca-paper.js, Settings paperStockBroker 'alpaca'): paper stock
   brackets and options spreads execute in the Alpaca Paper account; its cash / holdings live in the
-  `alpacaPaper` snapshot, Paper side only. Tests / harness point ALPACA_PAPER_BASE_URL at the
+  `alpacaPaper` snapshot, Paper side only. Until Alpaca reports a fill (fillEstimated) such a record is a WORKING
+  order (client netPnl.working: no P&L, "Working"); [Close] cancels it (alpaca-paper.cancelEntry), never a closing trade. Tests / harness point ALPACA_PAPER_BASE_URL at the
   scratchpad `alpacamock.js` (never the user's real paper account).
+- **Event loop (Phase 72)**: a loop over symbols awaits `loop-pace.pace()` once per symbol (an `await` on cached data
+  never yields); no synchronous per-symbol pass over bars without it. The VM is an e2-micro (0.25 vCPU).
 - **Deploy (Compute Engine VM, pm2):** `bash scripts/deploy-vm.sh [pm2-app]` on the VM.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
@@ -48,7 +51,8 @@ Server (`server/`)
   `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm), `bracket-ops.js`
   (shared cancel / verify / re-arm / replaceStop), `ratchet.js` (+1R / +1.5R stop locks,
   STOP_GAP_UNFILLED), `order-recovery.js` (orders Coinbase took that the ledger never recorded),
-  `chart-ticks.js` (1 s TICKS for charted symbols), `paper-pools.js` (Phase 70: separate stocks / options and
+  `chart-ticks.js` (1 s TICKS for charted symbols), `loop-pace.js` (Phase 72: every scan loop awaits pace() per
+  symbol so a low-vCPU VM never starves live ticks / HTTP; `[loop] event loop blocked` warning; SCAN_SLICE_MS / SCAN_PAUSE_MS), `paper-pools.js` (Phase 70: separate stocks / options and
   crypto PAPER bankrolls + cash), `crypto-waterfall.js` (Settings venue status strip), `crypto-router.js` + `crypto-venues.js`
   (Phases 69A / 69B: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
   `reconciler.js` (broker truth, UNARMORED, ended partial exits), `external-close.js` (Phase 71: coins sold in

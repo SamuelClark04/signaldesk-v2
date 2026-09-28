@@ -19,6 +19,7 @@ const gate = require('../risk/reality-gate'); // T1 within 2.5x the daily ATR (P
 const { planTargets } = require('../risk/target-plan');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
+const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 
 const STRATEGY_ID = 'equity-swing';
 const MIN_DAYS_TO_EARNINGS = 3;
@@ -148,6 +149,7 @@ async function generateCandidates(latestPricesMap, { symbols = CONFIG.symbols, n
   tally.start();
   const candidates = [];
   for (const symbol of symbols) {
+    await pace();
     tally.checked();
     const livePrice = lookup(latestPricesMap, symbol);
     if (!(livePrice > 0)) { tally.skip(symbol, 'No live price'); continue; }

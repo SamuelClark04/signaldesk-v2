@@ -13,6 +13,7 @@ const { scoreHeadline } = require('../intelligence/sentiment-nlp');
 const { peekDailyBars } = require('../connectors/daily-bars');
 const gate = require('../risk/reality-gate');
 const { createTally } = require('./scan-tally');
+const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 
 const STRATEGY_ID = 'equity-day';
 const SESSION_OPEN = 9 * 60 + 30; // minutes after midnight, US/Eastern
@@ -41,9 +42,17 @@ const etFormat = new Intl.DateTimeFormat('en-US', {
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 
+// Phase 72: memoized. formatToParts is slow and every pass re-tags the same session bars three times
+// (the strategy, trigger proximity, watch triggers): a real cost on a 0.25 vCPU VM. A bar's time never changes.
+const eastern = new Map();
 function toEastern(iso) {
+  const hit = eastern.get(iso);
+  if (hit) return hit;
   const p = Object.fromEntries(etFormat.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
-  return { date: `${p.year}-${p.month}-${p.day}`, minute: Number(p.hour) * 60 + Number(p.minute) };
+  const v = { date: `${p.year}-${p.month}-${p.day}`, minute: Number(p.hour) * 60 + Number(p.minute) };
+  if (eastern.size >= 50000) eastern.clear(); // ~ a few sessions of 1m bars for the whole universe
+  eastern.set(iso, v);
+  return v;
 }
 
 const lookup = (src, key) => (src instanceof Map ? src.get(key) : src && src[key]);
@@ -148,10 +157,11 @@ function detectOrb(symbol, rawBars, headlines) {
   };
 }
 
-function generateCandidates(marketDataMap, newsContext) {
+async function generateCandidates(marketDataMap, newsContext) {
   const candidates = [];
   tally.start();
   for (const [symbol, bars] of entries(marketDataMap)) {
+    await pace();
     tally.checked();
     const candidate = detectOrb(symbol, bars, lookup(newsContext, symbol));
     if (candidate) { candidates.push(candidate); tally.setup(); }

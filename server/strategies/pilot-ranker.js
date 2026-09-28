@@ -13,6 +13,7 @@
 //                 more than 18% above the 50-day SMA: -25 (extended, no chasing)
 // Rankings are cached RANK_TTL_MS (the bars themselves for hours).
 const { getLongDailyBars } = require('../connectors/daily-bars');
+const { pace } = require('../execution/loop-pace'); // Phase 72
 
 const UNIVERSE = Object.freeze(['SPY', 'QQQ', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'AVGO', 'TSLA', 'AMD', 'COST', 'LLY',
   'BTC-USD', 'ETH-USD', 'SOL-USD', 'LINK-USD', 'AVAX-USD']);
@@ -88,6 +89,7 @@ async function rankUniverse(priceOf, now = Date.now()) {
   }
   const rows = [];
   for (const asset of UNIVERSE) {
+    await pace(); // Phase 72
     const bars = await dailyBars(asset, now);
     const live = priceOf(asset);
     const price = live > 0 ? live : bars.length ? bars[bars.length - 1].close : null;

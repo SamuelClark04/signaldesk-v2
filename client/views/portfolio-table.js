@@ -13,6 +13,7 @@
   const display = (p) => PM().display(p);
   // ---------- Holdings table ----------
   function pnlCell(m, p) {
+    if (m.working) return el('td', { className: 'num pf-muted', textContent: 'Working · not filled', title: SD.netPnl.workingText(p) }); // Phase 72
     if (m.noBasis) return el('td', { className: 'num pf-muted', textContent: 'No cost basis', title: 'Coinbase reports no entry price for this balance (e.g. coins transferred in)' });
     if (!m.live && m.priceSource !== 'sync' && m.priceSource !== 'close' && !(m.gross !== null && m.optionBasis)) return el('td', { className: 'num pf-muted', textContent: 'No live price' });
     if (m.gross === null) {

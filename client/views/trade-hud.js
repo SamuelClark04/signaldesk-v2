@@ -32,6 +32,7 @@
     const head = el('div', { className: 'hud-contract' }, [el('strong', { textContent: contractName(p) }),
       el('span', { className: 'hud-muted', textContent: `${n} contract${n === 1 ? '' : 's'}` })]);
     head.title = od.contract;
+    if (SD.netPnl.working(p)) return [head, SD.netPnl.hero(p, m, { compact: true })]; // Phase 72: "Order working at Alpaca Paper · not filled yet"
     if (m.optionValue === undefined) {
       return [head, el('div', { className: 'hud-pnl hud-muted', textContent: 'No option price (no fresh quote or live underlying)' })];
     }
@@ -41,7 +42,7 @@
       el('span', { className: 'hud-muted', textContent: 'Premium ' }),
       el('strong', { textContent: m.optionValue.toFixed(2) }),
       el('span', { className: `hud-basis is-${m.optionBasis}`, textContent: basis }),
-      el('span', { className: 'hud-muted', textContent: ` paid ${od.debit}` }),
+      el('span', { className: 'hud-muted', textContent: ` ${SD.netPnl.working(p) ? 'limit' : 'paid'} ${od.debit}` }), // Phase 72: not filled yet
     ]);
     premium.title = m.optionBasis === 'mid' ? 'Net mid of both legs\' live quotes (closing fills 0.15 x their combined bid/ask under it)' : m.optionBasis === 'bid' ? `Real bid (${od.feed || 'indicative'} feed) at ${when}` : 'No fresh quote: Black-Scholes value at the live underlying price, anchored to the entry quote';
     return [head, premium, SD.netPnl.hero(p, m, { compact: true, noBreakEven: true })]; // Phase 63: net first
@@ -60,7 +61,7 @@
     const venue = p.adopted ? 'ADOPTED' : p.execution === 'LIVE' ? `LIVE · ${p.broker}` : 'PAPER';
     const t1 = p.targets && p.targets[0] && p.targets[0].price;
     // Phase 63: the true net is the hero (gross + friction under it, then the break-even).
-    const pnl = m.gross !== null && m.gross !== undefined ? SD.netPnl.hero(p, m, { compact: true })
+    const pnl = SD.netPnl.working(p) || (m.gross !== null && m.gross !== undefined) ? SD.netPnl.hero(p, m, { compact: true })
       : el('div', { className: 'hud-pnl hud-muted', textContent: !m.live ? 'No live price' : m.underlyingMove !== undefined
         ? `Underlying ${m.underlyingMove >= 0 ? '+' : '−'}${Math.abs(m.underlyingMove * 100).toFixed(2)}%` : '—' });
 
@@ -70,8 +71,8 @@
       type: 'button',
       className: `btn hud-exit${atBroker ? '' : ' is-armed'}`,
       textContent: atBroker ? `Close at ${p.broker}` : closing ? 'Closing…' : SD.positionDetail.closeText(p), // net if closed now (exit quote)
-      disabled: atBroker || closing || !m.live || !ctx.online,
-      title: atBroker ? (p.adopted ? 'Adopted holding: sell it at the broker (SignalDesk places no orders for it)' : 'LIVE position: its exits are orders at the broker; close it there')
+      disabled: atBroker || closing || (!m.live && !SD.netPnl.working(p)) || !ctx.online,
+      title: SD.netPnl.working(p) ? SD.netPnl.workingText(p) : atBroker ? (p.adopted ? 'Adopted holding: sell it at the broker (SignalDesk places no orders for it)' : 'LIVE position: its exits are orders at the broker; close it there')
         : !m.live ? 'No live price: cannot close at a known price' : !ctx.online ? 'Offline' : 'Close this paper position now at the live price',
     });
     exit.onclick = () => ctx.onClosePosition(p, m);

@@ -39,6 +39,7 @@ const coinbase = require('../connectors/coinbase-socket');
 const discovery = require('../connectors/coinbase-discovery');
 const gem = require('./gem-triggers');
 const { createTally } = require('./scan-tally');
+const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 
 const STRATEGY_ID = 'speculative-crypto';
 const TAG = 'Speculative Moonshot';
@@ -235,6 +236,7 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
   const btc = btcLive > 0 ? { live: btcLive, bars: await bars5('BTC-USD', now) } : null;
   const list = await gemWatchlist(now);
   for (const w of list) {
+    await pace();
     tally.checked();
     const live = lookup(latestPricesMap, w.symbol);
     if (!(live > 0)) { tally.skip(w.symbol, 'No live price yet (joining the Coinbase stream)'); continue; }

@@ -32,6 +32,7 @@ const moonshotRadar = require('../intelligence/moonshot-radar'); // MOONSHOT_RAD
 const discovery = require('../connectors/coinbase-discovery'); // Coinbase gem catalog (System 6)
 const afterHours = require('./after-hours-plans'); // options plans priced on the last close (OPTIONS_PLANS)
 const session = require('../market/market-session'); // is the US session open (Alpaca clock, else ET hours)
+const loop = require('./loop-pace'); // Phase 72: yield between symbols / stages (low-vCPU VM)
 const { spreadGate, volumeGate, depthGate, MAX_CRYPTO_SPREAD, MAX_MOONSHOT_SPREAD } = require('../risk/break-even'); // crypto liquidity gates (65 / 65B / 66)
 
 const PIPELINE_INTERVAL_MS = 60000;
@@ -66,7 +67,7 @@ async function collectCandidates() {
   const all = [];
   for (const [name, generate] of STRATEGIES) {
     try {
-      all.push(...(await generate()));
+      all.push(...(await loop.during(name, generate)));
     } catch (err) {
       console.error(`[pipeline] strategy ${name} failed:`, err.message);
     }
@@ -138,6 +139,7 @@ async function pipelinePass() {
   const cryptoLive = settings.cryptoMode === 'live';
   if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare({ live: cryptoLive }).catch(() => {}); // pair lists (+ live cash) before routing
   for (const candidate of candidates) {
+    await loop.pace();
     candidate.catalysts = macro.catalystsFor(candidate);
     // No live price, or an option with the US session closed (market-session.js: the
     // clock, never a missing price, Phase 59B): never staged. With the market closed an
@@ -197,7 +199,7 @@ async function pipelinePass() {
   } catch (err) { console.error('[pipeline] route refresh failed:', err.message); }
 
   // After staging (Phase 62): each radar row's gate verdict reflects this pass's risk-engine outcome.
-  try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
+  try { await loop.during('moonshot-radar', () => moonshotRadar.publish(broadcast, prices.getLatestPrices())); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
 
   // Exit management (LIVE positions were reconciled at the top of the pass).
   // Live prices: watchlist last prices, and PRICES_UPDATED for the Setups view
@@ -217,18 +219,18 @@ async function pipelinePass() {
   // "Watching": each symbol's nearest live trigger level, from real bars.
   try {
     // Marks: a closed-market stock is measured from its last session close (never "Waiting for a price").
-    watchlist.setTriggers(await computeTriggers(watchlist.getWatchlist(), prices.getMarkPrices(), alpacaStocks.getLatestBars()));
+    watchlist.setTriggers(await loop.during('watch-triggers', () => computeTriggers(watchlist.getWatchlist(), prices.getMarkPrices(), alpacaStocks.getLatestBars())));
   } catch (err) {
     console.error('[pipeline] watch triggers failed:', err.message);
   }
 
-  await exitPass.run(broadcast); // held option quotes, PAPER exits, POSITIONS_UPDATED / JOURNAL_UPDATED (exit-pass.js)
+  await loop.during('exit-pass', () => exitPass.run(broadcast)); // held option quotes, PAPER exits, POSITIONS_UPDATED / JOURNAL_UPDATED (exit-pass.js)
   // Portfolio Pilot defense: SELL under the 200-day SMA, TRIM when far extended (Approvals queue).
-  try { await reviewHoldings(broadcast); } catch (err) { console.error('[pipeline] pilot review failed:', err.message); }
+  try { await loop.during('portfolio-pilot', () => reviewHoldings(broadcast)); } catch (err) { console.error('[pipeline] pilot review failed:', err.message); }
 
   // "Heating up": distance to each strategy's trigger (Market Watch filter).
   try {
-    const next = computeProximity(alpacaStocks.getLatestBars(), prices.getLatestPrices());
+    const next = await loop.during('trigger-proximity', () => computeProximity(alpacaStocks.getLatestBars(), prices.getLatestPrices()));
     if (JSON.stringify(next.items) !== JSON.stringify(proximityState.items)) broadcast('TRIGGER_PROXIMITY', next);
     proximityState = next;
   } catch (err) {
@@ -236,11 +238,7 @@ async function pipelinePass() {
   }
 
   // Dashboard intelligence (attention alerts + market context), after exits settle.
-  try {
-    publishIntelligence(broadcast);
-  } catch (err) {
-    console.error('[pipeline] dashboard intelligence failed:', err.message);
-  }
+  try { await loop.pace(); publishIntelligence(broadcast); } catch (err) { console.error('[pipeline] dashboard intelligence failed:', err.message); }
 
   afterHours.publish(broadcast); // OPTIONS_PLANS (after-hours options plans that cleared the risk engine)
   scanLog.publish(); // SCAN_LOG to every client (server.js)
@@ -254,6 +252,7 @@ function startPipeline(options = {}) {
   if (typeof options.broadcast === "function") broadcast = options.broadcast;
   expirySweeper.start(broadcast);
   exitPass.reconcile(broadcast); // Phase 67: book what the broker did while SignalDesk was down, right at boot (errors are logged inside)
+  loop.watch(); // Phase 72: '[loop] event loop blocked N s (during X)' when the thread stalls
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)

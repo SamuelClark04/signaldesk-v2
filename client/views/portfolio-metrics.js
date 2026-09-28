@@ -45,6 +45,7 @@
   // WYSIWYG (Phase 59): a paper position's net is the server's exit quote (what a
   // close books: exit spread + fees), not the mid less fees.
   function mark(p, livePrice, close) {
+    if (SD.netPnl && SD.netPnl.working(p)) { const cost = costBasis(p); return { live: true, working: true, cost, marketValue: cost, gross: null, net: null, fees: null, pctGross: null }; } // Phase 72: not filled yet
     const m = rawMark(p, livePrice, close);
     const f = m && SD.netPnl ? SD.netPnl.live(p, m) : null; // Phase 65: the net on this tick (same as the hero / rail)
     return f ? { ...m, net: f.net, netSource: 'exit quote' } : m && p.exitQuote && Number.isFinite(p.exitQuote.net) ? { ...m, net: p.exitQuote.net, netSource: 'exit quote' } : m;
