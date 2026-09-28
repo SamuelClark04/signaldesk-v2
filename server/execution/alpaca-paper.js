@@ -11,6 +11,7 @@
 // The reconciler books Alpaca's real fills (entry, bracket exits, closing orders).
 const alpaca = require('../connectors/alpaca-api').paper;
 const spreads = require('../connectors/alpaca-options');
+const spreadEntry = require('./spread-entry'); // Phase 74: marketable limits (paper fills only at the NBBO), re-price, give up
 const prices = require('../market/latest-prices');
 
 const BROKER = 'Alpaca Paper';
@@ -34,11 +35,14 @@ async function open(ledger, order, livePrice, resized = null) {
     console.log(`[paper] ${o.id}: filled in the internal paper ledger (${why})`);
     return ledger.executeOrder(order.id, livePrice, { paperBrokerNote: `simulated: ${why}` }, resized);
   }
-  const r = o.market === 'options' ? await spreads.openSpread(o, o.positionSize) : await alpaca.submitOrder(o, o.positionSize, livePrice);
+  const px = o.market === 'options' ? await spreadEntry.limitFor(o.optionsData) : null;
+  const r = px ? await spreads.openSpread(o, o.positionSize, px.limit) : await alpaca.submitOrder(o, o.positionSize, livePrice);
   if (!r.ok) throw new Error(`PAPER_ORDER_FAILED: ${r.error}`);
-  console.log(`[paper] ${o.id}: sent to ${BROKER} as ${r.brokerId}`);
+  console.log(`[paper] ${o.id}: sent to ${BROKER} as ${r.brokerId}${px ? ` at ${px.limit} net (plan ${o.optionsData.debit}, ${px.basis})` : ''}`);
+  const now = Date.now();
+  const work = px ? { entryWork: { placedAt: now, repricedAt: now, reprices: 0, limit: px.limit, natural: px.natural, cap: px.cap } } : {};
   return ledger.executeOrder(order.id, livePrice, { execution: 'PAPER', paperBroker: 'alpaca', broker: BROKER, brokerId: r.brokerId, brokerEnvironment: 'alpaca-paper',
-    fillEstimated: true, brokerEntryType: r.entryType || 'market', ...(r.limitPrice ? { limitPrice: r.limitPrice } : {}) }, resized);
+    fillEstimated: true, brokerEntryType: r.entryType || 'market', ...(r.limitPrice ? { limitPrice: r.limitPrice } : {}), ...work }, resized);
 }
 
 const patch = (ledger, id, f) => ledger.updatePositions((p) => (p.id === id ? Object.assign(p, f) && true : false));
@@ -69,6 +73,13 @@ async function reconcileOwn(pos, ledger) {
   const s = await alpaca.getOrderStatus(pos.brokerId);
   if (!s.ok) return { id: pos.id, action: 'error', detail: s.error };
   if (s.terminal && !(s.filledQty > 0)) { ledger.voidLivePosition(pos.id, `ENTRY_${String(s.status).toUpperCase()}`); return { id: pos.id, action: 'voided' }; }
+  if (!(s.filledQty > 0) && pos.fillEstimated) { // Phase 74: still working: re-price toward the natural price, or give up
+    const w = await spreadEntry.work(pos, s, { api: alpaca, place: (limit, n) => spreads.openSpread(pos, pos.positionSize, limit, `:r${n}`) });
+    if (!w) return { id: pos.id, action: 'unchanged' };
+    if (w.patch) patch(ledger, pos.id, w.patch);
+    if (w.void) { ledger.voidLivePosition(pos.id, w.void); console.warn(`[paper] ${pos.id}: ${w.detail}`); } else if (w.action === 'repriced') console.log(`[paper] ${pos.id}: ${w.detail}`);
+    return { id: pos.id, action: w.action, detail: w.detail };
+  }
   if (s.filledQty > 0 && pos.fillEstimated) {
     patch(ledger, pos.id, { fillEstimated: false, brokerFillSyncedAt: Date.now(), optionsData: { ...pos.optionsData, debit: Math.abs(s.avgFillPrice) || pos.optionsData.debit, plannedDebit: pos.optionsData.debit } });
     return { id: pos.id, action: 'synced' };

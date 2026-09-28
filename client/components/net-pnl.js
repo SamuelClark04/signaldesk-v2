@@ -23,7 +23,7 @@
   // multi-leg spread resting at its limit debit) is a WORKING ORDER, not a trade: no P&L until the
   // fill is reported (the server clears fillEstimated only then); [Close] cancels it.
   const working = (p) => !!p && p.paperBroker === 'alpaca' && p.fillEstimated === true;
-  const workingText = (p) => `Order working at Alpaca Paper · not filled yet${p.market === 'options' && p.optionsData && p.optionsData.debit > 0 ? ` (limit ${money(p.optionsData.debit)} net debit)` : ''}`;
+  const workingText = (p) => { const lim = p.limitPrice || (p.optionsData && p.optionsData.debit); return `Order working at Alpaca Paper · not filled yet${p.market === 'options' && lim > 0 ? ` (limit ${money(lim)} net debit${p.entryWork && p.entryWork.reprices ? `, re-priced ${p.entryWork.reprices}x` : ''})` : ''}`; };
   const cancelPrompt = (p) => `Cancel the working ${p.asset} order at Alpaca Paper?\n\nAlpaca has not filled it yet, so nothing is sold: the order is canceled and removed once Alpaca confirms. If it fills first, it is closed like any position.`;
 
   const bidOf = (asset) => { const b = SD.app && SD.app.state && SD.app.state.bids; return b && b[asset] > 0 ? b[asset] : null; };

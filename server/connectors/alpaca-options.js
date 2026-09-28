@@ -23,7 +23,8 @@ async function place(body, what) {
   return r.body && r.body.id ? { ok: true, brokerId: r.body.id, status: r.body.status } : { ok: false, error: `Alpaca Paper: ${what} response had no id` };
 }
 
-async function openSpread(order, contracts) {
+// limit: the net debit to send (Phase 74: execution/spread-entry.js prices it; default the plan's); suffix: a re-priced order's id tail.
+async function openSpread(order, contracts, limit = null, suffix = '') {
   const od = order.optionsData;
   const legs = legsOf(od);
   if (!legs.length) return { ok: false, error: 'no option contract on this plan' };
@@ -31,11 +32,11 @@ async function openSpread(order, contracts) {
   if (!(od.debit > 0)) return { ok: false, error: 'no net debit to limit the order at' };
   const open = await marketOpen();
   if (!open.ok) return open;
-  const common = { qty: String(contracts), type: 'limit', limit_price: px2(od.debit), time_in_force: 'day', client_order_id: String(order.id).slice(0, 128) };
+  const common = { qty: String(contracts), type: 'limit', limit_price: px2(limit || od.debit), time_in_force: 'day', client_order_id: `${String(order.id).slice(0, 120)}${suffix}` };
   const body = legs.length === 1 ? { ...common, symbol: legs[0].contract, side: 'buy' }
     : { ...common, order_class: 'mleg', legs: legs.map((l) => ({ symbol: l.contract, ratio_qty: String(l.ratio || 1), side: l.side, position_intent: l.side === 'buy' ? 'buy_to_open' : 'sell_to_open' })) };
   const r = await place(body, 'spread order');
-  return r.ok ? { ...r, environment: 'alpaca-paper', entryType: 'limit', limitPrice: Number(px2(od.debit)), product: od.label || order.asset } : r;
+  return r.ok ? { ...r, environment: 'alpaca-paper', entryType: 'limit', limitPrice: Number(px2(limit || od.debit)), product: od.label || order.asset } : r;
 }
 
 async function closeSpread(pos, clientOrderId) {

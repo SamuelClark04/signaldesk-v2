@@ -34,7 +34,10 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   (alpaca-api.paper -> execution/alpaca-paper.js, Settings paperStockBroker 'alpaca'): paper stock
   brackets and options spreads execute in the Alpaca Paper account; its cash / holdings live in the
   `alpacaPaper` snapshot, Paper side only. Until Alpaca reports a fill (fillEstimated) such a record is a WORKING
-  order (client netPnl.working: no P&L, "Working"); [Close] cancels it (alpaca-paper.cancelEntry), never a closing trade. Tests / harness point ALPACA_PAPER_BASE_URL at the
+  order (client netPnl.working: no P&L, "Working"); [Close] cancels it (alpaca-paper.cancelEntry), never a closing trade.
+  Paper fills only MARKETABLE orders (NBBO): a spread entry is sent at the natural price from fresh quotes, capped at
+  spread-entry.maxDebit (T1 still nets MIN_T1_NET_RR after fees, <= 53% of width, <= +20% risk); re-priced every 3 min
+  while working, canceled + voided (ENTRY_UNFILLED) after 15 min (execution/spread-entry.js, Phase 74). Tests / harness point ALPACA_PAPER_BASE_URL at the
   scratchpad `alpacamock.js` (never the user's real paper account).
 - **Event loop (Phase 72)**: a loop over symbols awaits `loop-pace.pace()` once per symbol (an `await` on cached data
   never yields); no synchronous per-symbol pass over bars without it. The VM is an e2-micro (0.25 vCPU).
