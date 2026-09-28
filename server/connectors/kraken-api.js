@@ -117,7 +117,7 @@ function normOrder(txid, o) {
   const filledQty = Number(o.vol_exec) || 0;
   const status = STATUS[o.status] || String(o.status || 'unknown');
   const pair = pairs.byKraken(d.pair);
-  return { orderId: txid, clientOrderId: o.cl_ord_id || null, refid: o.refid || null, product: pair ? pair.symbol : d.pair, side: String(d.type || '').toUpperCase(), ordertype: d.ordertype,
+  return { orderId: txid, clientOrderId: o.cl_ord_id || null, userref: Number(o.userref) || null, refid: o.refid || null, product: pair ? pair.symbol : d.pair, side: String(d.type || '').toUpperCase(), ordertype: d.ordertype,
     status, filledQty, avgFillPrice: Number(o.price) > 0 ? Number(o.price) : null, fees: Number(o.fee) || 0, terminal: ['filled', 'canceled', 'expired'].includes(status),
     filledAt: filledQty > 0 && o.closetm ? Math.round(Number(o.closetm) * 1000) : null, openedAt: o.opentm ? Math.round(Number(o.opentm) * 1000) : null, stopPrice: Number(d.price) || null };
 }

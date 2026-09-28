@@ -3,7 +3,7 @@
 // got no clear answer (timeout / 429 / 5xx) before the ledger recorded the position, the
 // setup still carries that mark. recover() (at boot and at the top of every pass, and only
 // while such marks exist) lists each routed venue's BUY orders (Phase 69A: Coinbase / Kraken)
-// since the oldest mark and matches the client order id (Coinbase: the setup id; Kraken: its UUID):
+// since the oldest mark and matches the client order id (Coinbase: the setup id; OKX: its hash; Kraken: its userref, 70F):
 //   found, filled or still working  -> recorded as the LIVE position it should have become
 //                                      (the reconciler then syncs the real fill and the bracket)
 //   found but ended with nothing filled, or not listed after GRACE_MS -> the mark is cleared
@@ -33,7 +33,7 @@ async function recoverAt(ledger, venueId, cands, now) {
   }
   const out = [];
   for (const o of cands) {
-    const hit = r.orders.find((x) => x.clientOrderId === orders.clientIdOf(o.id)); // Kraken: the id's UUID
+    const hit = r.orders.find((x) => (orders.isEntryOf ? orders.isEntryOf(x, o.id) : x.clientOrderId === orders.clientIdOf(o.id))); // Kraken: its userref (70F)
     if (hit && (hit.filledQty > 0 || !hit.terminal)) {
       const filled = hit.filledQty > 0 && hit.avgFillPrice > 0;
       const size = filled ? hit.filledQty : o.positionSize;

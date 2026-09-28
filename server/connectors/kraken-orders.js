@@ -11,6 +11,10 @@
 //   placeBracket  a stand-alone stop-loss SELL (re-arm after a refused / partial close, the
 //                 Phase 68 ratchet's new stop); the target argument is SignalDesk's to watch
 //   sellMarket    a market SELL ([Close], T1)
+//   userrefOf     ENTRIES carry `userref` (a positive int32 hashed from the setup id), never a
+//                 cl_ord_id: live Kraken refuses cl_ord_id on an order with a conditional close
+//                 ("EOrder:cl_ord_id is not supported on conditional close", Phase 70F). The entry
+//                 is tracked by its txid; order recovery finds an unrecorded one by its userref.
 //   clientIdOf    Kraken's cl_ord_id is a UUID (or <= 18 chars): SignalDesk ids map to a
 //                 deterministic UUID, so recovery / uncertain-sell lookups find their orders
 //   listOrders / findOrderByClientId   open + closed orders since a time, by product / side
@@ -18,6 +22,9 @@ const crypto = require('crypto');
 const api = require('./kraken-api');
 const pairs = require('./kraken-pairs');
 
+const userrefOf = (id) => (parseInt(crypto.createHash('sha256').update(`userref:${id}`).digest('hex').slice(0, 8), 16) & 0x7fffffff) || 1;
+// Is Kraken order `o` the entry SignalDesk sent for setup `id`? (order-recovery.js)
+const isEntryOf = (o, id) => o.userref === userrefOf(id) || o.clientOrderId === clientIdOf(id);
 const clientIdOf = (id) => {
   const h = crypto.createHash('sha256').update(String(id)).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
@@ -52,7 +59,7 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
   const problem = pairs.minProblem(e, Number(vol), limit || entryPrice) || (!(c.invalidation > 0) ? 'no stop price' : null);
   if (problem) return { ok: false, error: `Kraken order not sent: ${problem}` };
   const r = await addOrder({ pair: e.altname, type: 'buy', ordertype: maker ? 'limit' : 'market', volume: vol, ...(maker ? { price: pairs.price(e, limit), oflags: 'post' } : {}),
-    cl_ord_id: clientIdOf(c.id), 'close[ordertype]': 'stop-loss', 'close[price]': pairs.price(e, c.invalidation) }, 'order');
+    userref: userrefOf(c.id), 'close[ordertype]': 'stop-loss', 'close[price]': pairs.price(e, c.invalidation) }, 'order'); // no cl_ord_id with a conditional close (70F)
   if (!r.ok) return r;
   return { ...r, environment: 'kraken-live', entryType: maker ? 'limit' : 'market', limitPrice: maker ? Number(pairs.price(e, limit)) : null, product: e.symbol, qty: Number(vol) };
 }
@@ -93,4 +100,4 @@ async function findOrderByClientId(product, clientOrderId, sinceMs) {
   return { ok: true, order: r.orders.find((o) => o.clientOrderId === want) || null };
 }
 
-module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf };
+module.exports = { submitOrder, placeBracket, sellMarket, listOrders, findOrderByClientId, clientIdOf, userrefOf, isEntryOf };
