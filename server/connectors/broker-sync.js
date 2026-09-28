@@ -66,6 +66,7 @@ async function fetchCoinbase(now) {
 
 async function fetchAlpaca(now) {
   if (!process.env.ALPACA_API_KEY || !process.env.ALPACA_API_SECRET) return { ...NEVER, status: 'not configured' };
+  if (alpacaApi.dataOnly()) return { ...NEVER, status: 'data only' }; // Phase 70G: paper keys = market data / news, never holdings or cash
   const [pos, acct] = await Promise.all([alpacaApi.getPositions(), alpacaApi.getAccount()]).catch((err) => [{ ok: false, error: err.message }, {}]);
   if (!pos.ok) return { ok: false, status: 'error', syncedAt: now, positions: [], cash: null, error: pos.error };
   const positions = pos.positions.filter((p) => p.qty > 0 && (p.marketValue || 0) >= DUST_USD).map((p) => ({
@@ -105,7 +106,7 @@ async function syncPortfolio(now = Date.now()) {
   if (cb.ok) console.log(`[broker-sync] Coinbase: ${cb.positions.length} holding(s), cash ${cb.cash.toFixed(2)}`);
   else console.warn(`[broker-sync] Coinbase sync failed: ${cb.error}`);
   if (al.ok) console.log(`[broker-sync] Alpaca: ${al.positions.length} holding(s)`);
-  else if (al.status !== 'not configured') console.warn(`[broker-sync] Alpaca sync failed: ${al.error}`);
+  else if (al.status !== 'not configured' && al.status !== 'data only') console.warn(`[broker-sync] Alpaca sync failed: ${al.error}`);
   for (const [key, name] of [['kraken', 'Kraken'], ['okx', 'OKX']]) {
     const v = snapshot[key];
     if (v.ok) console.log(`[broker-sync] ${name}: ${v.positions.length} holding(s), cash ${v.cash.toFixed(2)}${v.fundingCash > 0 ? `, funding ${v.fundingCash.toFixed(2)}` : ''}`);

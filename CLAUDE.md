@@ -24,6 +24,9 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
   against real Coinbase. Unit tests stub `connectors/coinbase-api` and `coinbase-orders`.
 - **Secrets:** never print or commit `.env` values; API keys travel in headers only.
+- **Alpaca paper keys (PK...) are data-only** (market data / news / clock): never holdings, cash,
+  sizing or orders (alpaca-api.dataOnly; ALPACA_ACCOUNT_ROLE=trading overrides).
+- **Deploy (Compute Engine VM, pm2):** `bash scripts/deploy-vm.sh [pm2-app]` on the VM.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

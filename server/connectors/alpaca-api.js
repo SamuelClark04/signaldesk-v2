@@ -6,6 +6,12 @@
 // https://paper-api.alpaca.markets to test against an Alpaca Paper account
 // (paper and live accounts use different key pairs).
 //
+// DATA-ONLY keys (Phase 70G): Alpaca PAPER keys ("PK...", or the paper-api base URL) serve the
+// free IEX stock / options market data, the news feed and the market clock, but are never a
+// broker: account, positions and orders are refused ({ ok: false, dataOnly: true }), so a paper
+// account's $100k cash and positions never reach Sync Broker, Live / External holdings, spendable
+// cash, live stock sizing or a live order. ALPACA_ACCOUNT_ROLE=trading overrides it (use the
+// account as the stock broker); =data forces data-only for any keys; unset / auto: by the keys.
 // Never throws: every outcome is { ok: true, ... } or { ok: false, error }.
 const DEFAULT_BASE_URL = 'https://api.alpaca.markets';
 const TIMEOUT_MS = 8000;
@@ -13,6 +19,14 @@ const TIMEOUT_MS = 8000;
 const num = (x) => (x === undefined || x === null || x === '' ? null : Number(x));
 const baseUrl = () => (process.env.ALPACA_TRADING_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
 const environment = () => (baseUrl().includes('paper-api') ? 'alpaca-paper' : 'alpaca-live');
+function dataOnly() {
+  const role = String(process.env.ALPACA_ACCOUNT_ROLE || 'auto').trim().toLowerCase();
+  if (role === 'trading') return false;
+  if (role === 'data') return true;
+  return String(process.env.ALPACA_API_KEY || '').trim().startsWith('PK') || baseUrl().includes('paper-api');
+}
+const BROKER_PATHS = /^\/v2\/(account|positions|orders)/; // what a data-only key may never touch
+const DATA_ONLY_ERROR = 'Alpaca keys are a PAPER account: used for market data / news only, never as a broker (set ALPACA_ACCOUNT_ROLE=trading to use it as one)';
 // Alpaca rejects sub-penny prices: 2 decimals at/above $1, 4 below.
 const tick = (p) => (p >= 1 ? p.toFixed(2) : p.toFixed(4));
 
@@ -21,6 +35,7 @@ async function alpacaFetch(path, { method = 'GET', body } = {}) {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
   if (!key || !secret) return { ok: false, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  if (BROKER_PATHS.test(path) && dataOnly()) return { ok: false, dataOnly: true, error: DATA_ONLY_ERROR };
 
   let res;
   try {
@@ -132,6 +147,7 @@ async function getPositions() {
 // orders. Refused outside regular hours (a queued market order fills far from
 // the price it was approved at). client_order_id = the Pilot action id.
 async function sellMarket(symbol, qty, clientOrderId) {
+  if (dataOnly()) return { ok: false, dataOnly: true, error: DATA_ONLY_ERROR }; // before the clock check (70G)
   if (!/^[A-Z][A-Z0-9.]{0,9}$/.test(String(symbol)) || !(qty > 0)) return { ok: false, error: `Alpaca sell not sent: invalid ${symbol} ${qty}` };
   const clock = await alpacaFetch('/v2/clock');
   if (!clock.ok) return clock;
@@ -197,4 +213,4 @@ async function getClock() {
   return { ok: true, isOpen: b.is_open === true, nextOpen: Date.parse(b.next_open) || null, nextClose: Date.parse(b.next_close) || null };
 }
 
-module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, DEFAULT_BASE_URL };
+module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, dataOnly, DEFAULT_BASE_URL };
