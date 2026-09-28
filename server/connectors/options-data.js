@@ -41,7 +41,18 @@ function parseOcc(symbol) {
 }
 
 // Expiry: 16:00 New York time on the expiration date (DST-aware).
+// Phase 75: memoized. toLocaleString with a time zone builds an Intl formatter per call, and the spread builder's
+// Black-Scholes bisections called this ~39,000 times per symbol (36.8 s of blocked event loop on the e2-micro VM).
+const expiries = new Map();
 function expiryMs(expiration) {
+  const hit = expiries.get(expiration);
+  if (hit !== undefined) return hit;
+  if (expiries.size > 5000) expiries.clear();
+  const v = expiryAt(expiration);
+  expiries.set(expiration, v);
+  return v;
+}
+function expiryAt(expiration) {
   const noonUtc = Date.parse(`${expiration}T12:00:00Z`);
   const nyNoon = new Date(noonUtc).toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit' });
   const offsetH = 12 - Number(nyNoon); // 4 (EDT) or 5 (EST)

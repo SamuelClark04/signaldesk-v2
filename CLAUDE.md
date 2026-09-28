@@ -48,6 +48,11 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   3 network failures -> fail fast 30 s); broker order / exit calls never do. boot.js sets IPv4-first DNS. A pass runs
   under `loop-pace.watchdog` (PASS_WATCHDOG_MS 45 s): past it the lock is released and the stalled pass is abandoned
   at its next pace() (PASS_ABANDONED). Paper exits run right after broker reconcile, and every 5 s (exit-pass.startFast).
+- **Strategies (Phase 75)**: `execution/strategy-runner.js` runs crypto first (swing, intraday, Moonshots), then stocks /
+  options, each with a STRATEGY_BUDGET_MS (15 s) budget: a late strategy finishes in the background, its setups carried
+  into the next pass. Only watchdog-released passes are abandoned. CPU-heavy per-contract math: no Intl / toLocaleString
+  per call (memoize, like options-data.expiryMs / 1-equity-day toEastern); spread-builder build() is async and paced.
+  The Moonshot leaderboard persists next to the ledger file (moonshot-radar.json), restored for 6 h.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

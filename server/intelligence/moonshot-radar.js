@@ -26,6 +26,20 @@ const badgeOf = (total) => BADGES.find(([min]) => total >= min)[1];
 const round2 = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null);
 
 let radar = { at: null, rows: [], top: TOP_N, scanned: 0, ranked: 0, missing: [], buzz: null, btc: null, swept: 0, gems: 0 };
+// Phase 75: the last leaderboard survives a restart (moonshot-radar.json next to the ledger file, so a test / harness
+// on a scratch ledger never touches the real one): a fresh connection shows it (restored: true) until the first pass.
+const fs = require('fs');
+const path = require('path');
+const RESTORE_MAX_MS = 6 * 3600 * 1000;
+const cacheFile = () => process.env.RADAR_CACHE_PATH || path.join(path.dirname(process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json')), 'moonshot-radar.json');
+try {
+  const saved = JSON.parse(fs.readFileSync(cacheFile(), 'utf8'));
+  if (saved && saved.at && Date.now() - saved.at < RESTORE_MAX_MS && Array.isArray(saved.rows)) radar = { ...saved, restored: true };
+} catch { /* none yet */ }
+function persist() {
+  const f = cacheFile();
+  fs.promises.writeFile(`${f}.tmp`, JSON.stringify(radar)).then(() => fs.promises.rename(`${f}.tmp`, f)).catch((err) => console.warn(`[moonshot-radar] not saved: ${err.message}`));
+}
 const getRadar = () => ({ ...radar, rows: radar.rows.map((r) => ({ ...r })) });
 const rowOf = (symbol) => { const r = radar.rows.find((x) => x.symbol === symbol); return r ? { ...r } : null; };
 
@@ -81,6 +95,7 @@ async function compute(latestPrices, now = Date.now()) {
   radar = { at: now, rows, top: TOP_N, scanned: list.length, ranked: rows.length, missing, swept: cat.swept, gems: cat.gems, catalogAt: cat.at, catalogError: cat.error,
     excluded: cat.excluded, buzz: social.snapshot(discovery.gems().map((c) => c.symbol), now),
     btc: btcMoves };
+  persist();
   return getRadar();
 }
 

@@ -73,7 +73,10 @@ const PASS_WATCHDOG_MS = num(process.env.PASS_WATCHDOG_MS, 45000);
 const passCtx = new AsyncLocalStorage();
 let currentPass = 0;
 const inPass = (fn) => { const gen = ++currentPass; return passCtx.run({ gen }, fn); };
-const abandoned = () => { const s = passCtx.getStore(); return !!s && s.gen !== currentPass; };
+// Only a pass the watchdog RELEASED is abandoned (Phase 75): a strategy still finishing a finished pass's work in the
+// background (strategy-runner's budget) keeps running when the next pass starts.
+const dead = new Set();
+const abandoned = () => { const s = passCtx.getStore(); return !!s && dead.has(s.gen); };
 function checkAlive() { if (abandoned()) throw Object.assign(new Error('PASS_ABANDONED: the watchdog released this pass'), { code: 'PASS_ABANDONED' }); }
 async function watchdog(pass, ms = PASS_WATCHDOG_MS) {
   let timer;
@@ -82,7 +85,8 @@ async function watchdog(pass, ms = PASS_WATCHDOG_MS) {
   try {
     const r = await Promise.race([pass, late]);
     if (r !== TIMED_OUT) return r;
-    currentPass += 1; // the stalled pass is stale from here on
+    dead.add(currentPass); // the stalled pass stops at its next pace()
+    if (dead.size > 100) dead.delete(dead.values().next().value);
     console.warn(`[pipeline] pass exceeded ${ms >= 10000 ? Math.round(ms / 1000) : (ms / 1000).toFixed(1)} s (during ${[...seen].join(', ') || current}); lock released, the stalled pass is abandoned at its next step`);
     return { timedOut: true };
   } finally { clearTimeout(timer); }

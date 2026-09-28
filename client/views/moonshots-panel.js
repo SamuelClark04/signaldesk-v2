@@ -58,7 +58,7 @@
     return el('div', { className: 'moon-head' }, [
       el('div', {}, [el('h2', { className: 'scan-title', textContent: 'Moonshot Radar' }),
         el('p', { className: 'scan-subtitle', textContent: r && r.at
-          ? `Top ${shown} of ${r.swept || r.ranked} Coinbase spot coins scanned · ${r.ranked} watchlist gems scored on 5m candles · Mega-caps excluded · updated ${age(r.at)} ago${btc ? ` · ${btc}` : ''}`
+          ? `Top ${shown} of ${r.swept || r.ranked} Coinbase spot coins scanned · ${r.ranked} watchlist gems scored on 5m candles · Mega-caps excluded · updated ${age(r.at)} ago${r.restored ? ' (saved before the last restart; refreshing)' : ''}${btc ? ` · ${btc}` : ''}`
           : 'Waiting for the first scan pass (it runs a few seconds after the server starts).' })]),
       el('div', { className: 'moon-legend' }, [...Object.entries(BADGE).map(([b, cls]) => el('span', { className: `moon-badge ${cls}`, textContent: b })),
         el('span', { className: 'slog-muted', textContent: '≥ 60 · 40–59 · < 40' }), run]),

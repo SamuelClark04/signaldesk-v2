@@ -104,7 +104,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const atm = main.contracts.filter((c) => c.iv > 0).sort((a, b) => Math.abs(a.strike - px) - Math.abs(b.strike - px) || Math.abs(a.dte - w.prefer) - Math.abs(b.dte - w.prefer))[0];
   const single = !!(atm && hv && atm.iv <= hv && bankroll >= builder.CONFIG.single.minBankroll);
   const ivText = atm && hv ? `${(atm.iv * 100).toFixed(0)}% ${atm.iv <= hv ? '<=' : '>'} 20-day HV ${(hv * 100).toFixed(0)}%` : 'vs HV unavailable';
-  const b = builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings,
+  const b = await builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings,
     maxExitSpread: env.maxExitSpread });
   if (!b.ok) return { id, reason: b.wide ? b.error : `OPTIONS_NO_STRUCTURE: ${b.error}` };
   const p = b.plan;

@@ -46,10 +46,21 @@ function rawModel(od, S, at) {
 }
 
 // Mid value per share at underlying S and time `at`, anchored to the real quote.
+// Phase 75: the anchor (the model at refSpot / refAt) is the same for every call on one position: cached per
+// object, keyed by what it depends on (a bisection calls this ~60 times per level).
+const anchors = new WeakMap();
+function anchorOf(od) {
+  const key = `${od.refSpot}|${od.refAt}|${od.iv}|${od.expiration}|${(od.legs || []).map((l) => `${l.side}${l.strike}${l.iv}${l.ratio || 1}`).join(',')}`;
+  const hit = anchors.get(od);
+  if (hit && hit.key === key) return hit.value;
+  const value = rawModel(od, od.refSpot, od.refAt);
+  anchors.set(od, { key, value });
+  return value;
+}
 function modelMid(od, S, at = Date.now()) {
   const raw = rawModel(od, S, at);
   if (!(od.refMid > 0 && od.refSpot > 0 && od.refAt > 0)) return raw;
-  return Math.max(0, od.refMid + raw - rawModel(od, od.refSpot, od.refAt));
+  return Math.max(0, od.refMid + raw - anchorOf(od));
 }
 
 // What selling the position would fetch per share at underlying S: the mid

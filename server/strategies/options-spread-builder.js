@@ -45,6 +45,7 @@ const { exitValue } = require('../risk/option-pricing');
 const { expectedMove } = require('../risk/expected-move');
 const { MIN_T1_NET_RR } = require('../risk/reality-gate');
 const { midHoldAt } = require('../risk/spread-stats');
+const { pace } = require('../execution/loop-pace'); // Phase 75: build() yields between strikes
 
 const CONFIG = {
   windows: { intraday: { minDte: 10, maxDte: 24, prefer: 14 }, swing: { minDte: 21, maxDte: 45, prefer: 30 }, weekly: { minDte: 10, maxDte: 18, prefer: 14 }, short: { minDte: 6, maxDte: 12, prefer: 9 } },
@@ -54,6 +55,7 @@ const CONFIG = {
   level: { minAtr: 0.5, maxAtr: 2.5, minEm: 0.8 }, maxExpirations: 4, narrowSteps: 3, single: { minBankroll: 10000 }, smallCap: { debitPct: 0.12, riskPct: 0.055 },
 };
 const MULT = 100;
+const LEVEL_STEPS = 32;
 const cents = (x) => Math.round(x * 100) / 100;
 const up = (x) => Math.ceil(x * 100 - 1e-9) / 100;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -83,7 +85,7 @@ function levelFor(od, value, spot, now) {
   const vHi = exitValue(od, hi, now);
   const inc = vHi > vLo;
   if (value < Math.min(vLo, vHi) || value > Math.max(vLo, vHi)) return null;
-  for (let i = 0; i < 60; i += 1) {
+  for (let i = 0; i < LEVEL_STEPS; i += 1) { // 32 halvings of 0.8 x spot: far under a cent (60 was ~1e-16 of the price)
     const mid = (lo + hi) / 2;
     if ((exitValue(od, mid, now) < value) === inc) lo = mid; else hi = mid;
   }
@@ -159,7 +161,7 @@ function expirationsFor(contracts, horizon) {
 // The best plan for a signal. args: { chain (main type), calls, puts (both, for the
 // Expected Move), type, horizon, spot, ctx (daily: atr, highs / lows), structuralStop,
 // bankroll, single, now, afterHours }. { ok, plan, em, level, anchored, tried } or { ok:false, error }.
-function build(a) {
+async function build(a) { // Phase 75: async, yields (pace) per expiration and per long strike
   const sign = a.type === 'call' ? 1 : -1;
   const level = levelTarget(a.ctx, a.spot, sign);
   const dist = level ? Math.abs(level - a.spot) : null;
@@ -180,6 +182,7 @@ function build(a) {
   let first = null; // the best expiration's result; a.alternatives: keep collecting (up to 3 plans) across the next expirations
   const found = [];
   for (const exp of exps) {
+    await pace();
     const em = expectedMove(a.calls, a.puts, a.spot, exp);
     const list = a.chain.filter((c) => c.expiration === exp && c.type === a.type);
     const ok = list.filter((c) => legWhy(c, a.now, a.afterHours) === null);
@@ -187,6 +190,7 @@ function build(a) {
     if (!longs.length) { whys.push(`${exp}: no tradeable ${CONFIG.longDelta[0]}-${CONFIG.longDelta[1]} delta ${a.type}`); continue; }
     const plans = [];
     for (const long of longs) {
+      await pace();
       const beyond = ok.filter((c) => sign * (c.strike - long.strike) > 0);
       const atLevel = anchorable ? beyond.filter((c) => sign * (level - c.strike) >= 0 && Math.abs(c.delta) >= CONFIG.levelDelta[0] && Math.abs(c.delta) <= CONFIG.levelDelta[1]) : [];
       const anchor = atLevel.length ? atLevel.reduce((b, c) => (Math.abs(level - c.strike) < Math.abs(level - b.strike) ? c : b)) : null;

@@ -4,12 +4,8 @@
 // server.js injects broadcast() so this module never touches sockets directly.
 const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const alpacaNews = require('../connectors/alpaca-news-socket');
-const equityDay = require('../strategies/1-equity-day');
-const cryptoSwing = require('../strategies/2-crypto-swing');
-const cryptoIntraday = require('../strategies/2-crypto-intraday'); // 15m / 1h day trades
-const equitySwing = require('../strategies/3-equity-swing');
-const optionsSystem = require('../strategies/5-options-system');
-const speculativeCrypto = require('../strategies/6-speculative-crypto'); // System 6, additive
+const cryptoIntraday = require('../strategies/2-crypto-intraday'); // 15m / 1h day trades (startup backfill)
+const runner = require('./strategy-runner'); // Phase 75: crypto first, a time budget per strategy (a slow options scan never blocks Moonshots)
 const { processCandidate } = require('../risk/risk-engine');
 const strictness = require('../risk/strictness');
 const { sizingBankroll } = require('../risk/venue-capital');
@@ -49,31 +45,6 @@ const getProximity = () => proximityState;
 function recordRejection(id, reason, candidate) {
   recordStat(id, reason, candidate);
   scanLog.rejected(id, reason, candidate || {});
-}
-
-// Each strategy runs isolated: one failing never blocks the others' candidates.
-const STRATEGIES = [
-  ['equity-day', () => equityDay.generateCandidates(alpacaStocks.getLatestBars(), alpacaNews.getNewsContext())],
-  ['crypto-swing', () => cryptoSwing.generateCandidates(prices.getLatestPrices())],
-  ['crypto-intraday', () => cryptoIntraday.generateCandidates(prices.getLatestPrices())],
-  // Marks: live, else the last session close (after hours / weekends the scan still runs; see the staging loop).
-  ['equity-swing', () => equitySwing.generateCandidates(prices.getMarkPrices())],
-  // Options plan on marks too (after hours: last close + the chain's last quotes); they stage only on live prices.
-  ['options-system', () => optionsSystem.generateCandidates(prices.getMarkPrices(), { live: prices.getLatestPrices() })],
-  ['speculative-crypto', () => speculativeCrypto.generateCandidates(prices.getLatestPrices())],
-];
-
-async function collectCandidates() {
-  const all = [];
-  for (const [name, generate] of STRATEGIES) {
-    try {
-      all.push(...(await loop.during(name, generate)));
-    } catch (err) {
-      if (err.code === 'PASS_ABANDONED') throw err; // the watchdog released this pass (Phase 73)
-      console.error(`[pipeline] strategy ${name} failed:`, err.message);
-    }
-  }
-  return all;
 }
 
 // One pass: strategies propose, the risk engine decides, the ledger holds state; one candidate failing never
@@ -122,13 +93,11 @@ async function pipelinePass() {
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
   // Open / staged trades on Coinbase gems keep streaming (exits and approvals need live prices).
   discovery.stream([...ledger.getActivePositions(), ...ledger.getPendingOrders()].filter((p) => p.market === 'crypto').map((p) => p.asset));
-  const candidates = await collectCandidates();
+  const candidates = await runner.collect();
   // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of [...equitySwing.takeBlocks(), ...cryptoSwing.takeBlocks(), ...cryptoIntraday.takeBlocks(), ...optionsSystem.takeBlocks(), ...speculativeCrypto.takeBlocks()]) recordRejection(b.id, b.reason, b.candidate);
+  for (const b of runner.takeBlocks()) recordRejection(b.id, b.reason, b.candidate);
   // Scanner log: what each strategy concluded per symbol on this pass.
-  for (const [id, mod] of [['equity-day', equityDay], ['crypto-swing', cryptoSwing], ['crypto-intraday', cryptoIntraday], ['equity-swing', equitySwing], ['options-system', optionsSystem], ['speculative-crypto', speculativeCrypto]]) {
-    scanLog.scanned(id, mod.takeScan());
-  }
+  for (const [id, scan] of runner.scans()) scanLog.scanned(id, scan);
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
   // capital of the venue it would execute on: the paper bankroll, or the LIVE

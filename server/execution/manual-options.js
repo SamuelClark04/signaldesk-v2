@@ -86,10 +86,10 @@ async function autoFind(symbol, type, spot, { bankroll, settings, afterHours = f
   const cap = exitSpreadCap(settings);
   const run = (maxExitSpread) => builder.build({ chain: main.contracts, calls: type === 'call' ? main.contracts : other.contracts || [], puts: type === 'put' ? main.contracts : other.contracts || [],
     type, horizon: 'swing', spot, ctx, structuralStop: spot - (type === 'call' ? 1 : -1) * STOP_ATR * ctx.atr, bankroll, single: false, now, afterHours, earnings: e.ok ? e.date : null, maxExitSpread, alternatives: true });
-  let b = run(cap);
+  let b = await run(cap);
   // Only the cap stood in the way: show them anyway, flagged (System 5 would skip them; a manual ticket may take one).
   const capOnly = !b.ok && b.wide;
-  if (capOnly) b = run(null);
+  if (capOnly) b = await run(null);
   if (!b.ok) throw new Error(`OPTIONS_NO_STRUCTURE: ${b.error}`);
   return { ok: true, spot, capNote: capOnly ? `Every valid ${type === 'call' ? 'bull call' : 'bear put'} spread is over your $${cap.toFixed(2)} exit-spread cap right now: shown flagged.` : null,
     plans: [b.plan, ...(b.alternatives || [])].map((p) => summarize(symbol, p, spot, cap, now)) };
