@@ -66,7 +66,7 @@ function monitorPositions(latestPricesMap) {
   const priceOf = (asset) => (latestPricesMap instanceof Map ? latestPricesMap.get(asset) : latestPricesMap && latestPricesMap[asset]);
   const closed = [];
   for (const pos of [...L.activePositions]) { // snapshot: closing removes from the list
-    if (pos.execution === 'LIVE') continue;
+    if (pos.execution === 'LIVE' || pos.paperBroker === 'alpaca') continue; // Alpaca Paper exits them (71)
     const price = priceOf(pos.asset);
     if (!(price > 0)) continue;
 
@@ -98,4 +98,4 @@ function monitorPositions(latestPricesMap) {
   return closed;
 }
 
-module.exports = { bind, monitorPositions, nextTarget };
+module.exports = { bind, monitorPositions, nextTarget, premiumExit };

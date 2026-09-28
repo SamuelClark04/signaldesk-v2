@@ -20,7 +20,7 @@
   // Phase 68: several open records on one symbol (ETH/USD Adopted + Live): the one picked (id),
   // else the bracketed LIVE trade, else any LIVE record, else the first.
   const pick = (state, asset, id) => { const h = heldFor(state, asset); return h.find((p) => p.id === id) || h.find((p) => p.execution === 'LIVE' && !p.adopted) || h.find((p) => p.execution === 'LIVE') || h[0] || null; };
-  const shortVenue = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? (p.broker && p.broker !== 'Coinbase' ? `Live · ${p.broker}` : 'Live') : 'Paper'); // 69A: Live · Kraken
+  const shortVenue = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? (p.broker && p.broker !== 'Coinbase' ? `Live · ${p.broker}` : 'Live') : p.paperBroker === 'alpaca' ? 'Paper · Alpaca' : 'Paper'); // 69A / 71
   function switcher(held, chosen, ctx) { // [Position 1: Live] | [Position 2: Adopted]
     return el('div', { className: 'pos-switch', role: 'group', ariaLabel: 'Open positions on this symbol' }, held.map((p, i) => {
       const b = el('button', { type: 'button', className: `pos-switch-btn${p.id === chosen.id ? ' is-active' : ''}`, textContent: `Position ${i + 1}: ${shortVenue(p)}`, title: p.id });
@@ -31,7 +31,7 @@
   }
   // Phase 58B: a spread opened before the net-delta floor (migrated, entry net delta < 0.12).
   const lowDelta = (p) => { const od = p.optionsData || {}; const d = Math.abs(od.netDelta ?? (od.stats ? od.stats.netDelta : NaN)); return od.migratedFrom && Math.round(d * 100) < 12 ? d : null; }; // as displayed (2 dp)
-  const venueOf = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? `Live · ${p.broker}` : 'Paper');
+  const venueOf = (p) => (p.adopted ? 'Adopted' : p.execution === 'LIVE' ? `Live · ${p.broker}` : p.paperBroker === 'alpaca' ? 'Paper · Alpaca Paper' : 'Paper');
 
   function daysLeft(expiration) {
     const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) + 'T00:00:00Z');

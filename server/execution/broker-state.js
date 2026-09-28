@@ -35,19 +35,30 @@ async function venueState(venue, mode, force, settings = {}) {
   return { ...base, ...value };
 }
 
+// Phase 71: the Alpaca PAPER account (the paper broker for stocks / options): its cash and equity,
+// shown as paper money beside the paper venues (never a live venue, never in live totals).
+async function paperAccountState(settings, force) {
+  const paper = alpacaApi.paper;
+  if (settings.stockMode === 'live' || settings.paperStockBroker === 'internal' || !paper.configured()) return null;
+  const hit = cache.get('alpacaPaper');
+  const value = !force && hit && Date.now() - hit.at < CACHE_MS ? hit.value : { ...(await paper.getAccount().catch((err) => ({ ok: false, error: err.message }))), fetchedAt: Date.now() };
+  cache.set('alpacaPaper', { at: value.fetchedAt, value });
+  return { label: 'Alpaca Paper', markets: 'paper stocks / options (the paper broker)', mode: 'paper', paperAccount: true, ...value };
+}
+
 // Snapshot for the UI. Sizing still uses the paper bankroll for every venue:
 // live balances are displayed, not yet used by the risk engine.
 async function getBrokerState({ force = false } = {}) {
   const settings = ledger.getSettings();
   const list = VENUES.filter((v) => !v.when || v.when());
-  const [venues, cryptoWaterfall] = await Promise.all([Promise.all(list.map((v) => venueState(v, settings[v.modeKey], force, settings))),
-    require('./crypto-waterfall').status().catch((err) => ({ error: err.message, rows: [] }))]);
+  const [venues, cryptoWaterfall, alpacaPaper] = await Promise.all([Promise.all(list.map((v) => venueState(v, settings[v.modeKey], force, settings))),
+    require('./crypto-waterfall').status().catch((err) => ({ error: err.message, rows: [] })), paperAccountState(settings, force)]);
   return {
     bankroll: settings.bankroll,
     cryptoBankroll: settings.cryptoBankroll, // Phase 70: the two paper pools, with their cash
     paper: require('./paper-pools').summary(),
     sizingBasis: 'paper-bankroll',
-    venues: Object.fromEntries(list.map((v, i) => [v.name, venues[i]])),
+    venues: { ...Object.fromEntries(list.map((v, i) => [v.name, venues[i]])), ...(alpacaPaper ? { alpacaPaper } : {}) },
     cryptoWaterfall, // Phase 70: Settings' waterfall strip (OKX US -> Kraken Pro -> Coinbase)
   };
 }

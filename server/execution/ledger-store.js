@@ -21,6 +21,7 @@ const SETTINGS_RULES = {
   cryptoBankroll: { type: 'number', default: 50000, min: 100, max: 100000000 }, // PAPER crypto bankroll (Phase 70)
   stockMode: { type: 'choice', default: 'paper', values: MODES }, // Alpaca: stocks + options
   cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // crypto: OKX US -> Kraken Pro -> Coinbase
+  paperStockBroker: { type: 'choice', default: 'alpaca', values: ['alpaca', 'internal'] }, // Phase 71: paper stocks / options at Alpaca Paper, or simulated
   riskProfile: { type: 'choice', default: DEFAULT_PROFILE, values: Object.keys(RISK_PROFILES) }, // % risked per new trade
   strictness: { type: 'choice', default: DEFAULT_STRICTNESS, values: Object.keys(STRICTNESS_LEVELS) }, // setup gates (risk/strictness.js)
   maxCapitalPct: { type: 'choice', default: DEFAULT_MAX_CAPITAL_PCT, values: [...CAPITAL_CHOICES] }, // Max Capital Per Trade (risk-engine.js)

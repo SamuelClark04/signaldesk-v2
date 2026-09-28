@@ -24,7 +24,7 @@ const be = require('../risk/break-even'); // Phase 63: expected vs actual exit (
 const coinbaseApi = require('../connectors/coinbase-api');
 const { entryShare } = require('./ledger-live');
 
-const APIS = { Alpaca: alpacaApi, Coinbase: coinbaseApi, Kraken: require('../connectors/kraken-api'), OKX: require('../connectors/okx-api') }; // + Kraken Pro (69A), OKX US (69B)
+const APIS = { Alpaca: alpacaApi, 'Alpaca Paper': alpacaApi.paper, Coinbase: coinbaseApi, Kraken: require('../connectors/kraken-api'), OKX: require('../connectors/okx-api') }; // + Kraken (69A), OKX (69B), Alpaca Paper (71)
 const QTY_EPSILON = 1e-9;
 const ENTRY_TTL_MS = 30 * 60 * 1000; // same window as the order guard
 const DUST_USD = 1; // below any order minimum: an ended exit leaving less than this unsold closes the record
@@ -80,6 +80,7 @@ function bookPartial(pos, current, exit, sold, booked, entryFee, ledger) {
 }
 
 async function reconcileOne(pos, ledger) {
+  if (pos.paperBroker === 'alpaca' && (pos.market === 'options' || pos.paperExitOrderId)) return require('./alpaca-paper').reconcileOwn(pos, ledger); // 71
   const api = APIS[pos.broker];
   if (!api) return { id: pos.id, action: 'error', detail: `unknown broker "${pos.broker}"` };
 
@@ -174,7 +175,8 @@ async function reconcileLivePositions(activePositions, ledger) {
   // Adopted holdings have no broker order to poll (they are watched, not traded) unless a
   // manual sell of one is working; a position mid-[Close at Coinbase] is left to that close.
   const closing = require('./coinbase-exit').isClosing;
-  const live = (activePositions || []).filter((p) => p.execution === 'LIVE' && (!p.adopted || p.brokerManualExitId || p.marketExitPending) && !closing(p.id));
+  const paperClosing = require('./alpaca-paper').isClosing;
+  const live = (activePositions || []).filter((p) => (p.execution === 'LIVE' || p.paperBroker === 'alpaca') && (!p.adopted || p.brokerManualExitId || p.marketExitPending) && !closing(p.id) && !paperClosing(p.id));
   return Promise.all(live.map((pos) => reconcileOne(pos, ledger).catch((err) => {
     console.error(`[reconcile] ${pos.id} failed: ${err.message}`);
     return { id: pos.id, action: 'error', detail: err.message };

@@ -59,7 +59,9 @@
       const v = h[k];
       return v && v.ok ? ` · ${name} ${v.positions.length} · ${money(v.cash)} cash` : v && v.status === 'error' ? ` · ${name} sync failed` : '';
     }).join('');
-    const extra = `${krText}${al && al.ok ? ` · Alpaca ${al.positions.length}` : al && al.status === 'error' ? ' · Alpaca sync failed' : al && al.status === 'data only' ? ' · Alpaca: market data only (paper keys)' : ''}${manual ? ` · ${manual} manual` : ''}`;
+    const ap = h.alpacaPaper; // Phase 71: the paper broker's account (paper money)
+    const apText = ap && ap.ok ? ` · Alpaca Paper ${ap.positions.length} · ${money(ap.cash)} paper cash` : '';
+    const extra = `${krText}${apText}${al && al.ok ? ` · Alpaca ${al.positions.length}` : al && al.status === 'error' ? ' · Alpaca sync failed' : al && al.status === 'data only' ? ' · Alpaca: market data only (paper keys)' : ''}${manual ? ` · ${manual} manual` : ''}`;
     if (!cb || cb.status === 'never') return `Coinbase not synced yet · paper prices are live${extra}`;
     if (!cb.ok) return `Coinbase sync failed (${clock(cb.syncedAt)}): ${cb.error}${extra}`;
     return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash${extra}`;

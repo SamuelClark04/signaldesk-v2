@@ -37,6 +37,7 @@
     pending = on;
     $('settings-save').disabled = on;
     for (const m of MODE_SELECTS) $(m.id).disabled = on;
+    $('settings-paper-broker').disabled = on;
     $('settings-risk').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     $('settings-strictness').querySelectorAll('button').forEach((b) => { b.disabled = on; });
     $('settings-capital').querySelectorAll('button').forEach((b) => { b.disabled = on; });
@@ -173,6 +174,7 @@
   function renderModes() {
     if (!saved) return;
     const live = MODE_SELECTS.filter((m) => saved[m.key] === 'live');
+    $('settings-paper-broker').value = saved.paperStockBroker || 'alpaca'; // Phase 71
     for (const m of MODE_SELECTS) {
       $(m.id).value = saved[m.key];
       $(m.id).classList.toggle('is-live', saved[m.key] === 'live');
@@ -264,6 +266,7 @@
 
   $('settings-form').addEventListener('submit', saveForm);
   for (const m of MODE_SELECTS) $(m.id).addEventListener('change', () => changeMode(m));
+  $('settings-paper-broker').addEventListener('change', () => request({ paperStockBroker: $('settings-paper-broker').value })); // paper money either way
   renderFacts();
   renderRisk();
   renderStrictness();

@@ -26,7 +26,7 @@ const num = (x) => {
 };
 
 const NEVER = { ok: false, status: 'never', syncedAt: null, positions: [], cash: null, error: null };
-let snapshot = { coinbase: NEVER, alpaca: NEVER, kraken: NEVER, okx: NEVER };
+let snapshot = { coinbase: NEVER, alpaca: NEVER, kraken: NEVER, okx: NEVER, alpacaPaper: NEVER }; // alpacaPaper: PAPER money (71), never live
 let running = null;
 let lastStart = 0;
 
@@ -76,6 +76,18 @@ async function fetchAlpaca(now) {
   return { ok: true, status: 'ok', syncedAt: now, environment: pos.environment, positions, cash: acct && acct.ok ? acct.cash : null, error: null };
 }
 
+// Alpaca Paper (Phase 71): the paper broker's account: paper cash + stock holdings (AVGO, NVDA,
+// ... bought there outside SignalDesk too). Shown on the Paper side only; never live cash / equity.
+async function fetchAlpacaPaper(now) {
+  if (!alpacaApi.paper.configured()) return { ...NEVER, status: 'not configured' };
+  const [pos, acct] = await Promise.all([alpacaApi.paper.getPositions(), alpacaApi.paper.getAccount()]).catch((err) => [{ ok: false, error: err.message }, {}]);
+  if (!pos.ok) return { ok: false, status: 'error', syncedAt: now, positions: [], cash: null, error: pos.error };
+  const positions = pos.positions.filter((p) => p.qty > 0).map((p) => ({ id: `alpaca-paper:${p.asset}`, asset: p.asset, market: 'stocks', direction: 'long', positionSize: p.qty, fillPrice: p.avgEntry > 0 ? p.avgEntry : null,
+    costBasis: p.costBasis, invalidation: null, targets: [], execution: 'BROKER', broker: 'Alpaca Paper', venue: 'Paper Stocks', paperAccount: true, brokerValue: p.marketValue,
+    brokerUnrealizedPnl: p.unrealizedPnl, syncedAt: now, openedAt: null, feeModel: feeModel('stocks') }));
+  return { ok: true, status: 'ok', syncedAt: now, paper: true, positions, cash: acct && acct.ok ? acct.cash : null, equity: acct && acct.ok ? acct.equity : null, error: null };
+}
+
 // Kraken Pro (Phase 69A) / OKX US (69B): spot balances at their USD price; neither reports a
 // cost basis. OKX's funding-account cash (fundingCash) is shown; only trading cash is spendable.
 async function fetchVenue(api, id, broker, now) {
@@ -95,10 +107,10 @@ const getSnapshot = () => JSON.parse(JSON.stringify(snapshot));
 async function syncPortfolio(now = Date.now()) {
   if (running || now - lastStart < MIN_GAP_MS) return { ok: false, busy: true, snapshot: getSnapshot() };
   lastStart = now;
-  running = Promise.all([fetchCoinbase(now), fetchAlpaca(now), fetchVenue(krakenApi, 'kraken', 'Kraken', now), fetchVenue(okxApi, 'okx', 'OKX', now)]);
+  running = Promise.all([fetchCoinbase(now), fetchAlpaca(now), fetchVenue(krakenApi, 'kraken', 'Kraken', now), fetchVenue(okxApi, 'okx', 'OKX', now), fetchAlpacaPaper(now)]);
   try {
-    const [coinbase, alpaca, kraken, okx] = await running;
-    snapshot = { coinbase, alpaca, kraken, okx };
+    const [coinbase, alpaca, kraken, okx, alpacaPaper] = await running;
+    snapshot = { coinbase, alpaca, kraken, okx, alpacaPaper };
   } finally {
     running = null;
   }

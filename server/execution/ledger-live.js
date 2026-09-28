@@ -49,7 +49,7 @@ function splitPosition(candidateId, qty) {
 
 function findLive(candidateId) {
   const pos = findOpen(candidateId);
-  if (pos.execution !== 'LIVE') throw new Error(`paper-ledger: ${candidateId} is not a LIVE position`);
+  if (pos.execution !== 'LIVE' && !pos.paperBroker) throw new Error(`paper-ledger: ${candidateId} is not a LIVE (or broker-held paper) position`); // + Alpaca Paper (71)
   return pos;
 }
 

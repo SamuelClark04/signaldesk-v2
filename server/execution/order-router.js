@@ -70,7 +70,11 @@ async function routeApproved(order, livePrice) {
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
   const settings = ledger.getSettings();
   let resized = order.amountOverride ? order : null;
-  if (settings[venue.modeKey] === 'paper' || order.forcePaper) return ledger.executeOrder(order.id, livePrice, {}, resized); // forcePaper: a manual PAPER ticket (manual-trade.js)
+  if (settings[venue.modeKey] === 'paper' || order.forcePaper) { // forcePaper: a manual PAPER ticket (manual-trade.js)
+    const ap = require('./alpaca-paper'); // Phase 71: paper stocks / options execute at Alpaca Paper
+    if (order.market !== 'crypto' && ap.enabled(settings)) return ap.open(ledger, order, livePrice, resized);
+    return ledger.executeOrder(order.id, livePrice, {}, resized);
+  }
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
   if (order.market === 'crypto') {
     const rc = await routeCrypto(order, settings, livePrice);

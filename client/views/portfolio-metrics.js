@@ -107,7 +107,17 @@
   // The other crypto venues (Kraken Pro 69A, OKX US 69B): broker -> key, each synced on its own.
   const XV = { OKX: 'okx', Kraken: 'kraken' };
   const XNAME = { okx: 'OKX', kraken: 'Kraken' };
-  const VENUE_KEYS = { paper: ['paper'], crypto: ['coinbase', ...Object.values(XV), 'alpaca', 'external'], combined: ['paper', 'coinbase', ...Object.values(XV), 'alpaca', 'external'] };
+  const VENUE_KEYS = { paper: ['paper', 'alpaca-paper'], crypto: ['coinbase', ...Object.values(XV), 'alpaca', 'external'], combined: ['paper', 'alpaca-paper', 'coinbase', ...Object.values(XV), 'alpaca', 'external'] };
+  // Phase 71: the Alpaca Paper account's holdings SignalDesk did not open (e.g. AVGO, NVDA, SMCI):
+  // PAPER money, listed on the Paper / Combined side only (never the Live / External view or live cash).
+  function paperAccountRows(state) {
+    const ap = state.holdings && state.holdings.alpacaPaper;
+    if (!ap || !ap.ok) return [];
+    const mine = (state.positions || []).filter((x) => x.paperBroker === 'alpaca');
+    return ap.positions.map((p) => { const own = mine.filter((x) => x.asset === p.asset).reduce((s, x) => s + x.positionSize, 0); const q = Math.max(0, p.positionSize - own);
+      return { ...p, positionSize: q, costBasis: p.costBasis > 0 && p.positionSize > 0 ? (p.costBasis * q) / p.positionSize : null }; }).filter((p) => p.positionSize > QTY_DUST)
+      .map((p) => ({ p, key: 'alpaca-paper', alert: { asset: p.asset, tone: 'info', action: 'Alpaca Paper holding', detail: 'In your Alpaca Paper account, bought outside SignalDesk: paper money (never live cash or equity)' } }));
+  }
 
   function ledgerVenue(p) {
     if (p.execution !== 'LIVE') return 'paper';
@@ -163,7 +173,7 @@
     if (!synced && keys.has('coinbase')) keys.add('coinbase-ledger'); // no snapshot yet: show what the ledger knows
     if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
     for (const k of Object.values(XV)) if (keys.has(k) && !xs.some((x) => x.k === k)) keys.add(`${k}-ledger`);
-    const rows = [...ledger, ...broker, ...manual].filter((r) => keys.has(r.key))
+    const rows = [...ledger, ...broker, ...manual, ...paperAccountRows(state)].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
       // No live price: the latest session close, else the server's markPrice (external holdings, Phase 55).
       .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset], closeOf(state, r.p.asset) || markOf(state, r.p)), alert: r.alert || alerts.get(r.p.id) || null }));
@@ -173,7 +183,8 @@
     const krRows = rows.filter((r) => XNAME[r.key]); // OKX + Kraken holdings
     const alRows = rows.filter((r) => r.key === 'alpaca');
     const extRows = rows.filter((r) => r.key === 'external');
-    const counted = [...paper, ...cbRows, ...krRows, ...alRows, ...extRows];
+    const apRows = rows.filter((r) => r.key === 'alpaca-paper'); // paper money (71)
+    const counted = [...paper, ...cbRows, ...krRows, ...alRows, ...extRows, ...apRows];
     const usePaper = keys.has('paper');
     const useCb = keys.has('coinbase') && synced;
     const useAl = keys.has('alpaca') && alSynced;
@@ -184,6 +195,7 @@
     const managedOf = (list) => list.reduce((s, r) => s + (r.p.positionSize > 0 ? (r.m.marketValue * r.p.managedQty) / r.p.positionSize : 0), 0);
     const alValue = sum(alRows);
     const extValue = sum(extRows);
+    const apValue = sum(apRows);
     const outside = alValue - managedOf(alRows) + extValue; // Alpaca balances + manual holdings not managed by SignalDesk
     const pools = paperPools(state);
     const bankroll = usePaper ? pools.stocks.bankroll + pools.crypto.bankroll : 0; // both paper accounts (Phase 70)
@@ -201,9 +213,9 @@
     const paperCash = usePaper ? bankroll + realized - paperCost : 0;
     const totals = {
       venue, bankroll, pools, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
-      holdingsValue: paperValue + cbValue + krValue + alValue + extValue,
+      holdingsValue: paperValue + cbValue + krValue + alValue + extValue + apValue,
       managedValue: paperValue + cbManaged + managedOf(krRows) + managedOf(alRows),
-      externalValue: cbValue - cbManaged + krValue - managedOf(krRows) + outside,
+      externalValue: cbValue - cbManaged + krValue - managedOf(krRows) + outside + apValue,
       accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0) + (useAl ? alValue + alCash : 0) + extValue,
       cash: paperCash + cbCash + krCash + alCash, alCash, krCash, extValue,
       venueCash: [...(useCb ? [['Coinbase', cbCash]] : []), ...xUse.map((x) => [XNAME[x.k], x.h.cash || 0])], // live crypto cash per venue (69B)

@@ -24,8 +24,12 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
   against real Coinbase. Unit tests stub `connectors/coinbase-api` and `coinbase-orders`.
 - **Secrets:** never print or commit `.env` values; API keys travel in headers only.
-- **Alpaca paper keys (PK...) are data-only** (market data / news / clock): never holdings, cash,
-  sizing or orders (alpaca-api.dataOnly; ALPACA_ACCOUNT_ROLE=trading overrides).
+- **Alpaca paper keys (PK...)**: for the LIVE client data-only (market data / news / clock: never
+  live holdings, cash, sizing or orders; alpaca-api.dataOnly). They ARE the PAPER broker
+  (alpaca-api.paper -> execution/alpaca-paper.js, Settings paperStockBroker 'alpaca'): paper stock
+  brackets and options spreads execute in the Alpaca Paper account; its cash / holdings live in the
+  `alpacaPaper` snapshot, Paper side only. Tests / harness point ALPACA_PAPER_BASE_URL at the
+  scratchpad `alpacamock.js` (never the user's real paper account).
 - **Deploy (Compute Engine VM, pm2):** `bash scripts/deploy-vm.sh [pm2-app]` on the VM.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in

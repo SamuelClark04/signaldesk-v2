@@ -111,6 +111,11 @@
     const b = state.broker;
     if (!b || !b.venues) return null;
     const tiles = Object.values(b.venues).map((v) => {
+      if (v.paperAccount) { // Phase 71: the Alpaca Paper account (paper money)
+        return el('div', { className: `pf-venue-tile${v.ok ? '' : ' is-error'}` }, [el('span', { className: 'pf-kpi-label', textContent: `Paper broker · ${v.label} · ${v.markets}` }),
+          el('strong', { className: 'pf-kpi-value', textContent: v.ok ? money(v.equity) : '—' }),
+          el('span', { className: 'pf-kpi-sub', textContent: v.ok ? `Cash ${money(v.cash)} · paper money: never live cash or equity · as of ${clock(v.fetchedAt)}` : `Account unavailable: ${v.error}` })]);
+      }
       const live = v.mode === 'live';
       const failed = live && !v.ok;
       const value = !live ? money(v.paperBankroll ?? b.bankroll) : failed ? '—' : money(v.buyingPower); // Phase 70: its own paper pool

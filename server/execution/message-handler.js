@@ -56,6 +56,8 @@ function createMessageHandler({ send, broadcast }) {
   function handleClose(ws, { id, quoteAt }) {
     if (typeof id !== 'string' || !id) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'missing position id' });
     if (inFlight.has(id)) return send(ws, 'ACTION_FAILED', { type: 'CLOSE_POSITION', id, error: 'ORDER_BUSY' });
+    const ap = require('./alpaca-paper'); // Phase 71: held at Alpaca Paper -> a closing order there
+    if (ap.isAtAlpaca(ledger.getActivePositions().find((p) => p.id === id))) return ap.handleClose(ws, id, { send, broadcast, ledger, inFlight });
     inFlight.add(id);
     try {
       const trade = closeManually(id, quoteAt);

@@ -64,6 +64,11 @@ async function run(broadcast = () => {}) {
     }
     out.positionsChanged = true;
   }
+  // Options held at Alpaca Paper (Phase 71): a premium stop / target sends the closing order there.
+  try {
+    const sent = await require('./alpaca-paper').exits(ledger);
+    if (sent.length) { out.positionsChanged = true; out.journalChanged = true; }
+  } catch (err) { console.error('[pipeline] Alpaca Paper exits failed:', err.message); }
   // PAPER exits from local prices (monitorPositions skips LIVE ones: the broker exits those).
   try {
     const closed = ledger.monitorPositions(prices.getLatestPrices());
