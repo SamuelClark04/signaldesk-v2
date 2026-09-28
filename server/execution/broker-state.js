@@ -21,8 +21,8 @@ const VENUES = [
 const cache = new Map(); // venue name -> { at, value }
 let publishSeq = 0;
 
-async function venueState(venue, mode, force) {
-  const base = { label: venue.label, markets: venue.markets, mode };
+async function venueState(venue, mode, force, settings = {}) {
+  const base = { label: venue.label, markets: venue.markets, mode, paperBankroll: venue.modeKey === 'cryptoMode' ? settings.cryptoBankroll : settings.bankroll }; // Phase 70: its paper pool
   if (mode !== 'live') return base;
 
   const hit = cache.get(venue.name);
@@ -40,11 +40,15 @@ async function venueState(venue, mode, force) {
 async function getBrokerState({ force = false } = {}) {
   const settings = ledger.getSettings();
   const list = VENUES.filter((v) => !v.when || v.when());
-  const venues = await Promise.all(list.map((v) => venueState(v, settings[v.modeKey], force)));
+  const [venues, cryptoWaterfall] = await Promise.all([Promise.all(list.map((v) => venueState(v, settings[v.modeKey], force, settings))),
+    require('./crypto-waterfall').status().catch((err) => ({ error: err.message, rows: [] }))]);
   return {
     bankroll: settings.bankroll,
+    cryptoBankroll: settings.cryptoBankroll, // Phase 70: the two paper pools, with their cash
+    paper: require('./paper-pools').summary(),
     sizingBasis: 'paper-bankroll',
     venues: Object.fromEntries(list.map((v, i) => [v.name, venues[i]])),
+    cryptoWaterfall, // Phase 70: Settings' waterfall strip (OKX US -> Kraken Pro -> Coinbase)
   };
 }
 

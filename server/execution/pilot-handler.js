@@ -45,7 +45,7 @@ let matrix = { rows: [], paperEquity: null, realEquity: null, at: null };
 const tried = new Set(); // ADD / ROTATION ids already sent through the gates (once per day each)
 const getMatrix = () => ({ ...matrix, rows: matrix.rows.map((r) => ({ ...r })) });
 
-// Paper account equity: bankroll + realized paper P&L + open paper unrealized P&L.
+// Paper account equity: both paper bankrolls + realized paper P&L + open paper unrealized P&L.
 function paperEquity() {
   const isPaper = (x) => x.execution !== 'LIVE' && x.execution !== 'BROKER' && !x.adopted;
   const realized = ledger.getTradeJournal().filter(isPaper).reduce((s, t) => s + (t.netPnl || 0), 0);
@@ -53,7 +53,8 @@ function paperEquity() {
     const px = priceOf(p.asset);
     return s + (px > 0 && p.market !== 'options' ? ledger.unrealizedPnl(p, px) : 0);
   }, 0);
-  return ledger.getSettings().bankroll + realized + open;
+  const s = ledger.getSettings();
+  return s.bankroll + (s.cryptoBankroll ?? 0) + realized + open; // both paper pools (Phase 70)
 }
 
 // Real money SignalDesk tracks: its LIVE trades (not options) + external holdings.

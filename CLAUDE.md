@@ -41,7 +41,8 @@ Server (`server/`)
   `coinbase-exit.js` ([Close at Coinbase]: uncertain sells, truthful re-arm), `bracket-ops.js`
   (shared cancel / verify / re-arm / replaceStop), `ratchet.js` (+1R / +1.5R stop locks,
   STOP_GAP_UNFILLED), `order-recovery.js` (orders Coinbase took that the ledger never recorded),
-  `chart-ticks.js` (1 s TICKS for charted symbols), `crypto-router.js` + `crypto-venues.js`
+  `chart-ticks.js` (1 s TICKS for charted symbols), `paper-pools.js` (Phase 70: separate stocks / options and
+  crypto PAPER bankrolls + cash), `crypto-waterfall.js` (Settings venue status strip), `crypto-router.js` + `crypto-venues.js`
   (Phases 69A / 69B: OKX US -> Kraken Pro -> Coinbase waterfall; one connector surface per venue),
   `reconciler.js` (broker truth, UNARMORED, ended partial exits), `expiry-sweeper.js` + `setup-ttl.js`
   (8 / 15 / 30 min approval windows), `order-guard.js`, `manual-trade.js`,
@@ -83,8 +84,10 @@ Client (`client/`)
   <= 0.80%, fee drag <= 0.35R, T1 >= 1.35 : 1. Crypto positions >= $20 notional.
 - Break-even is the fixed sell price after the entry fee and the exit taker fee; P&L gross is
   measured at the best bid so gross + fees = net.
+- Paper: two accounts (Phase 70). `settings.bankroll` = stocks / options, `settings.cryptoBankroll`
+  = crypto; paper setups size from their pool's bankroll, capped at its paper cash.
 - Crypto routing: the cheapest configured venue that lists the pair (and, at approval, has the
-  cash); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx'
+  cash in ONE currency its books settle in; live staging also skips venues that cannot fund $20); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx'
   0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX and Kraken rest only the
   stop (a market stop: no STOP_GAP); SignalDesk sells at T1. OKX charges a BUY's fee in the coin:
   the position size is what was received. Cash checks use one currency (`spendable`).

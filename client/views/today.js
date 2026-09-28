@@ -74,14 +74,8 @@
         metric("Today's change", signed(m.todayPnl, money), `${pct(m.todayPct)} · realized today (SignalDesk trades)`, pnlClass(m.todayPnl)),
       ];
     }
-    const live = Object.values((state.broker && state.broker.venues) || {}).filter((v) => v.mode === 'live');
-    return [
-      el('div', { className: 'today-metrics' }, items),
-      ...(live.length ? [el('div', { className: 'today-live' }, live.map((v) => el('span', {
-        className: `today-live-item${v.ok ? '' : ' is-error'}`,
-        textContent: v.ok ? `LIVE ${v.label}: buying power ${money(v.buyingPower)}` : `LIVE ${v.label}: account unavailable`,
-      })))] : []),
-    ];
+    const pills = SD.venue.pills(state); // LIVE venues' buying power + the paper pools' (Phase 70)
+    return [el('div', { className: 'today-metrics' }, items), ...(pills.length ? [el('div', { className: 'today-live' }, pills)] : [])];
   }
 
   // ---------- Briefing ----------

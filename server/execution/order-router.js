@@ -32,7 +32,11 @@ async function routeCrypto(order, settings, livePrice) {
   const v = cryptoVenues.VENUES[r.venue];
   const venue = { modeKey: 'cryptoMode', broker: v.broker, venueId: r.venue, route: r,
     api: { submitOrder: (...a) => (r.venue === 'coinbase' ? coinbaseApi.submitOrder(...a) : v.orders().submitOrder(...a)) } };
-  if (r.venue === staged) return { venue, order, resized: null };
+  // Same venue and sized from its live account: sent as staged. Sized from another venue's live
+  // account (re-routed: cash moved, a pair listed / delisted): re-sized here. Sized from paper:
+  // left as it is, so the SIZED_FOR_OTHER_VENUE check below refuses it (never auto-promoted).
+  const liveSized = /-live$/.test(order.sizingBasis || '');
+  if (!liveSized || (r.venue === staged && order.sizingBasis === `${r.venue}-live`)) return { venue, order, resized: null };
   const capital = await sizingBankroll('crypto', settings, r.venue);
   if (!capital.ok) throw new Error(capital.reason);
   const s = processCandidate({ ...order, ...cryptoRouter.fields(r) }, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash });

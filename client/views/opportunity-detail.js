@@ -117,22 +117,25 @@
     ];
   }
 
-  const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity' };
+  const BASIS = { paper: 'Paper bankroll', 'coinbase-live': 'Live Coinbase account value', 'alpaca-live': 'Live Alpaca equity', 'okx-live': 'Live OKX US account value', 'kraken-live': 'Live Kraken Pro account value' };
+  const CRYPTO_BROKER = { okx: 'OKX', kraken: 'Kraken', coinbase: 'Coinbase' }; // a routed setup's venue (69A / 69B)
   // Was this order sized for the venue it would execute on now? (server rule:
   // message-handler refuses a LIVE approval of a setup not sized from that account)
   function sizing(o, ctx) {
-    const [modeKey, broker] = VENUE[o.market] || [null, '?'];
+    const [modeKey, venueBroker] = VENUE[o.market] || [null, '?'];
+    const routed = o.market === 'crypto' && CRYPTO_BROKER[o.venue] ? o.venue : null; // the crypto venue it was routed to
+    const broker = routed ? CRYPTO_BROKER[routed] : venueBroker;
     const liveVenue = !!(ctx.settings && modeKey && ctx.settings[modeKey] === 'live');
     const basis = o.sizingBasis || 'paper'; // setups staged before venue sizing were all sized from paper
-    const venueKey = liveVenue ? broker.toLowerCase() : 'paper'; // 'paper' | 'coinbase' | 'alpaca'
-    return { broker, basis, venueKey, mismatch: hasLevels(o) && liveVenue && basis !== `${broker.toLowerCase()}-live` };
+    const venueKey = liveVenue ? (routed ? 'coinbase' : broker.toLowerCase()) : 'paper'; // funding: 'paper' | 'coinbase' (every crypto venue) | 'alpaca'
+    return { broker, basis, venueKey, mismatch: hasLevels(o) && liveVenue && basis !== `${routed || broker.toLowerCase()}-live` };
   }
 
   // The money, plainly: where the cash comes from, what the buy costs in total,
   // and what is lost if the stop is hit (before and after fees).
   function moneyGroup(o, ctx, ready) {
     const { venueKey } = sizing(o, ctx);
-    const f = SD.portfolioMetrics.fundingSource(ctx.state || {}, venueKey);
+    const f = SD.portfolioMetrics.fundingSource(ctx.state || {}, venueKey, o.market); // paper: that market's own paper pool (Phase 70)
     const entryFee = o.costs && Number.isFinite(o.costs.entry) ? o.costs.entry : 0;
     const required = Number.isFinite(o.notional) ? o.notional + entryFee : null;
     const lossWithFees = o.scenarios && o.scenarios.stop ? -o.scenarios.stop.net : null;

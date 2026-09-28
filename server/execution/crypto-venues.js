@@ -14,11 +14,17 @@
 // stop; SignalDesk sells at T1 itself (ratchet.watch).
 const cost = require('../risk/cost-authority');
 
+// The most one order can spend from `balances` in any ONE of `ccys` (0 when the pair has no book).
+const best = (balances, ccys) => Math.max(0, ...ccys.map((c) => Number(balances && balances[c]) || 0));
+
 const VENUES = {
   okx: {
     id: 'okx', label: 'OKX US', broker: 'OKX', restsTarget: false,
     configured: () => require('../connectors/okx-api').configured(),
     lists: (symbol) => require('../connectors/okx-pairs').lists(symbol),
+    // The currencies `symbol`'s OKX books settle in (ETH-USD: USD / USDC; ETH-USDT: USDT): the most in one.
+    spendable: (symbol, balances) => { const p = require('../connectors/okx-pairs');
+      return best(balances, p.books(symbol).flatMap((e) => e.tradeQuotes.filter((q) => p.QUOTES.includes(q)))); },
     api: () => require('../connectors/okx-api'),
     orders: () => require('../connectors/okx-orders'),
   },
@@ -26,6 +32,8 @@ const VENUES = {
     id: 'kraken', label: 'Kraken Pro', broker: 'Kraken', restsTarget: false,
     configured: () => require('../connectors/kraken-api').configured(),
     lists: (symbol) => require('../connectors/kraken-pairs').lists(symbol),
+    spendable: (symbol, balances) => { const p = require('../connectors/kraken-pairs'); const base = String(symbol).replace(/-USDC?$/, '');
+      return best(balances, ['USD', 'USDC'].filter((q) => p.get(`${base}-${q}`))); }, // X/USD or X/USDC books
     api: () => require('../connectors/kraken-api'),
     orders: () => require('../connectors/kraken-orders'),
   },

@@ -1,7 +1,7 @@
 // Venue capital: the bankroll a candidate is sized against, by the venue it
 // would execute on (order-router.js; Phase 69A: crypto by its ROUTED venue, crypto-router.js:
 // 'coinbase-live', 'kraken-live' or 'okx-live').
-//   paper venue -> the configured paper bankroll (Settings)
+//   paper venue -> the market's paper bankroll (Settings: stocks / options, crypto; Phase 70), capped at its paper cash
 //   LIVE crypto -> the Coinbase account value: every spot balance incl. USD/USDC
 //   LIVE stocks -> the Alpaca account equity (options follow the stock venue)
 // Live values are cached for CACHE_MS so a scan over many candidates makes at
@@ -81,15 +81,24 @@ const brokerOf = (market, venue) => (market === 'crypto' && FETCHERS[venue] ? ve
 async function sizingBankroll(market, settings, venue = null) {
   const [modeKey] = VENUE_OF[market] || [];
   const broker = brokerOf(market, venue);
-  if (!modeKey || settings[modeKey] !== 'live') {
-    return settings.bankroll > 0 ? { ok: true, bankroll: settings.bankroll, basis: 'paper' }
-      : { ok: false, reason: 'Invalid bankroll', basis: 'paper' };
-  }
+  if (!modeKey || settings[modeKey] !== 'live') return paperCapital(market, settings);
   const basis = `${broker}-live`;
   const r = await liveValue(broker);
   if (!r.ok) return { ok: false, reason: `${UNAVAILABLE}: ${r.error}`, basis };
   const external = manualValue();
   return { ok: true, bankroll: r.value + external, accountValue: r.value, externalValue: external, cash: r.cash, basis, fetchedAt: r.fetchedAt };
+}
+
+// Phase 70: PAPER sizing uses the market's own paper pool (stocks / options, or crypto): its
+// bankroll, and never more than its paper cash (paper-pools.js), so one pool cannot spend the other's.
+function paperCapital(market, settings) {
+  const pools = require('../execution/paper-pools');
+  const pool = pools.poolOf(market);
+  const bankroll = pools.bankrollOf(settings, pool);
+  if (!(bankroll > 0)) return { ok: false, reason: 'Invalid bankroll', basis: 'paper' };
+  let cash = null;
+  try { cash = Math.max(0, pools.cashOf(pool, undefined, settings)); } catch { /* ledger not loaded (tests): no cash cap */ }
+  return { ok: true, bankroll, basis: 'paper', pool, ...(Number.isFinite(cash) ? { cash } : {}) };
 }
 
 // Market value of the manual external holdings (live price, else last close, else cost).

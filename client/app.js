@@ -140,6 +140,7 @@
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
     SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
+    BROKER_STATE: (broker) => SD.settingsWaterfall.render(broker), // Phase 70: the Settings waterfall strip
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
     LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open

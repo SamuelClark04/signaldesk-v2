@@ -65,6 +65,18 @@
     return `Coinbase synced ${clock(cb.syncedAt)} · ${cb.positions.length} holding${cb.positions.length === 1 ? '' : 's'} · ${money(cb.cash)} cash${extra}`;
   }
 
+  // Buying power pills (Today): each LIVE venue's, and each PAPER pool's while its mode is paper
+  // (Phase 70: stocks / options and crypto are separate paper accounts).
+  function pills(state) {
+    const s = state.settings || {};
+    const live = Object.values((state.broker && state.broker.venues) || {}).filter((v) => v.mode === 'live').map((v) => el('span', {
+      className: `today-live-item${v.ok ? '' : ' is-error'}`, textContent: v.ok ? `LIVE ${v.label}: buying power ${money(v.buyingPower)}` : `LIVE ${v.label}: account unavailable` }));
+    const pools = SD.portfolioMetrics ? SD.portfolioMetrics.paperPools(state) : null;
+    const paper = !pools ? [] : [['stocks', s.stockMode], ['crypto', s.cryptoMode]].filter(([, m]) => m !== 'live').map(([k]) => el('span', {
+      className: `today-live-item is-paper${pools[k].cash < 0 ? ' is-error' : ''}`, textContent: `PAPER ${pools[k].label}: buying power ${money(pools[k].cash)} of ${money(pools[k].bankroll)}` }));
+    return [...live, ...paper];
+  }
+
   // Toggle + Sync Broker (+ optional extra buttons) with the status line under them.
   function controls(state, extra = []) {
     return el('div', { className: 'pf-header-right' }, [
@@ -79,5 +91,5 @@
     if (h && !h.syncing) { syncRequested = false; clearTimeout(syncTimer); }
   }
 
-  SD.venue = { controls, current, received, LABEL, KEYS };
+  SD.venue = { controls, current, received, pills, LABEL, KEYS };
 })();

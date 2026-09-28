@@ -114,10 +114,10 @@ async function closeLive(ledger, id, opts = {}) {
   ops.claim(id);
   try {
     const product = pos.brokerProduct || pos.asset;
-    const qty = pos.positionSize;
-    log(`${id}: MANUAL CLOSE requested: ${qty} ${product}`);
+    log(`${id}: MANUAL CLOSE requested: ${pos.positionSize} ${product}`);
     // 1. Look up the bracket.
     const b = await bracketOf(pos);
+    const qty = ops.heldQty(pos, b.status); // what the entry really filled (OKX: net of its coin fee)
     const reconcile = async (why) => {
       ops.release(id); // the reconciler skips positions mid-close
       const r = await require('./reconciler').reconcileLivePositions([ledger.getActivePositions().find((p) => p.id === id)].filter(Boolean), ledger);

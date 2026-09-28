@@ -12,7 +12,7 @@
 
   const MODE_SELECTS = [
     { id: 'settings-stock-mode', key: 'stockMode', venue: 'Alpaca (stocks/options)', short: 'Stocks' },
-    { id: 'settings-crypto-mode', key: 'cryptoMode', venue: 'Coinbase (crypto)', short: 'Crypto' },
+    { id: 'settings-crypto-mode', key: 'cryptoMode', venue: 'Crypto (OKX US · Kraken Pro · Coinbase)', short: 'Crypto' }, // one mode for every crypto venue (69B)
   ];
 
   let transport = { isOnline: () => false, send: () => {} }; // set by app.js via init()
@@ -22,6 +22,9 @@
   let draftProfile = null; // risk profile picked but not saved yet (null = the saved one)
   const PROFILE_LABEL = { conservative: 'Conservative', balanced: 'Balanced', aggressive: 'Aggressive' };
   const pctText = (x) => `${(x * 100).toFixed(1)}%`;
+  const crypto = () => (saved && (saved.cryptoBankroll ?? saved.bankroll)) || 0; // the crypto paper bankroll (Phase 70)
+  // LIVE crypto: how the three venues share the work (crypto-router.js).
+  const WATERFALL_TEXT = 'LIVE: approvals route automatically via the fee waterfall (1st: OKX US 0.08%/0.10% → 2nd: Kraken Pro 0.25%/0.40% → 3rd: Coinbase) based on coin listing and available cash.';
 
   function setStatus(text, kind = '') {
     const s = $('settings-status');
@@ -59,12 +62,14 @@
     transport.send({ type: 'UPDATE_SETTINGS', payload });
   }
 
-  // Save Settings sends the risk profile and the bankroll together.
+  // Save Settings sends the risk profile and both paper bankrolls together (Phase 70: stocks /
+  // options and crypto are separate paper accounts).
   function saveForm(e) {
     e.preventDefault();
     const bankroll = Number($('settings-bankroll').value);
-    if (!Number.isFinite(bankroll) || bankroll <= 0) return setStatus('Enter a bankroll above $0.', 'error');
-    const payload = { bankroll };
+    const cryptoBankroll = Number($('settings-crypto-bankroll').value);
+    if (![bankroll, cryptoBankroll].every((x) => Number.isFinite(x) && x > 0)) return setStatus('Enter both paper bankrolls above $0.', 'error');
+    const payload = { bankroll, cryptoBankroll };
     if (draftProfile && saved && draftProfile !== saved.riskProfile) payload.riskProfile = draftProfile;
     return request(payload);
   }
@@ -116,7 +121,7 @@
     box.replaceChildren(...saved.maxCapitalChoices.map((pct) => {
       const active = pct === saved.maxCapitalPct;
       const b = el('button', { type: 'button', className: `settings-risk-opt${pct > 0.15 ? ' is-aggressive' : ''}${active ? ' is-active' : ''}`, disabled: pending }, [
-        el('strong', { textContent: `${Math.round(pct * 100)}%` }), el('span', { textContent: `${money(saved.bankroll * pct)} max per trade` })]);
+        el('strong', { textContent: `${Math.round(pct * 100)}%` }), el('span', { textContent: `${money(saved.bankroll * pct)} stocks · ${money(crypto() * pct)} crypto`, title: 'Max per trade, from each paper bankroll' })]);
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(active));
       b.onclick = () => { if (!active) request({ maxCapitalPct: pct }); };
@@ -181,19 +186,20 @@
 
     const warn = $('settings-live-warning');
     warn.hidden = !live.length;
-    warn.textContent = live.length
-      ? `LIVE: approvals for ${live.map((m) => m.short.toLowerCase()).join(' and ')} route to the broker, not the paper ledger.`
-      : '';
+    const stocksLive = live.some((m) => m.key === 'stockMode');
+    const cryptoLive = live.some((m) => m.key === 'cryptoMode');
+    warn.textContent = [stocksLive ? 'LIVE: approvals for stocks / options route to Alpaca, not the paper ledger.' : '', cryptoLive ? WATERFALL_TEXT : ''].filter(Boolean).join(' ');
   }
 
   function renderFacts() {
     if (!saved) { $('settings-facts').replaceChildren('Waiting for the server…'); return; }
     const pct = saved.riskPct;
+    const cap = saved.maxCapitalPct || 0.1;
     $('settings-facts').replaceChildren('Saved: ', el('strong', { textContent: `${PROFILE_LABEL[saved.riskProfile] || saved.riskProfile} (${pctText(pct)})` }),
-      ' risk on a ', el('strong', { textContent: money(saved.bankroll) }), ' paper bankroll, so each new trade risks up to ',
-      el('strong', { textContent: money(saved.bankroll * pct) }), ' at its stop and uses at most ',
-      el('strong', { textContent: `${Math.round((saved.maxCapitalPct || 0.1) * 100)}% (${money(saved.bankroll * (saved.maxCapitalPct || 0.1))})` }),
-      ' of the bankroll (change any single trade with its Trade Amount). Staged setups and open positions keep the size they were given. Strictness: ',
+      ' risk on the ', el('strong', { textContent: `${money(saved.bankroll)} stocks / options` }), ' and ', el('strong', { textContent: `${money(crypto())} crypto` }),
+      ' paper bankrolls (separate accounts), so each new paper trade risks up to ', el('strong', { textContent: `${money(saved.bankroll * pct)} / ${money(crypto() * pct)}` }),
+      ' at its stop and uses at most ', el('strong', { textContent: `${Math.round(cap * 100)}% (${money(saved.bankroll * cap)} / ${money(crypto() * cap)})` }),
+      ' of its bankroll (change any single trade with its Trade Amount). Staged setups and open positions keep the size they were given. Strictness: ',
       el('strong', { textContent: (saved.strictnessLevels && saved.strictnessLevels[saved.strictness] || {}).label || saved.strictness || 'strict' }),
       ' (sizing, the fee gate, the capital cap and the earnings shields are the same at every level).');
   }
@@ -205,9 +211,11 @@
     saved = settings;
 
     // Don't clobber what the user is typing unless this is the reply to their own save.
-    const input = $('settings-bankroll');
-    const editing = document.activeElement === input && Number(input.value) !== saved.bankroll;
-    if (!editing || wasPending) input.value = String(saved.bankroll);
+    for (const [id, v] of [['settings-bankroll', saved.bankroll], ['settings-crypto-bankroll', crypto()]]) {
+      const input = $(id);
+      const editing = document.activeElement === input && Number(input.value) !== v;
+      if (!editing || wasPending) input.value = String(v);
+    }
 
     if (wasPending) setStatus('Saved.', 'ok');
     if (draftProfile === saved.riskProfile) draftProfile = null; // saved: no longer a draft
@@ -235,18 +243,21 @@
   $('settings-reset').addEventListener('click', () => {
     const s = $('settings-reset-status');
     if (!transport.isOnline()) { s.textContent = 'Offline: cannot reach the server.'; return; }
-    const typed = window.prompt('Reset the PAPER ledger?\n\nThis deletes every paper position, closed paper trade and journal entry, all staged setups '
-      + 'and Pilot proposals. LIVE/adopted positions are kept. A backup file is saved on the server.\n\nType RESET to confirm:');
+    const scope = $('settings-reset-scope').value; // 'all' | 'stocks' | 'crypto' (Phase 70)
+    const what = { all: 'every paper position, closed paper trade and journal entry, all staged setups', stocks: 'every STOCKS / OPTIONS paper position, closed trade and staged setup',
+      crypto: 'every CRYPTO paper position, closed trade and staged setup' }[scope];
+    const typed = window.prompt(`Reset the PAPER ledger (${scope === 'all' ? 'all paper' : `${scope === 'crypto' ? 'crypto' : 'stocks / options'} only`})?\n\nThis deletes ${what} `
+      + 'and their Pilot proposals. LIVE/adopted positions are kept. A backup file is saved on the server.\n\nType RESET to confirm:');
     if (typed === null) return;
     if (typed.trim() !== 'RESET') { s.textContent = 'Not reset: the confirmation word did not match.'; s.className = 'settings-status is-error'; return; }
     s.textContent = 'Resetting…'; s.className = 'settings-status';
-    transport.send({ type: 'RESET_LEDGER', confirm: 'RESET' });
+    transport.send({ type: 'RESET_LEDGER', confirm: 'RESET', scope });
   });
   function resetDone(r) {
     const s = $('settings-reset-status');
     if (!r || !r.ok) { s.textContent = `Not reset: ${(r && r.error) || 'no reply'}`; s.className = 'settings-status is-error'; return; }
     const n = r.removed;
-    s.textContent = `Paper ledger reset: removed ${n.positions} position(s), ${n.trades} trade(s), ${n.pending} staged setup(s).`
+    s.textContent = `Paper ledger reset (${r.scope === 'stocks' ? 'stocks / options' : r.scope || 'all'}): removed ${n.positions} position(s), ${n.trades} trade(s), ${n.pending} staged setup(s).`
       + `${r.keptLive.positions ? ` Kept ${r.keptLive.positions} LIVE position(s).` : ''} Backup saved on the server.`;
     s.className = 'settings-status is-ok';
   }

@@ -21,6 +21,10 @@ const fail = (code, msg) => Object.assign(new Error(`${code}: ${msg}`), { code }
 const log = (msg) => console.warn(`[LIVE] ${msg}`);
 const patch = (ledger, id, fields) => ledger.updatePositions((p) => (p.id === id ? Object.assign(p, fields) && true : false));
 const coinsFree = (bal, qty) => bal.ok && bal.available + QTY_EPS >= qty * (1 - 1e-6);
+// The coins a position really holds: its size, capped at what its entry filled. OKX charges a BUY's
+// fee in the coin, so until the reconciler syncs the fill the ledger may still carry the gross size;
+// a stop / sell for it would be refused. (Split and adopted records keep their own size.)
+const heldQty = (pos, s) => (!pos.parentId && !pos.adopted && s && s.ok && s.filledQty > 0 ? Math.min(pos.positionSize, s.filledQty) : pos.positionSize);
 
 function claim(id) {
   if (busy.has(id)) throw fail('ORDER_BUSY', `${id} already has a close or stop move in progress`);
@@ -76,12 +80,12 @@ async function rearmThenFail(ledger, pos, qty, why, code, msg, lead) {
 // Phase 68: move a LIVE Coinbase position's stop UP to `stop` (the bracket's T1 unchanged).
 // { moved: true, bracketId } | { alreadyClosed: true } | throws (nothing sold either way).
 async function replaceStop(ledger, pos, stop, label) {
-  const qty = pos.positionSize;
   const product = pos.brokerProduct || pos.asset;
   const tp = pos.targets && pos.targets[0] && pos.targets[0].price;
   if (!(stop > pos.invalidation)) throw fail('RATCHET_DOWN_REFUSED', `the new stop ${stop} is not above the current ${pos.invalidation}: a stop only moves up`);
   const s = await venues.api(pos).getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId });
   if (!s.ok) throw fail('BROKER_UNREACHABLE', `could not read ${pos.id}'s orders (${s.error}); the stop was not changed`);
+  const qty = heldQty(pos, s);
   if (s.exit && s.exit.filledQty > 0) return { alreadyClosed: true };
   if (s.exit && s.exit.status === 'open') {
     const c = await cancelBracket(pos, s.exit.brokerExitId);
@@ -108,4 +112,4 @@ async function replaceStop(ledger, pos, stop, label) {
   return { moved: true, bracketId: r.brokerId };
 }
 
-module.exports = { timing, claim, release, isBusy: (id) => busy.has(id), pollUntil, cancelBracket, freeCoins, rearm, rearmThenFail, replaceStop, patch, coinsFree, baseOf, fail, log, sleep, QTY_EPS };
+module.exports = { heldQty, timing, claim, release, isBusy: (id) => busy.has(id), pollUntil, cancelBracket, freeCoins, rearm, rearmThenFail, replaceStop, patch, coinsFree, baseOf, fail, log, sleep, QTY_EPS };

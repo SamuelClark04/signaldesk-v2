@@ -24,6 +24,19 @@
   const costBasis = (p) => (p.market === 'options' && p.optionsData
     ? p.positionSize * p.optionsData.debit * p.optionsData.multiplier : p.positionSize * p.fillPrice);
 
+  // Phase 70: the two PAPER accounts (server: paper-pools.js). Each pool's cash = its bankroll +
+  // its closed paper trades' net P&L - the cost of its open paper positions.
+  const poolOf = (market) => (market === 'crypto' ? 'crypto' : 'stocks');
+  function paperPools(state) {
+    const s = state.settings || {};
+    const out = { stocks: { label: 'Stocks / Options', bankroll: s.bankroll || 0 }, crypto: { label: 'Crypto', bankroll: (s.cryptoBankroll ?? s.bankroll) || 0 } };
+    for (const v of Object.values(out)) Object.assign(v, { realized: 0, cost: 0 });
+    for (const t of state.journal || []) if (t.execution !== 'LIVE' && !t.adopted) out[poolOf(t.market)].realized += t.netPnl || 0;
+    for (const p of state.positions || []) if (p.execution !== 'LIVE' && !p.adopted) out[poolOf(p.market)].cost += costBasis(p) || 0;
+    for (const v of Object.values(out)) v.cash = v.bankroll + v.realized - v.cost;
+    return out;
+  }
+
   // One position marked at a live price. Without one (market closed, weekend),
   // stocks / coins are marked at the latest regular-session close (`close`, from
   // REFERENCE_PRICES; priceSource 'close', live false: closing still needs a
@@ -172,7 +185,8 @@
     const alValue = sum(alRows);
     const extValue = sum(extRows);
     const outside = alValue - managedOf(alRows) + extValue; // Alpaca balances + manual holdings not managed by SignalDesk
-    const bankroll = usePaper ? (state.settings && state.settings.bankroll) || 0 : 0;
+    const pools = paperPools(state);
+    const bankroll = usePaper ? pools.stocks.bankroll + pools.crypto.bankroll : 0; // both paper accounts (Phase 70)
     const realized = usePaper ? (state.journal || []).filter((t) => t.execution !== 'LIVE').reduce((s, t) => s + (t.netPnl || 0), 0) : 0;
     const cbCash = useCb ? cb.cash || 0 : 0;
     const krCash = xUse.reduce((s, x) => s + (x.h.cash || 0), 0);
@@ -186,7 +200,7 @@
     const committed = counted.reduce((s, r) => s + (r.m.noBasis ? 0 : r.m.cost), 0); // no cost basis: not in the P/L % base
     const paperCash = usePaper ? bankroll + realized - paperCost : 0;
     const totals = {
-      venue, bankroll, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
+      venue, bankroll, pools, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
       holdingsValue: paperValue + cbValue + krValue + alValue + extValue,
       managedValue: paperValue + cbManaged + managedOf(krRows) + managedOf(alRows),
       externalValue: cbValue - cbManaged + krValue - managedOf(krRows) + outside,
@@ -223,12 +237,12 @@
       if (!v || !v.ok || !(v.equity > 0)) return { amount: null, label: 'Live Alpaca equity', note: v && v.error ? `unavailable: ${v.error}` : 'unavailable' };
       return { amount: v.equity, label: 'Live Alpaca equity', note: `as of ${clock(v.fetchedAt)}` };
     }
-    const b = state.settings && state.settings.bankroll;
-    return { amount: b > 0 ? b : null, label: 'Paper bankroll', note: 'configured in Settings' };
+    const b = (state.settings && state.settings.bankroll) + ((state.settings && state.settings.cryptoBankroll) || 0);
+    return { amount: b > 0 ? b : null, label: 'Paper bankrolls', note: 'stocks / options + crypto, configured in Settings' };
   }
 
   // The cash that would pay for a new buy on this venue: { amount|null, label, note }.
-  function fundingSource(state, key) {
+  function fundingSource(state, key, market = null) {
     if (key === 'coinbase') {
       const v = state.broker && state.broker.venues && state.broker.venues.coinbase;
       const xv = Object.values(XV).map((k) => [k, state.broker && state.broker.venues && state.broker.venues[k]]).filter(([, x]) => x && x.ok && Number.isFinite(x.buyingPower));
@@ -245,8 +259,9 @@
       const v = state.broker && state.broker.venues && state.broker.venues.alpaca;
       return v && v.ok ? { amount: v.buyingPower, label: 'Alpaca buying power', note: `as of ${clock(v.fetchedAt)}` } : { amount: null, label: 'Alpaca buying power', note: 'unavailable' };
     }
-    return { amount: metrics(state, 'paper').totals.paperCash, label: 'Paper cash available', note: 'bankroll + realized − open paper positions' };
+    if (market) { const pl = paperPools(state)[poolOf(market)]; return { amount: pl.cash, label: `${pl.label} paper cash`, note: 'its bankroll + realized − its open paper positions' }; }
+    return { amount: metrics(state, 'paper').totals.paperCash, label: 'Paper cash available', note: 'both paper bankrolls + realized − open paper positions' };
   }
 
-  SD.portfolioMetrics = { mark, metrics, venueBankroll, fundingSource, pct, display };
+  SD.portfolioMetrics = { mark, metrics, venueBankroll, fundingSource, paperPools, pct, display };
 })();

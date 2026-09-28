@@ -83,3 +83,27 @@
 .settings-exitspread-wrap { width: 120px; }
 .settings-exitspread-wrap .input:disabled { opacity: 0.5; }
 .settings-exitspread-note { flex-basis: 100%; color: var(--text-faint); font-size: 12px; }
+
+/* Phase 70: two paper bankrolls side by side; paper reset scope */
+.settings-bankrolls { display: flex; flex-wrap: wrap; gap: 12px; }
+.settings-bankrolls .field { flex: 1 1 220px; }
+.settings-reset-scope { margin: 0 16px 10px; max-width: 320px; }
+
+/* Phase 70: Crypto Waterfall Routing & Broker Status (settings-waterfall.js) */
+.settings-waterfall { margin: 4px 16px 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.wf-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.wf-active { margin: 6px 0 10px; color: var(--accent); font-size: 13px; }
+.wf-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.wf-row { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 12px; color: var(--text-muted); }
+.wf-row.is-active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.wf-row.is-not-configured { opacity: 0.75; }
+.wf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wf-rank { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.wf-name { color: var(--text); font-size: 14px; }
+.wf-badge { padding: 1px 7px; border: 1px solid var(--border-strong); border-radius: 999px; font: 600 10px var(--font-ui); letter-spacing: 0.04em; }
+.wf-badge.is-connected { border-color: var(--long); background: var(--long-bg); color: var(--long); }
+.wf-badge.is-unavailable { border-color: var(--short); background: var(--short-bg); color: var(--short); }
+.wf-badge.is-route { border-color: var(--accent); color: var(--accent); }
+.wf-cash { color: var(--text); font-family: var(--font-mono); }
+.wf-fees { font-family: var(--font-mono); }
+.wf-role { color: var(--text-faint); }

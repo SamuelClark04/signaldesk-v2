@@ -135,7 +135,8 @@ async function pipelinePass() {
   counts.generated = candidates.length;
 
   afterHours.begin();
-  if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare().catch(() => {}); // OKX / Kraken pair lists before routing (69A / 69B)
+  const cryptoLive = settings.cryptoMode === 'live';
+  if (candidates.some((c) => c.market === 'crypto')) await cryptoRouter.prepare({ live: cryptoLive }).catch(() => {}); // pair lists (+ live cash) before routing
   for (const candidate of candidates) {
     candidate.catalysts = macro.catalystsFor(candidate);
     // No live price, or an option with the US session closed (market-session.js: the
@@ -155,7 +156,7 @@ async function pipelinePass() {
     const depth = candidate.market === 'crypto' && !candidate.speculative ? volumeGate(candidate.asset) : null;
     const thin = [book, depth].find((g) => g && !g.ok);
     if (thin) { recordRejection(candidate.id, thin.reason, candidate); continue; }
-    if (candidate.market === 'crypto') Object.assign(candidate, cryptoRouter.fields(cryptoRouter.preRoute(candidate.asset))); // Phase 69A: cheapest venue listing it
+    if (candidate.market === 'crypto') Object.assign(candidate, cryptoRouter.fields(cryptoRouter.preRoute(candidate.asset, { live: cryptoLive }))); // cheapest venue listing it (live: and funded)
     const capital = await sizingBankroll(candidate.market, settings, candidate.venue);
     if (!capital.ok) {
       // Fail closed: a LIVE setup is never sized from the paper bankroll.

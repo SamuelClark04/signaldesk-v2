@@ -34,6 +34,7 @@
   font-size: 12px;
 }
 .today-live-item.is-error { border-color: var(--warn); background: transparent; color: var(--warn); }
+.today-live-item.is-paper { border-color: var(--border-strong); background: transparent; color: var(--text-muted); } /* Phase 70: paper pools */
 
 /* ---------- Briefing ---------- */
 .today-briefing { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
@@ -97,3 +98,4 @@
 @media (max-width: 420px) {
   .today-metrics { grid-template-columns: 1fr; }
 }
+.today-live-item.is-paper.is-error { border-color: var(--warn); color: var(--warn); }

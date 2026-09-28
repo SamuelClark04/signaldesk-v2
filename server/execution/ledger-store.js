@@ -17,9 +17,10 @@ const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: old
 // nothing can switch to live except an explicit, valid user update.
 const MODES = ['paper', 'live'];
 const SETTINGS_RULES = {
-  bankroll: { type: 'number', default: 50000, min: 100, max: 100000000 },
+  bankroll: { type: 'number', default: 50000, min: 100, max: 100000000 }, // PAPER stocks / options bankroll
+  cryptoBankroll: { type: 'number', default: 50000, min: 100, max: 100000000 }, // PAPER crypto bankroll (Phase 70)
   stockMode: { type: 'choice', default: 'paper', values: MODES }, // Alpaca: stocks + options
-  cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // Coinbase: crypto
+  cryptoMode: { type: 'choice', default: 'paper', values: MODES }, // crypto: OKX US -> Kraken Pro -> Coinbase
   riskProfile: { type: 'choice', default: DEFAULT_PROFILE, values: Object.keys(RISK_PROFILES) }, // % risked per new trade
   strictness: { type: 'choice', default: DEFAULT_STRICTNESS, values: Object.keys(STRICTNESS_LEVELS) }, // setup gates (risk/strictness.js)
   maxCapitalPct: { type: 'choice', default: DEFAULT_MAX_CAPITAL_PCT, values: [...CAPITAL_CHOICES] }, // Max Capital Per Trade (risk-engine.js)
@@ -103,6 +104,8 @@ function restoreSettings(saved) {
       console.warn(`[ledger] ignoring saved setting: ${err.message}; keeping ${settings[key] ?? 'default'}`);
     }
   }
+  // Phase 70: a ledger from before the crypto paper bankroll existed starts it at the (then shared) bankroll.
+  if (saved.cryptoBankroll === undefined) settings.cryptoBankroll = settings.bankroll;
 }
 
 // An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.

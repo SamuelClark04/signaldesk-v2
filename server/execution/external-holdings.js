@@ -20,6 +20,7 @@ const prices = require('../market/latest-prices');
 const brokerSync = require('../connectors/broker-sync');
 const { protectiveLevels, T1_SHARE } = require('../risk/protective-levels');
 const { feeModel } = require('../risk/scenarios');
+const { feeKey } = require('../risk/cost-authority');
 
 const STORE_PATH = process.env.EXTERNAL_HOLDINGS_PATH || path.join(__dirname, '..', 'data', 'external-holdings.json');
 const LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9 .&'_-]{0,23}$/;
@@ -199,7 +200,7 @@ function toPosition(base, e) {
     invalidation: lv.invalidation, targets: lv.targets, customLevels: lv.custom, levelsBasis: lv.basis, levelsRef: lv.ref, t1Done: !!e.t1Done,
     dollarRisk: lv.ref && lv.invalidation ? (lv.ref - lv.invalidation) * qty : null, execution: 'EXTERNAL', external: base.kind, broker: base.broker,
     strategyId: 'external', setupType: base.kind === 'manual' ? `Manual holding (${base.broker})` : `${base.broker} holding (bought outside SignalDesk)`,
-    timeframe: '1d', openedAt: base.openedAt || null, syncedAt: base.syncedAt || null, feeModel: feeModel(base.market) };
+    timeframe: '1d', openedAt: base.openedAt || null, syncedAt: base.syncedAt || null, feeModel: feeModel(feeKey({ market: base.market, broker: base.broker })) }; // OKX / Kraken holdings: their fees
 }
 
 // Every external holding in the ledger's position shape (ids ext:<id> / ext:<venue>:<asset>).

@@ -97,21 +97,27 @@ const findPilotAction = (id) => {
 // journal entries are KEPT: they record real trades, not paper P&L. Settings
 // (bankroll, risk profile, strictness) and bookmarks stay. The state file is
 // copied first (backup path returned), so a reset can be undone by hand.
+// Phase 70: scope 'stocks' (stocks + options) or 'crypto' resets that paper pool only (its
+// positions, trades, staged and discarded setups, Pilot proposals); 'all' (default) both.
 const isLive = (x) => x.execution === 'LIVE' || x.execution === 'BROKER' || x.execution === 'EXTERNAL' || x.adopted;
+const SCOPES = ['all', 'stocks', 'crypto'];
 
-function resetPaper() {
+function resetPaper(scope = 'all') {
+  if (!SCOPES.includes(scope)) throw new Error(`reset scope must be one of: ${SCOPES.join(', ')}`);
   const { pendingOrders, activePositions, tradeJournal, discardedOrders, pilotActions, save, backup } = need();
-  const backupPath = backup('pre-reset');
+  const { poolOf } = require('./paper-pools');
+  const other = (x) => scope !== 'all' && poolOf(x.market || (x.asset && /-USDC?$/.test(x.asset) ? 'crypto' : 'stocks')) !== scope; // outside the pool reset
+  const backupPath = backup(`pre-reset-${scope}`);
   const keep = (list, pred) => { const kept = list.filter(pred); const removed = list.length - kept.length; list.splice(0, list.length, ...kept); return removed; };
   const removed = {
-    positions: keep(activePositions, isLive),
-    trades: keep(tradeJournal, isLive),
-    pending: keep(pendingOrders, () => false),
-    discarded: keep(discardedOrders, () => false),
-    pilotActions: keep(pilotActions, (a) => !!a.external), // external holdings are real: their proposals stay
+    positions: keep(activePositions, (x) => isLive(x) || other(x)),
+    trades: keep(tradeJournal, (x) => isLive(x) || other(x)),
+    pending: keep(pendingOrders, other),
+    discarded: keep(discardedOrders, other),
+    pilotActions: keep(pilotActions, (a) => !!a.external || other(a)), // external holdings are real: their proposals stay
   };
   save();
-  return { removed, keptLive: { positions: activePositions.length, trades: tradeJournal.length }, backupPath };
+  return { scope, removed, keptLive: { positions: activePositions.length, trades: tradeJournal.length }, backupPath };
 }
 
 module.exports = { bind, resetPaper, saveSetup, unsaveSetup, getSavedSetups, getPilotActions, syncPilotActions, resolvePilotAction, findPilotAction };

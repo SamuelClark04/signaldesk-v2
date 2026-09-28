@@ -89,8 +89,7 @@
       // Cash is isolated per venue: paper money never counts as live buying power.
       card('Spendable cash', usd(t.cash), !t.usePaper ? `Live cash: ${t.venueCash.map(([v, c]) => `${v} ${usd(c)}`).join(' + ') || 'none synced'} (sync ${clock(t.syncedAt)})`
         : t.useCb ? `Paper cash ${usd(t.paperCash)} + live Coinbase USD/USDC ${usd(t.cbCash)} (kept separate when trading)`
-          : t.cash >= 0 ? 'Paper cash available: bankroll + realized − open paper positions'
-            : `Over-committed: ${money(t.paperCost)} in open paper positions vs a ${money(t.bankroll)} bankroll`, t.cash < 0 ? 'pnl-neg' : ''),
+          : `Paper cash: ${Object.values(t.pools).map((pl) => `${pl.label} ${usd(pl.cash)} of ${usd(pl.bankroll)}`).join(' · ')}${t.cash < 0 ? ' (over-committed)' : ''}`, t.cash < 0 ? 'pnl-neg' : ''),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
       realizedCard(card),
     ]);
@@ -114,8 +113,8 @@
     const tiles = Object.values(b.venues).map((v) => {
       const live = v.mode === 'live';
       const failed = live && !v.ok;
-      const value = !live ? money(b.bankroll) : failed ? '—' : money(v.buyingPower);
-      const sub = !live ? 'Paper bankroll: approvals fill in the paper ledger' : failed ? `Account unavailable: ${v.error}`
+      const value = !live ? money(v.paperBankroll ?? b.bankroll) : failed ? '—' : money(v.buyingPower); // Phase 70: its own paper pool
+      const sub = !live ? `${v.markets === 'stocks / options' ? 'Stocks / options' : 'Crypto'} paper bankroll: approvals fill in the paper ledger` : failed ? `Account unavailable: ${v.error}`
         : `${v.balances ? Object.entries(v.balances).filter(([k, x]) => k === 'USD' || x > 0).map(([k, x]) => `${k} ${money(x)}`).join(' + ')
           + (v.fundingCash > 0 ? ` · ${money(v.fundingCash)} in Funding (move to Trading to use)` : '') : `Cash ${money(v.cash)} · equity ${money(v.equity)}${v.tradingBlocked ? ' · TRADING BLOCKED' : ''}`} · as of ${clock(v.fetchedAt)}`;
       return el('div', { className: `pf-venue-tile${live ? ' is-live' : ''}${failed ? ' is-error' : ''}` }, [
@@ -124,7 +123,7 @@
     });
     return el('section', { className: 'pf-card' }, [
       el('div', { className: 'pf-card-head' }, [el('h3', { className: 'pf-h', textContent: 'Execution venues' }),
-        el('span', { className: 'pf-sub', textContent: `Position sizing uses the paper bankroll (${money(b.bankroll)}) for every venue` })]),
+        el('span', { className: 'pf-sub', textContent: `Paper venues size from their own paper bankroll (stocks / options ${money(b.bankroll)} · crypto ${money(b.cryptoBankroll ?? b.bankroll)}); LIVE venues from their account` })]),
       el('div', { className: 'pf-venues' }, tiles),
     ]);
   }

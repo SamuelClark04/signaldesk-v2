@@ -142,11 +142,11 @@ function createMessageHandler({ send, broadcast }) {
   }
 
   // Paper reset: destructive, so it needs the typed confirmation word as well.
-  function handleReset(ws, { confirm }) {
+  function handleReset(ws, { confirm, scope = 'all' }) {
     if (confirm !== 'RESET') return send(ws, 'LEDGER_RESET', { ok: false, error: 'Type RESET to confirm.' });
     try {
-      const r = ledger.resetPaper();
-      console.warn(`[ledger] PAPER RESET: removed ${JSON.stringify(r.removed)}; kept LIVE ${JSON.stringify(r.keptLive)}; backup ${r.backupPath}`);
+      const r = ledger.resetPaper(scope); // Phase 70: 'all' | 'stocks' | 'crypto'
+      console.warn(`[ledger] PAPER RESET (${r.scope}): removed ${JSON.stringify(r.removed)}; kept LIVE ${JSON.stringify(r.keptLive)}; backup ${r.backupPath}`);
       broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
       broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
       broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
@@ -154,7 +154,7 @@ function createMessageHandler({ send, broadcast }) {
       try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
       publishBrokerState(broadcast, { force: true }).catch(() => {});
       // Only the backup's file name goes to clients, not the server's directory layout.
-      return broadcast('LEDGER_RESET', { ok: true, removed: r.removed, keptLive: r.keptLive, backupFile: r.backupPath ? require('path').basename(r.backupPath) : null });
+      return broadcast('LEDGER_RESET', { ok: true, scope: r.scope, removed: r.removed, keptLive: r.keptLive, backupFile: r.backupPath ? require('path').basename(r.backupPath) : null });
     } catch (err) {
       return send(ws, 'LEDGER_RESET', { ok: false, error: err.message });
     }

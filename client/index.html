@@ -115,13 +115,22 @@
               <span class="field-label" id="settings-exitspread-label">Max Option Exit Spread ($) (per contract; applies instantly, from the next scan)</span>
               <div class="settings-exitspread" id="settings-exitspread" aria-labelledby="settings-exitspread-label"></div>
             </div>
-            <label class="field">
-              <span class="field-label">Paper trading bankroll</span>
-              <span class="input-wrap">
-                <span class="input-prefix">$</span>
-                <input class="input" id="settings-bankroll" type="number" min="100" step="any" inputmode="decimal" required>
-              </span>
-            </label>
+            <div class="settings-bankrolls">
+              <label class="field">
+                <span class="field-label">Paper bankroll: stocks / options ($)</span>
+                <span class="input-wrap">
+                  <span class="input-prefix">$</span>
+                  <input class="input" id="settings-bankroll" type="number" min="100" step="any" inputmode="decimal" required>
+                </span>
+              </label>
+              <label class="field">
+                <span class="field-label">Paper bankroll: crypto ($)</span>
+                <span class="input-wrap">
+                  <span class="input-prefix">$</span>
+                  <input class="input" id="settings-crypto-bankroll" type="number" min="100" step="any" inputmode="decimal" required>
+                </span>
+              </label>
+            </div>
             <button class="btn btn-primary" id="settings-save" type="submit">Save Settings</button>
             <span class="settings-status" id="settings-status" role="status"></span>
           </form>
@@ -135,7 +144,7 @@
               </select>
             </label>
             <label class="field">
-              <span class="field-label">Coinbase mode (crypto)</span>
+              <span class="field-label">Crypto mode (OKX US · Kraken Pro · Coinbase)</span>
               <select class="mode-select" id="settings-crypto-mode" data-key="cryptoMode">
                 <option value="paper">Paper</option>
                 <option value="live">LIVE</option>
@@ -143,6 +152,7 @@
             </label>
             <span class="live-warning" id="settings-live-warning" hidden></span>
           </div>
+          <section class="settings-waterfall" id="settings-waterfall" aria-label="Crypto waterfall routing and broker status"></section>
 
           <p class="settings-facts" id="settings-facts"></p>
           <a class="btn m-only m-journal-link" href="#journal">Open the trade journal →</a>
@@ -164,7 +174,15 @@
             <span class="panel-hint">Paper account only; LIVE and adopted broker positions are never touched</span>
           </div>
           <p class="settings-facts">Reset Paper Ledger removes every paper position, closed paper trade and journal entry, all staged setups and Pilot proposals,
-            so the paper account starts again at its bankroll with P&amp;L at zero. Settings and bookmarks stay. A backup copy of the ledger file is saved first.</p>
+            so the paper account starts again at its bankroll with P&amp;L at zero. Pick one pool to reset only its positions, trades and setups (the other paper pool is kept). Settings and bookmarks stay. A backup copy of the ledger file is saved first.</p>
+          <label class="field settings-reset-scope">
+            <span class="field-label">What to reset</span>
+            <select class="mode-select" id="settings-reset-scope">
+              <option value="all">All paper (stocks / options + crypto)</option>
+              <option value="stocks">Stocks / options paper only</option>
+              <option value="crypto">Crypto paper only</option>
+            </select>
+          </label>
           <button class="btn btn-danger" id="settings-reset" type="button">Reset Paper Ledger</button>
           <span class="settings-status" id="settings-reset-status" role="status"></span>
         </div>
@@ -223,6 +241,7 @@
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
   <script src="views/settings.js"></script>
+  <script src="views/settings-waterfall.js"></script>
   <script src="views/settings-mobile.js"></script>
   <script src="views/today.js"></script>
   <script src="lib/mobile.js"></script>

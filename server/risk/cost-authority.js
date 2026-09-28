@@ -61,7 +61,9 @@ const LEG_RATE = {
 // The fee table an order / position is costed on: 'crypto:kraken' / 'crypto:okx' when it is
 // routed to (or held at) that venue; otherwise its market ('crypto' = Coinbase).
 const BROKER_VENUE = { Kraken: 'kraken', OKX: 'okx' };
-const venueOf = (x) => (x && (x.venue || x.routeVenue || BROKER_VENUE[x.broker])) || null;
+// The first of venue / routeVenue / broker that names a crypto venue ('Live Crypto', a synced
+// holding's venue label, is not one: an OKX / Kraken holding is costed by its broker).
+const venueOf = (x) => (x ? [x.venue, x.routeVenue, BROKER_VENUE[x.broker], x.broker === 'Coinbase' ? 'coinbase' : null].find((v) => v === 'coinbase' || VENUE_FEES[v]) : null) || null;
 const feeKey = (x) => { const v = venueOf(x); return x && x.market === 'crypto' && VENUE_FEES[v] ? `crypto:${v}` : x && x.market; };
 // A venue's exact rates { maker, taker } (Coinbase: the account tier in force).
 const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { maker: coinbaseFees().maker, taker: coinbaseFees().taker });
@@ -101,7 +103,7 @@ function packageQuote(legs) {
 const MAX_FEE_DRAG = Number(process.env.MAX_COST_R) || 0.35;
 const MAX_FEE_DRAG_CRYPTO = Math.min(MAX_FEE_DRAG, 0.30); // Phase 65: standard crypto, at most 30% of 1R to fees + spread
 // Phase 65B two tiers: Moonshots (speculative) keep MAX_FEE_DRAG (0.35R) so tight coils stay tradeable.
-const maxFeeDrag = (market, speculative = false) => (market === 'crypto' && !speculative ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG);
+const maxFeeDrag = (market, speculative = false) => (/^crypto(:|$)/.test(market) && !speculative ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG); // a venue key ('crypto:okx') is crypto too
 
 function legRate(market, liquidity = 'taker') {
   const rates = LEG_RATE[market];

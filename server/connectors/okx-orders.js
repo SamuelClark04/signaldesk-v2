@@ -56,12 +56,20 @@ async function submitOrder(candidate, size, entryPrice, opts = {}) {
 
 const bookOf = (product) => pairs.get(product) || pairs.books(product)[0] || null;
 
+// A BUY's fee is charged in the coin: a stop / sell for a little more than is free (the gross size,
+// a rounding step) would be refused (51008). Within FEE_SLACK of the size: what is free instead.
+const FEE_SLACK = 0.005;
+async function fit(e, size) {
+  const a = await api.getAvailable(e.base);
+  return a.ok && a.available < size && a.available >= size * (1 - FEE_SLACK) ? a.available : size;
+}
+
 // Stand-alone protective stop for `size` already held (the target is watched by SignalDesk).
 async function placeBracket(product, size, takeProfit, stop, clientOrderId) {
   await pairs.refresh();
   const e = bookOf(product);
   if (!e || !(size > 0) || !(stop > 0)) return { ok: false, error: `OKX stop not sent: invalid ${product} ${size} @ ${stop}` };
-  const sz = pairs.size(e, size);
+  const sz = pairs.size(e, await fit(e, size));
   if (!(Number(sz) > 0)) return { ok: false, error: `OKX stop not sent: ${size} is below ${e.instId}'s size step` };
   return place('/api/v5/trade/order-algo', { instId: e.instId, tdMode: 'cash', side: 'sell', ordType: 'conditional', sz, slTriggerPx: pairs.price(e, stop), slOrdPx: '-1',
     algoClOrdId: api.clientIdOf(clientOrderId) }, 'stop', api.algoIdOf);
@@ -71,7 +79,7 @@ async function sellMarket(product, size, clientOrderId) {
   await pairs.refresh();
   const e = bookOf(product);
   if (!e || !(size > 0)) return { ok: false, error: `OKX sell not sent: invalid ${product} ${size}` };
-  const sz = pairs.size(e, size);
+  const sz = pairs.size(e, await fit(e, size));
   if (!(Number(sz) > 0)) return { ok: false, error: `OKX sell not sent: ${size} is below ${e.instId}'s size step` };
   const r = await place('/api/v5/trade/order', { instId: e.instId, tdMode: 'cash', side: 'sell', ordType: 'market', sz, clOrdId: api.clientIdOf(clientOrderId) }, 'sell', api.idOf);
   return r.ok ? { ...r, qty: Number(sz), environment: 'okx-live' } : { ...r, qty: Number(sz) };
