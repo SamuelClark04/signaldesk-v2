@@ -4,7 +4,8 @@
 // or { ok: false, error, uncertain? }.
 // Auth (private endpoints): headers API-Key = KRAKEN_API_KEY and API-Sign =
 //   base64( HMAC-SHA512( base64decode(KRAKEN_API_SECRET), uriPath + SHA256(nonce + postData) ) )
-// with a strictly increasing nonce (microseconds since the epoch, never repeated).
+// with a strictly increasing nonce (microseconds since the epoch, never repeated); private calls are
+// serialized so nonces also ARRIVE in order.
 // KRAKEN_API_BASE_URL points it at a local mock in tests / the harness.
 //   getAccount       Balance: cash = ZUSD + USD + USDC; spot holdings by SignalDesk base
 //   getAvailable     BalanceEx: balance + credit - credit_used - hold_trade (coins free to sell)
@@ -38,7 +39,21 @@ function failure(err) {
   return { ok: false, error: reason.startsWith('Kraken') ? reason : `Kraken unreachable: ${reason}`, uncertain };
 }
 
-async function privateCall(method, params = {}) {
+// Kraken rejects a nonce lower than the last one it SAW (EAPI:Invalid nonce), so two requests in
+// flight at once can fail when the network reorders them (Phase 70's broker tile + waterfall strip
+// read the balance together). Private calls therefore go out ONE AT A TIME, each nonce taken at
+// send time; an "Invalid nonce" refusal (never processed by Kraken) is retried once.
+let queue = Promise.resolve();
+function privateCall(method, params = {}) {
+  const run = queue.then(() => sendPrivate(method, params)).catch((err) => {
+    if (!(err.kraken || []).some((e) => /^EAPI:Invalid nonce/.test(e))) throw err;
+    return sendPrivate(method, params);
+  });
+  queue = run.catch(() => {});
+  return run;
+}
+
+async function sendPrivate(method, params = {}) {
   if (!configured()) throw Object.assign(new Error('Kraken: KRAKEN_API_KEY / KRAKEN_API_SECRET not set in .env'), { kraken: ['EAPI:not configured'] });
   const path = `/0/private/${method}`;
   const n = nonce();
