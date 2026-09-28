@@ -67,7 +67,7 @@
       : [nw(`Fees: ${signed(-f.friction, money)}`), ' ', nw(`(Entry${f.entryActual ? ' (actual)' : ''} ${signed(-f.entryFee, money)} + Exit fee ${signed(-f.exitCost, money)})`)];
     const sub = el('div', { className: 'np-sub' }, [nw(`Gross${f.atBid ? ' (at bid)' : ''}: ${signed(f.gross, money)}${f.grossPct === null || f.grossPct === undefined ? '' : ` (${pct(f.grossPct)})`}`),
       ...(split.length ? [' · ', ...split] : [])]);
-    sub.title = f.atBid ? `Gross at the best bid ${price(f.sell, p)} (a market sell fills there; last trade ${price(f.last, p)}). Fees: the entry fee + Coinbase's taker fee on the sale.`
+    sub.title = f.atBid ? `Gross at the best bid ${price(f.sell, p)} (a market sell fills there; last trade ${price(f.last, p)}). Fees: the entry fee + ${venueName(p)}'s taker fee on the sale.`
       : 'Gross at the last price (no fresh bid). Fees: the entry fee + the modelled exit fee.';
     const be = opts.noBreakEven ? null : breakEven(p);
     return el('div', { className: `np${opts.compact ? ' is-compact' : ''}` }, [main, sub, ...(be ? [el('div', { className: 'np-be' }, [nw(be)])] : [])]);
@@ -80,17 +80,20 @@
     return `Break-even sell price: ${price(q.breakEven, p)} (${pct(q.breakEvenPct)} from entry)`;
   }
 
-  // The cashout arithmetic for [Close at Coinbase]: 'Est. sell at best bid 0.2292 ($25.42) − Coinbase fee (~$0.33) = $25.09 cashout'.
+  // The venue whose fee a position pays on its sale (Phase 70D: OKX / Kraken positions were labelled Coinbase).
+  const venueName = (p) => ({ okx: 'OKX', kraken: 'Kraken', coinbase: 'Coinbase' })[p && p.venue] || ({ OKX: 'OKX', Kraken: 'Kraken' })[p && p.broker] || 'Coinbase';
+
+  // The cashout arithmetic for [Close at <venue>]: 'Est. sell at best bid 0.2292 ($25.42) − OKX fee (~$0.03) = $25.09 cashout'.
   function cashoutMath(p, m) {
     const f = live(p, m);
     const q = p.exitQuote;
     if (f && Number.isFinite(f.cashout)) {
       const thin = q && q.thinBid ? ` · the best bid holds only ${q.bidQty} (a market sell may fill lower)` : ''; // Phase 66
-      return `Est. sell at ${f.atBid ? 'best bid' : 'last price'} ${price(f.sell, p)} (${money(f.sell * p.positionSize)})${f.atBid ? '' : ' (no fresh bid)'} − Coinbase fee (~${money(f.exitFee)}) = ${money(f.cashout)} cashout${thin}`;
+      return `Est. sell at ${f.atBid ? 'best bid' : 'last price'} ${price(f.sell, p)} (${money(f.sell * p.positionSize)})${f.atBid ? '' : ' (no fresh bid)'} − ${venueName(p)} fee (~${money(f.exitFee)}) = ${money(f.cashout)} cashout${thin}`;
     }
     if (!q || !Number.isFinite(q.cashout)) return null;
     const at = q.sellBasis === 'best bid' ? `best bid ${price(q.sellPrice, p)}` : `last price ${price(q.sellPrice || q.underlying, p)} (no fresh bid)`;
-    return `Est. sell at ${at} (${money((q.sellPrice || q.underlying) * p.positionSize)}) − Coinbase fee (~${money(q.exitFee)}) = ${money(q.cashout)} cashout`;
+    return `Est. sell at ${at} (${money((q.sellPrice || q.underlying) * p.positionSize)}) − ${venueName(p)} fee (~${money(q.exitFee)}) = ${money(q.cashout)} cashout`;
   }
 
   // Upfront fee hurdle (ticket, staged approvals): 'Est. Round-Trip Fees: $0.66 (2.6% price hurdle to
@@ -104,5 +107,5 @@
 
   // Phase 69A: the crypto venue the router chose ("Route: Kraken Pro (0.25%/0.40%)"), as a note.
   const route = (o, cls = 'np-hurdle') => (o && o.routeReason ? [el('p', { className: `${cls} np-route`, textContent: o.routeReason })] : []);
-  SD.netPnl = { figures, live, hero, breakEven, cashoutMath, hurdle, route };
+  SD.netPnl = { figures, live, hero, breakEven, cashoutMath, hurdle, route, venueName };
 })();

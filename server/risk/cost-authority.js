@@ -11,7 +11,7 @@
 // replaces these once fetched (setCoinbaseFees); coinbaseFees() is always the one in force.
 // Crypto setups are held to MAX_FEE_DRAG_CRYPTO (0.30R) and their stop floor budgets under it.
 // Phase 69A: a setup routed to Kraken / OKX is costed on that venue's schedule (VENUE_FEES,
-// feeKey); strategy stop floors stay on Coinbase's (dearer) rates, so they are never too tight.
+// feeKey); strategy stop floors use the venue the setup would route to (strategies/venue-floor.js, 70D).
 // Legs are costed by how they really execute:
 //   entry   maker when the strategy rests a limit inside its entry zone
 //           (candidate.entryLiquidity = 'maker'), on paper AND live: live

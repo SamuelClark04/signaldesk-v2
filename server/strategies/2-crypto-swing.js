@@ -42,7 +42,8 @@ const STRATEGY_ID = 'crypto-swing';
 const FEE_DRAG_BUDGET = 0.29; // under the crypto gate's 0.30R (Phase 65), with a little room
 // Maker entry: a limit inside the zone (post-only when live, coinbase-api.js).
 const entryLiquidity = () => 'maker';
-const stopPct = () => minStopPct('crypto', 'maker', FEE_DRAG_BUDGET);
+const { floorKey } = require('./venue-floor');
+const stopPct = (asset) => minStopPct(floorKey(asset), 'maker', FEE_DRAG_BUDGET); // the routed venue's fees (70D)
 // Phase 65B: T1 at least 2.4R, so it nets >= 1.5 : 1 (the standard crypto gate) at the 5.4% floor,
 // whatever the global Strictness target (Moderate 2R) says.
 const MIN_TARGET_R = 2.4;
@@ -92,10 +93,10 @@ function analyse(bars) {
 }
 
 // Levels from the chart: { ok, entryMax, invalidation, pct, widened, target } or { ok: false, reason }.
-function levels(live, s, bars) {
+function levels(live, s, bars, asset) {
   const entryMax = px(live * (1 + CONFIG.entryBufferPct));
   const range = bars.slice(-14).reduce((sum, b) => sum + (b.high - b.low), 0) / Math.min(14, bars.length);
-  const cs = gate.chartStop(entryMax, s.flushBar.low - 0.25 * range, stopPct());
+  const cs = gate.chartStop(entryMax, s.flushBar.low - 0.25 * range, stopPct(asset));
   if (!cs.ok) return cs;
   const invalidation = floorPx(cs.invalidation);
   return { ok: true, entryMax, invalidation, pct: (entryMax - invalidation) / entryMax, widened: cs.widened,
@@ -153,7 +154,7 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
       if (!(s.lastClose <= s.mean)) { tally.skip(symbol, 'Reclaim happened earlier (not fresh)'); continue; }
       const shell = { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: 'Capitulation reversal', direction: 'long', timeframe: CONFIG.timeframe };
       const id = `${STRATEGY_ID}:REVERSAL:${symbol}:${s.flushBar.time}`;
-      const lv = levels(live, s, candles.get(symbol).bars);
+      const lv = levels(live, s, candles.get(symbol).bars, symbol);
       if (!lv.ok) { blocks.push({ id, reason: `CHART_STOP_TOO_TIGHT: ${lv.reason}`, candidate: shell }); tally.skip(symbol, 'Rejected: chart stop too tight for the fee tier'); lastSignal.set(symbol, s.flushBar.time); continue; }
       // Overhead daily resistance: snap T1 under it, or reject when it is too close.
       const daily = await getDailyBars(symbol, now);

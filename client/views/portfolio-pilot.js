@@ -20,6 +20,7 @@
     // Synced broker holdings: SignalDesk's exit rules don't run on them.
     'External holding': { label: 'BROKER', urgency: 'Low', tone: 'info', change: 'Not opened by SignalDesk: no SignalDesk stop, target or alert rules apply. Review it at the broker.' },
     'SignalDesk bracket at Coinbase': { label: 'BROKER', urgency: 'Low', tone: 'info', change: 'Its stop and target are live orders at Coinbase; they close it there. The reconciler records the fill here.' },
+    ...Object.fromEntries(['OKX', 'Kraken'].map((b) => [`SignalDesk bracket at ${b}`, { label: 'BROKER', urgency: 'Low', tone: 'info', change: `Its stop is a live order at ${b}; SignalDesk sells at T1. The reconciler records the fill here.` }])), // 70D
     Hold: { label: 'HOLD', urgency: 'Low', tone: 'ok', change: 'Becomes Take profit? at +10%, Near stop within 25% of the stop distance, Trend check after 7 days.' },
   };
   // ONE verdict per holding (Phase 54): the Portfolio matrix (server, PILOT_MATRIX)

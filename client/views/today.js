@@ -63,7 +63,7 @@
     } else {
       const { t } = m;
       const usd = (x) => `${x < 0 ? '−' : ''}${money(Math.abs(x))}`;
-      const cashSource = !t.usePaper ? 'live Coinbase USD + USDC' : t.useCb ? `paper ${usd(t.paperCash)} + Coinbase ${usd(t.cbCash)}` : 'paper cash';
+      const cashSource = !t.usePaper ? 'live crypto cash, every venue' : t.useCb ? `paper ${usd(t.paperCash)} + live ${usd(t.cash - t.paperCash)}` : 'paper cash'; // 70D: not Coinbase alone
       items = [
         // Total = Managed (SignalDesk positions) + External (broker coins it doesn't manage) + Cash.
         metric('Account value', usd(t.accountValue), `Total = ${usd(t.managedValue)} managed + ${usd(t.externalValue)} external + ${usd(t.cash)} cash (${cashSource})`),

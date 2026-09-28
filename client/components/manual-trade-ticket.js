@@ -120,7 +120,7 @@
       seg([['long', 'LONG'], ['short', 'SHORT', live]], t.direction, (v) => { t.direction = v; t.touched = { amount: t.touched.amount }; loadDefaults(); render(); }, 'mt-dir')]));
     rows.push(el('div', { className: 'mt-grid' }, [
       field('amount', 'Dollar size', 'amount', { prefix: '$' }),
-      field('stop', `Stop loss${d && d.stopBasis === 'fee floor' ? ' (fee-gate minimum)' : d && d.atr ? ` (1.5 × ATR ${d.atr.toFixed(d.price >= 1 ? 2 : 6)})` : ''}`, 'stop'),
+      field('stop', `Stop loss${d && d.stopBasis === 'fee floor' ? ' (fee-gate minimum)' : t.mode === 'crypto' && d && d.stopBasis ? ` (${d.stopBasis})` : d && d.atr ? ` (1.5 × ATR ${d.atr.toFixed(d.price >= 1 ? 2 : 6)})` : ''}`, 'stop'), // crypto: 1h ATR band (70D)
       field('t1', live ? 'Take profit (T1)' : 'Target T1', 't1'),
       ...(live ? [] : [field('t2', 'Target T2 (optional)', 't2')]),
     ]));
@@ -155,7 +155,9 @@
     const b = el('button', { type: 'button', id: 'mt-open', className: `btn btn-solid mt-go${live ? ' is-live' : ''}`, textContent: t.busy ? 'Opening…' : label, disabled: !ok });
     b.onclick = () => {
       const p = t.preview;
-      if (live && !window.confirm(`Place a LIVE order at Coinbase?\n\nBUY ${p.qty} ${t.asset} (${money(p.notional)}) at market\nStop ${tk.stop} · Take profit ${tk.t1} (bracket at Coinbase)\n\nThis uses real money.`)) return;
+      const at = ((p.route || '').replace(/^Route: (.+?) \(.*$/, '$1')) || 'Coinbase'; // the routed venue (70D)
+      const exits = at === 'Coinbase' ? '(bracket at Coinbase)' : `(stop at ${at}; SignalDesk sells at T1)`;
+      if (live && !window.confirm(`Place a LIVE order at ${at}?\n\nBUY ${p.qty} ${t.asset} (${money(p.notional)}) at market\nStop ${tk.stop} · Take profit ${tk.t1} ${exits}\n\nThis uses real money.`)) return;
       t.busy = true;
       t.result = null;
       t.openReq = req('MANUAL_TRADE_OPEN', { ticket: { ...tk, confirmLive: live } });

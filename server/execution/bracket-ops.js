@@ -79,10 +79,10 @@ async function rearmThenFail(ledger, pos, qty, why, code, msg, lead) {
 
 // Phase 68: move a LIVE Coinbase position's stop UP to `stop` (the bracket's T1 unchanged).
 // { moved: true, bracketId } | { alreadyClosed: true } | throws (nothing sold either way).
-async function replaceStop(ledger, pos, stop, label) {
+async function replaceStop(ledger, pos, stop, label, { allowSame = false } = {}) { // allowSame: a T1-only edit re-places a Coinbase bracket (70D)
   const product = pos.brokerProduct || pos.asset;
   const tp = pos.targets && pos.targets[0] && pos.targets[0].price;
-  if (!(stop > pos.invalidation)) throw fail('RATCHET_DOWN_REFUSED', `the new stop ${stop} is not above the current ${pos.invalidation}: a stop only moves up`);
+  if (!(stop > pos.invalidation) && !(allowSame && stop === pos.invalidation)) throw fail('RATCHET_DOWN_REFUSED', `the new stop ${stop} is not above the current ${pos.invalidation}: a stop only moves up`);
   const s = await venues.api(pos).getOrderStatus(pos.brokerId, { exitId: pos.brokerBracketId });
   if (!s.ok) throw fail('BROKER_UNREACHABLE', `could not read ${pos.id}'s orders (${s.error}); the stop was not changed`);
   const qty = heldQty(pos, s);

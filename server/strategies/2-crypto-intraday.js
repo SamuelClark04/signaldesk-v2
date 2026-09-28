@@ -67,7 +67,7 @@ function candidate(symbol, tf, s, b, live, ctx, now) {
   const shell = { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: s.setupType, direction: 'long', timeframe: tf };
   const reject = (reason, short) => { blocks.push({ id, reason, candidate: shell }); return { skip: `Rejected: ${short}` }; };
   const entryMax = round(Math.min(live, L.close * (1 + CONFIG.maxChasePct)) * (1 + CONFIG.entryBufferPct));
-  const floor = minStopPct('crypto', 'maker', CONFIG.feeBudget);
+  const floor = minStopPct(require('./venue-floor').floorKey(symbol), 'maker', CONFIG.feeBudget); // the routed venue's fees (70D)
   const structural = s.swingLow - CONFIG.stopAtrBuffer * sig.barAtr(b);
   const cs = gate.chartStop(entryMax, structural, floor);
   if (!cs.ok) return reject(`CHART_STOP_TOO_TIGHT: ${cs.reason}`, gate.CHART_STOP_REASON.toLowerCase());

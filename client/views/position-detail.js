@@ -136,7 +136,7 @@
       kv(opt ? `${p.asset} stop` : 'Stop', price(p.invalidation, p), 'text-short'),
       kv(opt ? `${p.asset} target (T1)` : 'Take profit 1 (T1)', t1 ? price(t1, p) : '—', 'text-long'),
       kv('Opened', p.openedAt ? new Date(p.openedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'),
-      ...[SD.ratchet.status(p), SD.ratchet.button(p, m, ctx)].filter(Boolean), // Phase 68: [🛡️ Lock Break-Even] / [🛡️ Lock Profit]
+      ...[SD.ratchet.status(p), SD.ratchet.button(p, m, ctx), SD.levelEditor.block(p, m, ctx)].filter(Boolean), // Phase 68 ratchet; 70D [✎ Edit stop / T1]
       exitButton(p, m, ctx),
       ...(SD.liveClose.can(p) && SD.netPnl.cashoutMath(p, m) ? [el('p', { className: 'np-math', textContent: SD.netPnl.cashoutMath(p, m) })] : []),
     ]);

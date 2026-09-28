@@ -16,7 +16,7 @@
     const cause = a.basis === 'best bid' ? 'due to spread/buffer' : a.basis === 'last price' ? 'vs the last price (no fresh bid)' : `vs the ${a.basis}`;
     const n = el('span', { className: `sub jr-audit ${a.favorable ? 'pnl-pos' : 'pnl-neg'}`,
       textContent: `Expected: ${money(a.expected)} | Actual Fill: ${money(a.actual)} (${signed(a.variance, money)} ${why} ${cause})` });
-    n.title = `Expected at ${a.basis}${Number.isFinite(a.expectedBid) ? ` ${a.expectedBid}` : ''}; filled ${a.filledQty} @ ${a.avgFillPrice}, Coinbase fee ${money(a.fees)}`;
+    n.title = `Expected at ${a.basis}${Number.isFinite(a.expectedBid) ? ` ${a.expectedBid}` : ''}; filled ${a.filledQty} @ ${a.avgFillPrice}, ${t.broker || 'Coinbase'} fee ${money(a.fees)}`;
     return n;
   }
 

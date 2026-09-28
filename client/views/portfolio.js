@@ -88,7 +88,7 @@
         + `${usd(t.cash)} in cash${t.unmarked ? ` · ${t.unmarked} without a live mark` : ''}`),
       // Cash is isolated per venue: paper money never counts as live buying power.
       card('Spendable cash', usd(t.cash), !t.usePaper ? `Live cash: ${t.venueCash.map(([v, c]) => `${v} ${usd(c)}`).join(' + ') || 'none synced'} (sync ${clock(t.syncedAt)})`
-        : t.useCb ? `Paper cash ${usd(t.paperCash)} + live Coinbase USD/USDC ${usd(t.cbCash)} (kept separate when trading)`
+        : t.useCb ? `Paper cash ${usd(t.paperCash)} + live crypto cash ${usd(t.cash - t.paperCash)} (kept separate when trading)`
           : `Paper cash: ${Object.values(t.pools).map((pl) => `${pl.label} ${usd(pl.cash)} of ${usd(pl.bankroll)}`).join(' · ')}${t.cash < 0 ? ' (over-committed)' : ''}`, t.cash < 0 ? 'pnl-neg' : ''),
       card('Unrealized P/L', signed(t.unrealized, money), t.unrealizedPct === null ? 'No open paper positions' : `${T().pct(t.unrealizedPct)} of cost · before est. exit fees`, pnlClass(t.unrealized)),
       realizedCard(card),

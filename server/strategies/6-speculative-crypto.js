@@ -173,7 +173,7 @@ async function evaluate(symbol, live, now, btc, watchRow) {
   }
 
   const entryMax = round(live * (1 + CONFIG.entryBufferPct));
-  const floor = minStopPct('crypto', kind === 'COIL' ? 'maker' : 'taker', CONFIG.feeBudget); // Moonshot tier: coil (maker) 4.6%, ignition (taker) 6.7%
+  const floor = minStopPct(require('./venue-floor').floorKey(symbol), kind === 'COIL' ? 'maker' : 'taker', CONFIG.feeBudget); // the routed venue's fees (70D); Coinbase: coil 4.6%, ignition 6.7%
   let invalidation;
   let stopBasis;
   if (kind === 'COIL') {

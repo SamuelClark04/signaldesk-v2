@@ -94,6 +94,9 @@ Client (`client/`)
   0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX and Kraken rest only the
   stop (a market stop: no STOP_GAP); SignalDesk sells at T1. OKX charges a BUY's fee in the coin:
   the position size is what was received. Cash checks use one currency (`spendable`).
+- Crypto stop floors use the routed venue's fees (strategies/venue-floor.js); Trade Ticket crypto
+  defaults: 2 x 1h ATR in a 3-5% band (Moonshots 4.5-6.5%), never under that floor
+  (ticket-levels.js). [✎ Edit stop / T1] (level-edit.js) tightens a live stop at its venue.
 - Stops only move UP (ratchet.js): +1.0R -> break-even + 0.05R, +1.5R -> entry + 0.5R; 1R
   (dollarRisk) stays the original risk. No automated setup on a symbol with an open LIVE /
   adopted record (order-guard.stackingConflict); Manual Trade Ticket orders are exempt.

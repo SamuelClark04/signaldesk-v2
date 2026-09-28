@@ -52,6 +52,14 @@
 .lwc-rail.is-top { top: 40px; } /* under the collapsed HUD pill */
 .lwc-rail.is-bottom { bottom: 52px; }
 .lwc-badge { padding: 1px 7px; border: 1px solid; border-radius: 999px; background: rgba(11, 17, 32, 0.85); font: 600 11px var(--font-mono); cursor: pointer; pointer-events: auto; }
+/* Phase 70D: [✎ Edit stop / T1] on the position card (level-editor.js) */
+.lv-edit-btn { align-self: flex-start; }
+.lv-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
+.lv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.lv-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.lv-input { width: 110px; padding: 4px 6px; font-family: var(--font-mono); }
+.lv-pct { min-width: 52px; font: 600 12px var(--font-mono); }
+.lv-note { color: var(--text-faint); font-size: 12px; }
 .lwc-levels.is-active { color: var(--accent); background: rgba(56, 189, 248, 0.1); }
 .opp-lwc-wrap:fullscreen { padding: 16px; background: var(--bg); }
 .opp-lwc-wrap:fullscreen .opp-lwc { flex: 1; height: auto; }

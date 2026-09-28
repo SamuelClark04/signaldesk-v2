@@ -70,7 +70,8 @@ function livePrice(mode, asset) {
   return prices.getLatestPrice(asset) || null;
 }
 
-// Pre-filled levels: stop 1.5 x daily ATR against the direction (never under the fee
+// Pre-filled levels (crypto: 2 x 1h ATR in a 3-5% / Moonshot 4.5-6.5% band, ticket-levels.js, 70D):
+// stocks: stop 1.5 x daily ATR against the direction (never under the fee
 // gate's minimum), T1 2R / T2 3R (crypto 2.5R / 3.5R: its fees need the room).
 // Moonshot Radar context (Phase 60B): the ticket opened from a gem carries its radar
 // score, and is sized like System 6: speculative, conviction = (score - 60) / 40 ->
@@ -105,10 +106,11 @@ async function defaults({ mode, asset, direction = 'long', venue = 'paper', moon
   if (mode === 'crypto') await cryptoRouter.prepare({ live: venue === 'live' }).catch(() => {});
   const fk = mode === 'crypto' ? require('../risk/cost-authority').feeKey({ market: 'crypto', venue: cryptoRouter.preRoute(asset, { live: venue === 'live' }).venue }) : MARKET[mode] === 'options' ? 'stocks' : MARKET[mode];
   const floor = px ? minStopPct(fk, 'taker') * px * FLOOR_ROOM : 0;
-  const risk = Math.max(a ? STOP_ATR * a : px * 0.03, floor);
+  const cs = mode === 'crypto' && px ? await require('./ticket-levels').cryptoStop(asset, px, floor / px, !!moonshotOf({ mode, moonshot })) : null; // 70D: 1h ATR band
+  const risk = cs ? cs.pct * px : Math.max(a ? STOP_ATR * a : px * 0.03, floor);
   const settings = ledger.getSettings();
   const k1 = mode === 'crypto' ? 2.5 : 2; // crypto fees need 2.5R for T1 to net the 1.25 : 1 floor
-  const out = { ok: true, mode, asset, direction, price: px || null, live: !!live, atr: a, amount: DEFAULT_AMOUNT[mode] || null, stopBasis: floor > (a ? STOP_ATR * a : 0) ? 'fee floor' : '1.5 x ATR',
+  const out = { ok: true, mode, asset, direction, price: px || null, live: !!live, atr: a, amount: DEFAULT_AMOUNT[mode] || null, stopBasis: cs ? cs.basis : floor > (a ? STOP_ATR * a : 0) ? 'fee floor' : '1.5 x ATR',
     stop: px ? round(px - d * risk, px) : null, t1: px ? round(px + d * k1 * risk, px) : null, t2: px ? round(px + d * (k1 + 1) * risk, px) : null,
     liveAllowed: settings.cryptoMode === 'live', coinbaseCash: mode === 'crypto' && venue === 'live' ? await coinbaseCash() : null,
     optionsSession: session.isEquityMarketOpen(now), paperBankroll: mode === 'crypto' ? settings.cryptoBankroll : settings.bankroll }; // Phase 70: that market's paper pool
