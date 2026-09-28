@@ -7,7 +7,7 @@
 //                         that already closed at the broker while SignalDesk was offline.
 //                         Concurrent calls share one run; changes are broadcast at once.
 //   run(broadcast)        held option quotes (real bids for marks and paper exits), Alpaca Paper option exits,
-//                         time exits (Phase 76: day trades at the close, options before expiry), then the
+//                         time exits (Phase 76: options 3 days before expiry), then the
 //                         PAPER exits (exit-monitor.js), then POSITIONS_UPDATED / JOURNAL_UPDATED.
 const ledger = require('./paper-ledger');
 const prices = require('../market/latest-prices');
@@ -76,7 +76,7 @@ async function runOnce(broadcast) {
     const sent = await require('./alpaca-paper').exits(ledger);
     if (sent.length) { out.positionsChanged = true; out.journalChanged = true; }
   } catch (err) { console.error('[pipeline] Alpaca Paper exits failed:', err.message); }
-  // Phase 76: day trades flattened before the close, options closed 3 days before expiry (time-exits.js).
+  // Phase 76: automated option spreads closed 3 days before expiry (time-exits.js); nothing else closes on time.
   try {
     const t = await require('./time-exits').run(ledger, { isBusy: require('./order-router').isBusy });
     if (t.some((x) => x.trade || x.pending || x.canceled)) { out.positionsChanged = true; out.journalChanged = true; }

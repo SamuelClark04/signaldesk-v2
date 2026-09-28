@@ -123,12 +123,10 @@ function validateOrder(c, size, entryPrice) {
   return null;
 }
 
-// Phase 76: a 'day' bracket's stop and target EXPIRE at the close, leaving a multi-day position unprotected
-// overnight: only a day trade (closed by SignalDesk before the bell) keeps 'day'; every other plan is 'gtc'.
-const bracketTif = (c) => (c.strategyId === 'equity-day' || c.tradeType === 'Day Trade' ? 'day' : 'gtc');
-
 // Market entry + broker-side take-profit and stop-loss (OTO bracket).
 // client_order_id = candidate id, so a retried request cannot create a duplicate order.
+// Phase 76 / 76B: GTC for EVERY plan, day trades included: a 'day' bracket's stop and target expire at the
+// 4:00 PM close and would leave the shares unprotected overnight (a day trade may now carry into the next session).
 async function submitOrder(candidate, size, entryPrice, ctx = LIVE) {
   const problem = validateOrder(candidate, size, entryPrice);
   if (problem) return { ok: false, error: `Alpaca order not sent: ${problem}` };
@@ -148,7 +146,7 @@ async function submitOrder(candidate, size, entryPrice, ctx = LIVE) {
       qty: String(size),
       side: candidate.direction === 'short' ? 'sell' : 'buy',
       type: 'market',
-      time_in_force: bracketTif(candidate),
+      time_in_force: 'gtc',
       order_class: 'bracket',
       client_order_id: String(candidate.id).slice(0, 128),
       take_profit: { limit_price: tick(candidate.targets[0].price) },
@@ -271,4 +269,4 @@ const paper = {
   validateOrder,
 };
 
-module.exports = { bracketTif, dataKeys, credentials, PAPER, LIVE, getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, getOrder, cancelOrder, dataOnly, paper, DEFAULT_BASE_URL, PAPER_BASE_URL };
+module.exports = { dataKeys, credentials, PAPER, LIVE, getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, getOrder, cancelOrder, dataOnly, paper, DEFAULT_BASE_URL, PAPER_BASE_URL };

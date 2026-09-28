@@ -87,7 +87,7 @@
   // Trade type and expected hold: from the setup (strategies set them); older
   // setups fall back to their strategy's defaults.
   const DURATION = {
-    'equity-day': ['Day Trade', '1-4 hours (closed by the end of the session)'], 'crypto-swing': ['Swing Trade', '2-7 days'],
+    'equity-day': ['Day Trade', '1-4 hours (may carry overnight until its stop or target)'], 'crypto-swing': ['Swing Trade', '2-7 days'],
     'equity-swing': ['Swing Trade', '3-10 days'], 'options-system': ['Options Swing', '5-15 trading days (exit well before expiry)'],
   };
   function holdChip(o) {

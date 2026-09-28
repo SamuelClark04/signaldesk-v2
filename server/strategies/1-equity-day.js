@@ -21,7 +21,7 @@ const SESSION_CLOSE = 16 * 60;
 
 const CONFIG = {
   tradeType: 'Day Trade',
-  expectedDuration: '1-4 hours (closed by the end of the session)',
+  expectedDuration: '1-4 hours (may carry overnight until its stop or target)', // Phase 76B: never closed on time alone
   openingRangeMinutes: 15,
   barMinutes: 5,
   minOpeningRangeBars: 10, // of 15 one-minute bars; IEX can skip quiet minutes

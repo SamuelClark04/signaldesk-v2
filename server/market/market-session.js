@@ -50,13 +50,6 @@ function sessionOpenMs(now = Date.now()) {
   return now;
 }
 
-// Phase 76: when today's session closes (ms): the clock's next_close while open (1 pm early closes
-// included), else 16:00 ET today.
-function closeMs(now = Date.now()) {
-  if (byClock(now) && clock.nextClose) return clock.nextClose;
-  return sessionOpenMs(now) + (CLOSE_MIN - OPEN_MIN) * 60000;
-}
-
 async function refresh() {
   const r = await require('../connectors/alpaca-api').getClock();
   if (!r.ok) {
@@ -87,4 +80,4 @@ function status(now = Date.now()) {
 // Tests: pin (or clear) the clock reading.
 const setClock = (c) => { clock = c ? { at: Date.now(), ...c } : null; };
 
-module.exports = { isEquityMarketOpen, byHours, sessionOpenMs, closeMs, status, start, stop, refresh, setClock, CLOCK_MS };
+module.exports = { isEquityMarketOpen, byHours, sessionOpenMs, status, start, stop, refresh, setClock, CLOCK_MS };

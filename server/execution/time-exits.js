@@ -1,11 +1,10 @@
-// Time exits (Phase 76 audit): the plan's clock, not only its price, ends a trade.
-//   SESSION_CLOSE  an equity-day (ORB) trade is a DAY trade ("closed by the end of the session"):
-//                  FLATTEN_MIN minutes before the bell (the Alpaca clock: 1 pm early closes too) it is
-//                  closed at market. Its Alpaca 'day' bracket would otherwise expire at the close and
-//                  leave the shares unprotected overnight.
+// Time exits (Phase 76 audit): an option's expiration, not only its price, ends a trade.
 //   EXPIRY_EXIT    an automated options position (System 5) is closed EXPIRY_DAYS calendar days before
 //                  its expiration: a debit spread held into expiry week carries pin / assignment risk and
 //                  the fastest theta, which the plan (exits "well before expiry") never meant to take.
+// Phase 76B (the user's rule): NOTHING else is closed on time alone. A day trade that has not hit its stop or
+// target by the bell carries into the next session (its Alpaca bracket is GTC), and a stale Moonshot is only
+// flagged in the UI (Stale, 24 h+): stop, target and the user's manual exits decide.
 // Session hours only (a closing order needs an open market). PAPER positions close in the internal ledger
 // (at the exit quote, like [Close]) or at Alpaca Paper (alpaca-paper.sendClose: a working entry is canceled,
 // never a closing trade). LIVE positions are never sold here: they are reported (the user closes them).
@@ -14,7 +13,6 @@ const prices = require('../market/latest-prices');
 const session = require('../market/market-session');
 const { daysToExpiry } = require('../connectors/options-data');
 
-const FLATTEN_MIN = 10;
 const EXPIRY_DAYS = 3;
 const RETRY_MS = 60 * 1000;
 const tries = new Map(); // position id -> last attempt (ms)
@@ -23,9 +21,6 @@ const warned = new Set();
 // Why `p` must be closed now, or null.
 function due(p, now = Date.now()) {
   if (!session.isEquityMarketOpen(now)) return null;
-  if (p.strategyId === 'equity-day' && p.market === 'stocks' && session.closeMs(now) - now <= FLATTEN_MIN * 60000) {
-    return { reason: 'SESSION_CLOSE', leg: 'session_close', why: `day trade: flattened ${FLATTEN_MIN} min before the close` };
-  }
   const od = p.optionsData;
   if (p.market === 'options' && p.strategyId === 'options-system' && od && od.expiration && daysToExpiry(od.expiration, now) <= EXPIRY_DAYS) {
     return { reason: 'EXPIRY_EXIT', leg: 'expiry_exit', why: `${daysToExpiry(od.expiration, now)} day(s) to its ${od.expiration} expiration (exits ${EXPIRY_DAYS} days before)` };
@@ -70,4 +65,4 @@ async function run(ledger, { isBusy = () => false } = {}, now = Date.now()) {
 
 const reset = () => { tries.clear(); warned.clear(); };
 
-module.exports = { run, due, reset, FLATTEN_MIN, EXPIRY_DAYS };
+module.exports = { run, due, reset, EXPIRY_DAYS };

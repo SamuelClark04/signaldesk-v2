@@ -40,6 +40,17 @@
       title: p.execution === 'BROKER' ? `Synced from ${p.broker}${p.tracked && p.tracked.length ? '; includes SignalDesk trades' : ''}` : p.execution === 'LIVE' ? `Opened live by SignalDesk at ${p.broker}` : 'SignalDesk paper ledger' });
   }
 
+  // Phase 76B: a Moonshot (a minutes-to-hours momentum trade) still open after 24 h gets a quiet STALE tag.
+  // Informational only: it still exits at its stop, its target or the user's Close, never on time.
+  const STALE_MS = 24 * 3600 * 1000;
+  function staleBadge(p) {
+    const at = Date.parse(p.openedAt);
+    if (!(p.strategyId === 'speculative-crypto' || p.speculative) || !Number.isFinite(at) || Date.now() - at < STALE_MS) return null;
+    const h = Math.floor((Date.now() - at) / 3600000);
+    return el('span', { className: 'pf-venue is-stale', textContent: `STALE · ${h >= 48 ? `${Math.floor(h / 24)}d` : `${h}h`}`,
+      title: `Moonshot open ${h} hours (planned: minutes to hours). Nothing is closed on time: it still exits at its stop, its target or your Close.` });
+  }
+
   // opts: { selectedId, onSelect(id), onClose(position, mark), closing:Set, online }
   function holdingsTable(data, opts) {
     const head = ['Asset', 'Direction', 'Size', 'Entry price', 'Stop loss', 'Target 1', 'Current price', 'Unrealized P/L', 'Next step', 'Action'];
@@ -60,7 +71,7 @@
       const tr = el('tr', { className: `row${p.id === opts.selectedId ? ' is-selected' : ''}` }, [
         el('td', {}, el('div', { className: 'scan-asset' }, [SD.scannerDetail.badge(p.asset),
           el('div', {}, [el('strong', { textContent: display(p) }), el('span', {}, [`${D().nameOf(p.asset)} `,
-            venueBadge(p)])])])),
+            venueBadge(p), ...[staleBadge(p)].filter(Boolean)])])])),
         el('td', { className: `text-upper text-${p.direction === 'short' ? 'short' : 'long'} pf-dir`, textContent: p.direction }),
         el('td', { className: 'num', textContent: size(p) }),
         el('td', { className: 'num', textContent: price(p.fillPrice, p) }),
