@@ -189,6 +189,7 @@ live.bind({ pendingOrders, activePositions, tradeJournal, discardedOrders, isKno
 module.exports = {
   updatePositions,
   stageOrder,
+  replacePending: live.replacePending,
   executeOrder,
   discardOrder,
   closePosition,

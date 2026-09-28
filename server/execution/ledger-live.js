@@ -148,4 +148,14 @@ function recoverLive(id, extra) {
   return { ...pos };
 }
 
-module.exports = { bind, markSubmitting, recoverable, recoverLive, splitPosition, syncLiveFill, voidLivePosition, setBracketStatus, adoptPosition, releaseAdopted, entryShare, MANUAL_EXIT_FIELDS };
+// Phase 70B: a staged order re-routed / re-sized in place (route-refresh.js): same id and staging
+// time; the replacement must come from the risk engine. false when it is no longer pending.
+function replacePending(id, sized) {
+  const i = L.pendingOrders.findIndex((o) => o.id === id && o.status === 'pending');
+  if (i < 0 || !sized || sized.id !== id || !require('../risk/risk-engine').isApproved(sized)) return false;
+  L.pendingOrders[i] = { ...L.pendingOrders[i], ...sized, status: 'pending', stagedAt: L.pendingOrders[i].stagedAt, reroutedAt: Date.now() };
+  L.save();
+  return true;
+}
+
+module.exports = { bind, replacePending, markSubmitting, recoverable, recoverLive, splitPosition, syncLiveFill, voidLivePosition, setBracketStatus, adoptPosition, releaseAdopted, entryShare, MANUAL_EXIT_FIELDS };

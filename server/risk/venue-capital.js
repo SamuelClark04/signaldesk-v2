@@ -86,7 +86,18 @@ async function sizingBankroll(market, settings, venue = null) {
   const r = await liveValue(broker);
   if (!r.ok) return { ok: false, reason: `${UNAVAILABLE}: ${r.error}`, basis };
   const external = manualValue();
-  return { ok: true, bankroll: r.value + external, accountValue: r.value, externalValue: external, cash: r.cash, basis, fetchedAt: r.fetchedAt };
+  // Phase 70B: LIVE crypto risk is a share of ALL the live crypto equity (Coinbase + Kraken Pro +
+  // OKX US: routing only picks where an order executes); the cash cap stays the routed venue's.
+  // Another venue that cannot be read now is left out (never fails the order).
+  const others = market === 'crypto' ? await otherCryptoValue(broker) : 0;
+  return { ok: true, bankroll: r.value + others + external, accountValue: r.value, otherVenuesValue: others, externalValue: external, cash: r.cash, basis, fetchedAt: r.fetchedAt };
+}
+
+const CRYPTO_VENUES = { coinbase: () => true, kraken: () => require('../connectors/kraken-api').configured(), okx: () => require('../connectors/okx-api').configured() };
+async function otherCryptoValue(broker) {
+  const ids = Object.keys(CRYPTO_VENUES).filter((id) => id !== broker && CRYPTO_VENUES[id]());
+  const vals = await Promise.all(ids.map((id) => liveValue(id).catch(() => ({ ok: false }))));
+  return vals.reduce((sum, v) => sum + (v.ok ? v.value : 0), 0);
 }
 
 // Phase 70: PAPER sizing uses the market's own paper pool (stocks / options, or crypto): its

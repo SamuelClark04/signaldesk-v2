@@ -47,7 +47,8 @@
   }
 
   function setupCard(staged, ctx) {
-    const [modeKey, broker] = VENUE[staged.market] || [null, '?'];
+    const [modeKey, venueBroker] = VENUE[staged.market] || [null, '?'];
+    const broker = staged.market === 'crypto' ? ({ okx: 'OKX US', kraken: 'Kraken Pro', coinbase: 'Coinbase' }[staged.venue] || venueBroker) : venueBroker; // the routed venue (69A / 70B)
     const live = !!(ctx.state.settings && modeKey && ctx.state.settings[modeKey] === 'live');
     const amount = SD.tradeAmount.resolve(staged, live);
     const o = amount.order; // size, risk and P&L at the chosen amount

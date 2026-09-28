@@ -36,10 +36,14 @@ async function routeCrypto(order, settings, livePrice) {
   // account (re-routed: cash moved, a pair listed / delisted): re-sized here. Sized from paper:
   // left as it is, so the SIZED_FOR_OTHER_VENUE check below refuses it (never auto-promoted).
   const liveSized = /-live$/.test(order.sizingBasis || '');
-  if (!liveSized || (r.venue === staged && order.sizingBasis === `${r.venue}-live`)) return { venue, order, resized: null };
+  if (!liveSized || (r.venue === staged && order.sizingBasis === `${r.venue}-live` && !r.fit)) return { venue, order, resized: null }; // fit: trimmed to the cash (70B)
   const capital = await sizingBankroll('crypto', settings, r.venue);
-  if (!capital.ok) throw new Error(capital.reason);
-  const s = processCandidate({ ...order, ...cryptoRouter.fields(r) }, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash });
+  const s = capital.ok ? processCandidate({ ...order, ...cryptoRouter.fields(r) }, capital.bankroll, { riskPct: settings.riskPct, maxCapitalPct: settings.maxCapitalPct, sizingBasis: capital.basis, cashCap: capital.cash })
+    : { approved: false, reason: capital.reason };
+  if (!s.approved && staged === 'coinbase' && order.sizingBasis === 'coinbase-live') { // Phase 70B: sized for Coinbase already: keep it there
+    console.warn(`[LIVE] ${order.id}: ${v.label} could not take it (${s.reason}); sent to Coinbase as staged`);
+    return routeCrypto.coinbase(order, `Route: Coinbase (${v.label}: ${s.reason})`);
+  }
   if (!s.approved) throw new Error(`ROUTE_CHANGED: ${r.reason}; re-sized for ${v.label}: ${s.reason}`);
   // The user's Trade Amount ($) is kept on the new venue (re-applied by the risk engine).
   const z = order.amountOverride ? resizeOrder(s, order.notional || order.positionSize * order.entryPrice, { confirmed: true }) : s;
@@ -47,6 +51,13 @@ async function routeCrypto(order, settings, livePrice) {
   console.warn(`[LIVE] ${order.id}: re-routed ${staged} -> ${r.venue} (${r.reason}); re-sized ${order.positionSize} -> ${z.positionSize}`);
   return { venue, order: z, resized: z };
 }
+
+// The Coinbase venue for an order kept on it (a cheaper venue could not take it).
+routeCrypto.coinbase = (order, reason) => {
+  const f = cryptoVenues.fees('coinbase');
+  const route = { venue: 'coinbase', label: 'Coinbase', broker: 'Coinbase', maker: f.maker, taker: f.taker, skipped: [], reason };
+  return { venue: { modeKey: 'cryptoMode', broker: 'Coinbase', venueId: 'coinbase', route, api: { submitOrder: (...a) => coinbaseApi.submitOrder(...a) } }, order, resized: null };
+};
 
 // Route a guard-approved order by its venue's mode (`order` may be the user's
 // resized copy: risk-engine.js resizeOrder, same id, a new quantity).

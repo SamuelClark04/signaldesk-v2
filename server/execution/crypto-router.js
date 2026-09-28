@@ -15,7 +15,12 @@
 const venues = require('./crypto-venues');
 
 const CASH_TTL_MS = 30 * 1000;
-const MIN_ORDER_USD = 20; // risk-engine MIN_CRYPTO_NOTIONAL: a venue that cannot fund it is not a route
+const { MIN_CRYPTO_NOTIONAL: MIN_ORDER_USD, CASH_BOUND_MIN_NOTIONAL, CASH_TRIM, feeInclusiveCash } = require('../risk/risk-engine');
+// Phase 70B: what one order can buy at venue `id` with `cash` (after its entry fee + the rounding
+// buffer), and whether that reaches the minimum a cash-bound account may trade ($19.80): an exact
+// $20.00 deposit qualifies (OKX $19.96, Kraken $19.90).
+const buys = (id, cash) => feeInclusiveCash(cash, venues.fees(id).taker);
+const funds = (id, cash) => buys(id, cash) + 1e-9 >= CASH_BOUND_MIN_NOTIONAL;
 const cashCache = new Map(); // venue id -> { at, value: { ok, cash, balances } | { ok: false, error } }
 
 // A venue's account (cached): { ok, cash (the most one order can spend), balances } | { ok: false, error }.
@@ -52,7 +57,7 @@ function preRoute(asset, { live = false } = {}) {
     if (!v.lists(asset)) { skipped.push({ label: v.label, why: `not listed on ${v.label}` }); continue; }
     const hit = live && cashCache.get(id);
     const cash = hit && hit.value.ok ? spendableFor(id, asset, hit.value) : null;
-    if (cash !== null && cash + 1e-9 < MIN_ORDER_USD * (1 + venues.fees(id).taker)) { skipped.push({ label: v.label, why: `${v.label} cash $${cash.toFixed(2)} < the $${MIN_ORDER_USD} minimum` }); continue; }
+    if (cash !== null && !funds(id, cash)) { skipped.push({ label: v.label, why: `${v.label} cash $${cash.toFixed(2)} < the $${MIN_ORDER_USD} minimum` }); continue; }
     return build(v, skipped);
   }
   return build(venues.VENUES.coinbase, skipped);
@@ -80,6 +85,9 @@ async function liveRoute(asset, notional) {
     const a = await accountOf(id);
     const cash = a.ok ? spendableFor(id, asset, a) : 0;
     if (a.ok && cash + 1e-9 >= need) return build(v, skipped);
+    // An order at the minimum on an exactly-funded venue: taken there, trimmed (<= 2%) to what the
+    // cash buys after the fee (fit: order-router re-sizes it on this venue).
+    if (a.ok && funds(id, cash) && notional <= buys(id, cash) * (1 + CASH_TRIM) + 1e-9) return { ...build(v, skipped), fit: true, fitNotional: buys(id, cash) };
     skipped.push({ label: v.label, why: a.ok ? `${v.label} cash $${cash.toFixed(2)} < $${need.toFixed(2)} order` : `${v.label} balance unavailable (${a.error})` });
   }
   return build(venues.VENUES.coinbase, skipped);

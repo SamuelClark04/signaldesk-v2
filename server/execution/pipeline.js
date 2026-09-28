@@ -190,6 +190,12 @@ async function pipelinePass() {
     }
   }
 
+  // Phase 70B: staged crypto setups move to the cheapest funded venue (a deposit, cash spent).
+  try {
+    const moved = await require('./route-refresh').refreshRoutes(ledger, settings, { live: cryptoLive, isBusy: require('./order-router').isBusy });
+    if (moved.length) broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
+  } catch (err) { console.error('[pipeline] route refresh failed:', err.message); }
+
   // After staging (Phase 62): each radar row's gate verdict reflects this pass's risk-engine outcome.
   try { await moonshotRadar.publish(broadcast, prices.getLatestPrices()); } catch (err) { console.error('[pipeline] moonshot radar failed:', err.message); }
 

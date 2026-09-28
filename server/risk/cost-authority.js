@@ -67,6 +67,8 @@ const venueOf = (x) => (x ? [x.venue, x.routeVenue, BROKER_VENUE[x.broker], x.br
 const feeKey = (x) => { const v = venueOf(x); return x && x.market === 'crypto' && VENUE_FEES[v] ? `crypto:${v}` : x && x.market; };
 // A venue's exact rates { maker, taker } (Coinbase: the account tier in force).
 const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { maker: coinbaseFees().maker, taker: coinbaseFees().taker });
+// The exact rates an order / position pays at its (routed) venue: { maker, taker }.
+const feesOf = (x) => venueFees(String(feeKey(x) || '').split(':')[1]);
 // The Coinbase rates in force: the .env / default ones until the account's own tier is read.
 
 function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
@@ -174,6 +176,7 @@ module.exports = {
   setCoinbaseFees,
   feeKey,
   venueFees,
+  feesOf,
   VENUE_FEES,
   COINBASE_MAKER_FEE,
   COINBASE_TAKER_FEE,

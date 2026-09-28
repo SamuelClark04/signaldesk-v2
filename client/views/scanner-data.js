@@ -157,11 +157,13 @@
       out.push({ name: 'Costs', sub: 'Fee drag within 0.35R', value: Number.isFinite(o.feeDrag) ? `${o.feeDrag.toFixed(2)}R` : '—', status: o.feeDrag <= 0.35 ? 'pass' : 'fail' });
       // Sized against the venue it executes on: the paper bankroll, or the LIVE account (real equity only).
       const [modeKey, broker] = { crypto: ['cryptoMode', 'coinbase'], stocks: ['stockMode', 'alpaca'], options: ['stockMode', 'alpaca'] }[o.market] || [];
-      const needed = state.settings && modeKey && state.settings[modeKey] === 'live' ? `${broker}-live` : 'paper';
+      const routed = o.market === 'crypto' && ['okx', 'kraken', 'coinbase'].includes(o.venue) ? o.venue : broker; // the crypto venue it was routed to (69A / 69B)
+      const needed = state.settings && modeKey && state.settings[modeKey] === 'live' ? `${routed}-live` : 'paper';
       const basis = o.sizingBasis || 'paper';
-      const basisText = { paper: 'the paper bankroll', 'coinbase-live': 'the live Coinbase account', 'alpaca-live': 'the live Alpaca account' }[basis] || basis;
+      const basisText = { paper: 'the paper bankroll', 'coinbase-live': 'the live Coinbase account', 'alpaca-live': 'the live Alpaca account', 'okx-live': 'the live crypto accounts (routed to OKX US)',
+        'kraken-live': 'the live crypto accounts (routed to Kraken Pro)' }[basis] || basis;
       out.push({ name: 'Risk budget', sub: basis === needed ? `Sized to ${o.riskPct > 0 ? `${(o.riskPct * 100).toFixed(1)}%` : 'the risk profile'} of ${basisText} (${SD.ui.money(o.sizingBankroll)})`
-        : `Sized from ${basisText}, but this venue now needs ${needed === 'paper' ? 'the paper bankroll' : `the live ${broker} account`}: dismiss & re-scan`,
+        : `Sized from ${basisText}, but this venue now needs ${needed === 'paper' ? 'the paper bankroll' : `the live ${routed} account`}: dismiss & re-scan`,
       value: o.sizingBankroll > 0 ? `${((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2)}%` : SD.ui.money(o.dollarRisk), status: basis === needed ? 'pass' : 'fail' });
       const created = Date.parse(o.timestamp) || o.stagedAt; // the guard measures from the setup's creation
       const left = created ? created + 30 * 60000 - Date.now() : null;
