@@ -66,6 +66,32 @@
       </section>
 
       <section class="tab" id="tab-journal" data-title="Journal" hidden>
+        <!-- Phase 77: Strategy Scorecard (lib/scorecard.js) + the book's risk now (PORTFOLIO_RISK). -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Strategy Scorecard</h2>
+            <div class="pf-venues-toggle sc-filter" id="scorecard-filter" role="group" aria-label="Which trades"></div>
+          </div>
+          <div class="sc-risks" id="scorecard-risk" aria-live="polite"></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th class="num">Trades</th>
+                  <th class="num">Win rate</th>
+                  <th class="num">Avg R</th>
+                  <th class="num">Profit factor</th>
+                  <th class="num">Net P/L</th>
+                </tr>
+              </thead>
+              <tbody id="scorecard-body"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="scorecard-empty">No closed trades yet.</div>
+          <p class="settings-note sc-note" id="scorecard-note"></p>
+        </div>
+
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">Closed Trades</h2>
@@ -89,6 +115,24 @@
           </div>
 
           <div class="empty" id="journal-empty">No closed trades yet.</div>
+        </div>
+
+        <!-- Phase 77: replay a strategy's live rules over past bars (server/backtest). Market data only. -->
+        <div class="panel bt">
+          <div class="panel-header">
+            <h2 class="panel-title">Backtest</h2>
+            <span class="panel-hint">Replays a strategy's live entry, stop and target rules over past bars, net of fees; never places an order</span>
+          </div>
+          <div class="bt-body">
+          <div class="bt-controls">
+            <label class="field"><span class="field-label">Strategy</span><select class="mode-select" id="backtest-rule"></select></label>
+            <label class="field"><span class="field-label">Window</span><select class="mode-select" id="backtest-days"></select></label>
+            <button class="btn btn-primary" id="backtest-run" type="button">Run Backtest</button>
+            <span class="settings-status" id="backtest-status" role="status"></span>
+          </div>
+          <p class="settings-note" id="backtest-unavailable"></p>
+          <div id="backtest-report"></div>
+          </div>
         </div>
       </section>
 
@@ -116,6 +160,10 @@
             <div class="field settings-risk-field">
               <span class="field-label" id="settings-exitspread-label">Max Option Exit Spread ($) (per contract; applies instantly, from the next scan)</span>
               <div class="settings-exitspread" id="settings-exitspread" aria-labelledby="settings-exitspread-label"></div>
+            </div>
+            <div class="field settings-risk-field">
+              <span class="field-label">Portfolio limits (the whole book; apply from the next scan and at every approval)</span>
+              <div class="settings-portfolio-risk" id="settings-portfolio-risk"></div>
             </div>
             <div class="settings-bankrolls">
               <label class="field">
@@ -209,6 +257,7 @@
           integrity="sha384-KkYqTZlM13Zya6fVUF3IGCBOQ1ehFeJVVgxaVvD/0MebineF9EI8Jkd3NnWNChqN" crossorigin="anonymous"></script>
   <!-- Order matters: helpers, then views, then the shell that wires them up. -->
   <script src="lib/ui.js"></script>
+  <script src="lib/scorecard.js"></script>
   <script src="lib/venue.js"></script>
   <script src="lib/auto-cycle.js"></script>
   <script src="components/chart-data.js"></script>
@@ -253,7 +302,10 @@
   <script src="views/portfolio-pilot.js"></script>
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
+  <script src="views/journal-scorecard.js"></script>
+  <script src="views/journal-backtest.js"></script>
   <script src="views/settings.js"></script>
+  <script src="views/settings-portfolio-risk.js"></script>
   <script src="views/settings-waterfall.js"></script>
   <script src="views/settings-mobile.js"></script>
   <script src="views/settings-accounts.js"></script>

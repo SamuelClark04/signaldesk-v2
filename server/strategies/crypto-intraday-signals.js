@@ -85,7 +85,8 @@ function pullback(b, tf) {
   if (!(e50[L] > 0)) return { skip: 'not enough history' };
   if (!(e9[L] > e21[L] && e21[L] > e50[L])) return { skip: 'no uptrend (EMA9 > EMA21 > EMA50)' };
   const win = tf === '15m' ? 96 : 24; // 24 hours of bars
-  for (const [name, series] of [['EMA21', e21], ['24h VWAP', b.map((_, i) => vwapAt(b, i, win))]]) {
+  const from = n - 1 - CONFIG.pullbackBars; // Phase 77: only the bars read below (identical result, ~15x less work: the backtest replays this per bar)
+  for (const [name, series] of [['EMA21', e21], ['24h VWAP', b.map((_, i) => (i >= from ? vwapAt(b, i, win) : NaN))]]) {
     const dipped = b.slice(n - 1 - CONFIG.pullbackBars, n - 1).some((x, j) => x.low <= series[n - 1 - CONFIG.pullbackBars + j]);
     if (!dipped || !(closes[P] <= series[P]) || !(closes[L] > series[L])) continue;
     const relVol = relVolAt(b, L);

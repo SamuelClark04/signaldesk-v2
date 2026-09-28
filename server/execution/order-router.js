@@ -3,6 +3,7 @@
 // guard runs first, then the order is routed by its market's mode (paper / LIVE).
 const ledger = require('./paper-ledger');
 const { validateApproval, stackingConflict } = require('./order-guard');
+const portfolioRisk = require('../risk/portfolio-risk'); // Phase 77
 const prices = require('../market/latest-prices');
 const { recordRejection } = require('./rejection-stats');
 const { requiredBasis, sizingBankroll } = require('../risk/venue-capital');
@@ -130,17 +131,22 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
   const stack = stackingConflict(order, ledger.getActivePositions()); // Phase 68: e.g. a Pilot rotation into a coin already held
-  const check = stack ? { valid: false, reason: stack } : validateApproval(order, livePrice);
+  // Phase 77: the book's open-risk ceiling / equity direction limit, again at approval (other trades may have opened).
+  const book = (o) => portfolioRisk.check(o, { positions: ledger.getActivePositions(), bankroll: o.sizingBankroll, settings: ledger.getSettings() });
+  const heat = stack ? null : book(order);
+  const check = stack || heat ? { valid: false, reason: stack || heat } : validateApproval(order, livePrice);
   if (check.valid && amount !== undefined && amount !== null) {
     const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
     const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });
     if (!resized.approved) throw new Error(resized.reason);
+    const heat2 = book(resized);
+    if (heat2) throw new Error(heat2); // a bigger trade amount would pass the ceiling: the setup stays pending
     console.log(`[ledger] APPROVE ${id}: trade amount $${Number(amount).toFixed(2)} -> ${resized.positionSize} (was ${order.positionSize}), risk $${resized.dollarRisk.toFixed(2)}`);
     return routeApproved(resized, livePrice);
   }
   if (check.valid) return routeApproved(order, livePrice);
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
-  if (check.reason !== 'NO_LIVE_PRICE') {
+  if (check.reason !== 'NO_LIVE_PRICE' && !heat) { // a book limit is temporary (close a trade, then approve): it stays pending
     ledger.discardOrder(id);
     recordRejection(id, check.reason, order);
   }

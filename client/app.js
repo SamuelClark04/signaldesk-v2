@@ -131,20 +131,25 @@
   SD.portfolio.init(transport);
   SD.settings.init(transport);
   SD.accounts.init(transport); // Phase 73: Settings > Accounts & Connections
+  SD.backtest.init(transport); // Phase 77: Journal > Backtest
 
   const HANDLERS = {
-    JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
+    JOURNAL_UPDATED: (trades) => { SD.journal.render(trades || []); SD.journalScorecard.render(trades || []); }, // + Strategy Scorecard (77)
+    PORTFOLIO_RISK: (r) => SD.journalScorecard.renderRisk(r), // Phase 77: open risk vs the ceiling, equity direction counts
+    BACKTEST_CATALOG: (c) => SD.backtest.received(c),
+    BACKTEST_PROGRESS: (p) => SD.backtest.progress(p),
+    BACKTEST_RESULT: (r) => SD.backtest.result(r),
     ACTION_FAILED: (payload) => (payload && ['CLOSE_POSITION', 'ADOPT_POSITION', 'RELEASE_POSITION'].includes(payload.type)
       ? (SD.portfolio.actionFailed(payload), payload.type === 'CLOSE_POSITION' && SD.opportunities.actionFailed(payload))
       : SD.opportunities.actionFailed(payload)),
     POSITIONS_UPDATED: (list) => { SD.portfolio.positionsUpdated(); SD.liveClose.watch(list); }, // closes a pending adoption form; UNARMORED toast (Phase 67)
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
-    SETTINGS_UPDATED: (settings) => { SD.settings.render(settings); SD.accounts.explain(settings); },
+    SETTINGS_UPDATED: (settings) => { SD.settings.render(settings); SD.accounts.explain(settings); SD.portfolioRiskSettings.render(settings); },
     ACCOUNTS_STATUS: (s) => SD.accounts.status(s), // Phase 73: never a secret
     ACCOUNT_RESULT: (r) => SD.accounts.result(r),
     BROKER_STATE: (broker) => SD.settingsWaterfall.render(broker), // Phase 70: the Settings waterfall strip
-    SETTINGS_ERROR: (payload) => SD.settings.error(payload),
+    SETTINGS_ERROR: (payload) => { SD.settings.error(payload); SD.portfolioRiskSettings.render(payload && payload.settings); },
     LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
     POSITION_MARKS: (m) => SD.liveChart.record(Object.fromEntries(Object.entries((m && m.book) || {}).map(([s, b]) => [s, b.last]))), // held symbols every 5 s
@@ -170,7 +175,7 @@
     setConn('connecting', 'Connecting…');
     const ws = new WebSocket(WS_URL);
     socket = ws;
-    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.liveClose.reset(); SD.ratchet.reset(); SD.levelEditor.reset(); SD.liveChart.announce(true); refreshView(); }); // Phase 67/68: nothing stays busy across a reconnect; re-watch the charts
+    ws.addEventListener('open', () => { backoff = 1000; setConn('open', 'Live'); SD.liveClose.reset(); SD.ratchet.reset(); SD.levelEditor.reset(); SD.liveChart.announce(true); SD.backtest.online(); refreshView(); }); // Phase 67/68: nothing stays busy across a reconnect; re-watch the charts
     ws.addEventListener('message', (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
@@ -191,5 +196,7 @@
 
   showTab(location.hash.slice(1));
   SD.journal.render([]);
+  SD.journalScorecard.render([]);
+  SD.portfolioRiskSettings.render(null);
   connect();
 })();

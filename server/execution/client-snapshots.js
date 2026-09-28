@@ -4,6 +4,11 @@
 const radar = require('../intelligence/moonshot-radar');
 const afterHours = require('./after-hours-plans');
 
-const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()], ['ACCOUNTS_STATUS', require('../security/vault').status()]]; // + accounts (73)
+function portfolioRisk() {
+  const ledger = require('./paper-ledger');
+  const s = ledger.getSettings();
+  return ['PORTFOLIO_RISK', require('../risk/portfolio-risk').summary(ledger.getActivePositions(), s, { stocks: s.bankroll, crypto: s.cryptoBankroll })];
+}
+const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()], ['ACCOUNTS_STATUS', require('../security/vault').status()], portfolioRisk()]; // + accounts (73), book risk (77)
 
 module.exports = { snapshots };

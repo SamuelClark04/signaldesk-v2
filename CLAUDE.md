@@ -60,6 +60,14 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   bracket is GTC, day trades included), stale Moonshots only get a UI tag (portfolio-table staleBadge, 24 h+); stop,
   target and manual exits decide. Equity swing scans all STOCKS. ORB: breakout above the session VWAP, none while SPY is under its VWAP.
   Tests that call moonshot-radar.compute set RADAR_CACHE_PATH (it otherwise writes next to the REAL ledger).
+- **Portfolio risk + attribution + backtest (Phase 77)**: risk/portfolio-risk.js caps the BOOK (a pool of one account): open risk
+  (dollarRisk x the stop distance still at risk; option spreads in full) + the new setup <= settings.maxOpenRiskPct (6%) of the
+  bankroll it is sized from, and <= settings.maxEquityPerDirection (2) bullish / 2 bearish equity trades open or staged; at staging
+  (pipeline) and at approval (order-router: refused but KEPT pending). Pilot / adopted / external holdings and manual orders are
+  outside both rules. PORTFOLIO_RISK each pass + on connect. Journal: Strategy Scorecard (client/lib/scorecard.js, UMD: a T1
+  partial + runner = one trade) and Backtest (server/backtest: history.js paged bars, engine.js replay with the live exits / cost
+  gates, rules-stocks.js / rules-crypto.js ports of the live rules, runner.js reports, handler.js RUN_BACKTEST / GET_BACKTESTS).
+  Moonshots / options / Pilot are not replayable (no archived buzz / option chains). The backtest follows the live Strictness dial.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

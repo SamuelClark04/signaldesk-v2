@@ -29,6 +29,10 @@ const SETTINGS_RULES = {
   // combined leg bid/ask x 100) is over this many dollars per contract, while on.
   optionExitSpreadOn: { type: 'choice', default: true, values: [true, false] },
   maxOptionExitSpread: { type: 'number', default: 8, min: 0, max: 500 },
+  // Phase 77 (risk/portfolio-risk.js): the book's open-risk ceiling (share of the bankroll) and the most
+  // bullish / bearish equity trades open or staged at once.
+  maxOpenRiskPct: { type: 'number', default: 0.06, min: 0.005, max: 0.5 },
+  maxEquityPerDirection: { type: 'number', default: 2, min: 1, max: 20, integer: true },
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
 
@@ -40,8 +44,8 @@ function cleanValue(key, value, rule) {
     return value;
   }
   const n = Number(value);
-  if (!Number.isFinite(n) || n < rule.min || n > rule.max) {
-    throw new Error(`${key} must be a number between ${rule.min} and ${rule.max}`);
+  if (!Number.isFinite(n) || n < rule.min || n > rule.max || (rule.integer && !Number.isInteger(n))) {
+    throw new Error(`${key} must be a${rule.integer ? ' whole' : ''} number between ${rule.min} and ${rule.max}`);
   }
   return n;
 }

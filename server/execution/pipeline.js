@@ -14,6 +14,7 @@ const { computeTriggers } = require('../intelligence/watch-triggers');
 const ledger = require('./paper-ledger');
 const { sendApprovalAlert } = require('./notifier');
 const { stackingConflict } = require('./order-guard');
+const portfolioRisk = require('../risk/portfolio-risk'); // Phase 77: open-risk ceiling + equity direction limit
 const exitPass = require('./exit-pass');
 const cryptoRouter = require('./crypto-router'); // Phase 69A: OKX -> Kraken -> Coinbase waterfall // broker reconciliation (first in every pass) + paper exits (Phase 67)
 const { recordRejection: recordStat } = require('./rejection-stats');
@@ -147,6 +148,8 @@ async function pipelinePass() {
     if (top && !top.ok) { recordRejection(result.id, top.reason, candidate); continue; }
     const stack = stackingConflict(result, ledger.getActivePositions(), ledger.getPendingOrders()); // Phase 68 / 76: one automated trade per symbol
     if (stack) { recordRejection(result.id, stack, candidate); continue; }
+    const bookRisk = portfolioRisk.check(result, { positions: ledger.getActivePositions(), pending: ledger.getPendingOrders(), bankroll: capital.bankroll, settings });
+    if (bookRisk) { recordRejection(result.id, bookRisk, candidate); continue; }
     counts.approved += 1;
     try {
       const staged = ledger.stageOrder(result);
@@ -210,6 +213,7 @@ async function pipelinePass() {
   // Dashboard intelligence (attention alerts + market context), after exits settle.
   try { await loop.pace(); publishIntelligence(broadcast); } catch (err) { console.error('[pipeline] dashboard intelligence failed:', err.message); }
 
+  try { broadcast('PORTFOLIO_RISK', portfolioRisk.summary(ledger.getActivePositions(), settings, { stocks: settings.bankroll, crypto: settings.cryptoBankroll })); } catch (err) { console.error('[pipeline] portfolio risk failed:', err.message); }
   afterHours.publish(broadcast); // OPTIONS_PLANS (after-hours options plans that cleared the risk engine)
   scanLog.publish(); // SCAN_LOG to every client (server.js)
   console.log(`[pipeline] candidates=${counts.generated} approved=${counts.approved} staged=${counts.staged}`);

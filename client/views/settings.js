@@ -278,5 +278,6 @@
     render,
     error,
     resetDone,
+    request, // Phase 77: settings-portfolio-risk.js saves through the same pending / status flow
   };
 })();
