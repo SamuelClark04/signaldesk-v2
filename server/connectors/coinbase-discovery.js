@@ -62,7 +62,7 @@ async function refresh(now = Date.now(), { force = false } = {}) {
   const url = `${(process.env.COINBASE_API_BASE_URL || 'https://api.coinbase.com').replace(/\/+$/, '')}/api/v3/brokerage/market/products?product_type=SPOT`;
   inflight = (async () => {
     try {
-      const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      const res = await require('./net-guard').guardedFetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const products = ((await res.json()).products || []).filter((p) => p.product_type === 'SPOT');
       const coins = products.filter((p) => p.quote_currency_id === 'USD' && tradable(p) && /^[A-Z0-9]{1,10}$/.test(String(p.base_currency_id).toUpperCase()))

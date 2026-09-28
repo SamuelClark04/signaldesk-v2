@@ -43,6 +43,13 @@ function credentials(ctx) {
     base: (process.env.ALPACA_PAPER_BASE_URL || PAPER_BASE_URL).replace(/\/+$/, '') };
 }
 const paperConfigured = () => { const c = credentials(PAPER); return !!(c.key && c.secret); };
+// Phase 73: the keys for MARKET DATA / NEWS / streams: the live keys, else the Alpaca Paper keys (both
+// serve the free IEX feed), so a family install with only paper keys still gets charts and scans.
+function dataKeys() {
+  if (process.env.ALPACA_API_KEY && process.env.ALPACA_API_SECRET) return { key: process.env.ALPACA_API_KEY, secret: process.env.ALPACA_API_SECRET };
+  const p = credentials(PAPER);
+  return p.key && p.secret ? { key: p.key, secret: p.secret } : null;
+}
 const envOf = (ctx) => (ctx.paper ? 'alpaca-paper' : environment());
 const DATA_ONLY_ERROR = 'Alpaca keys are a PAPER account: used for market data / news only, never as a broker (set ALPACA_ACCOUNT_ROLE=trading to use it as one)';
 // Alpaca rejects sub-penny prices: 2 decimals at/above $1, 4 below.
@@ -225,8 +232,9 @@ async function getOrderStatus(brokerId, opts = {}, ctx = LIVE) {
 }
 
 // The market clock (read-only): { ok, isOpen, nextOpen, nextClose } in ms (market/market-session.js).
-async function getClock(ctx = LIVE) {
-  const r = await alpacaFetch('/v2/clock', {}, ctx);
+async function getClock(ctx = null) { // Phase 73: the live keys, else the paper account's (same market clock)
+  const c = ctx || (process.env.ALPACA_API_KEY && process.env.ALPACA_API_SECRET ? LIVE : PAPER);
+  const r = await alpacaFetch('/v2/clock', {}, c);
   if (!r.ok) return r;
   const b = r.body || {};
   return { ok: true, isOpen: b.is_open === true, nextOpen: Date.parse(b.next_open) || null, nextClose: Date.parse(b.next_close) || null };
@@ -259,4 +267,4 @@ const paper = {
   validateOrder,
 };
 
-module.exports = { getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, getOrder, cancelOrder, dataOnly, paper, DEFAULT_BASE_URL, PAPER_BASE_URL };
+module.exports = { dataKeys, credentials, PAPER, LIVE, getAccount, submitOrder, getOrderStatus, getPositions, sellMarket, getClock, getOrder, cancelOrder, dataOnly, paper, DEFAULT_BASE_URL, PAPER_BASE_URL };

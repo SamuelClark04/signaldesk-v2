@@ -67,7 +67,7 @@ function parseAtom(xml, sub) {
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/atom+xml, application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const res = await require('./net-guard').guardedFetch(url, { headers: { 'User-Agent': UA, Accept: 'application/atom+xml, application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   return { res, text: await res.text() };
 }
 

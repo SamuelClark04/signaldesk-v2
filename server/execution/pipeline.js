@@ -69,16 +69,15 @@ async function collectCandidates() {
     try {
       all.push(...(await loop.during(name, generate)));
     } catch (err) {
+      if (err.code === 'PASS_ABANDONED') throw err; // the watchdog released this pass (Phase 73)
       console.error(`[pipeline] strategy ${name} failed:`, err.message);
     }
   }
   return all;
 }
 
-// One pipeline pass. Strategies only propose; the risk engine decides; only
-// the ledger holds state. A failure on one candidate never stops the others.
-// Scan status for the Scanner ("Complete · 3 seconds"), broadcast as SCAN_STATUS
-// when a pass starts and ends. priceTimes gives each fresh price's real age.
+// One pass: strategies propose, the risk engine decides, the ledger holds state; one candidate failing never
+// stops the others. SCAN_STATUS ("Complete · 3 seconds") when a pass starts / ends; priceTimes: each price's age.
 let pipelineRunning = false;
 const scanStatus = { running: false, trigger: null, startedAt: null, finishedAt: null, durationMs: null, counts: null, priceTimes: {}, intervalMs: PIPELINE_INTERVAL_MS };
 const getScanStatus = () => ({ ...scanStatus, counts: scanStatus.counts && { ...scanStatus.counts }, priceTimes: { ...scanStatus.priceTimes }, session: session.status() });
@@ -91,7 +90,9 @@ async function runPipeline({ trigger = 'timer' } = {}) {
   broadcast('SCAN_STATUS', getScanStatus());
   let counts = null;
   try {
-    counts = await pipelinePass();
+    // Phase 73: a pass gets PASS_WATCHDOG_MS (45 s); past it the lock is released and the stalled pass abandoned.
+    const r = await loop.watchdog(loop.inPass(() => pipelinePass()));
+    counts = r && r.timedOut ? null : r;
     return counts;
   } finally {
     pipelineRunning = false;
@@ -114,7 +115,8 @@ async function pipelinePass() {
   const counts = { generated: 0, approved: 0, staged: 0 };
   // Broker truth FIRST (Phase 67): fills, exits and voids that happened at the broker (also while
   // SignalDesk was offline) are booked before any strategy runs or any setup is sized / staged.
-  await exitPass.reconcile(broadcast);
+  await loop.during('broker-reconcile', () => exitPass.reconcile(broadcast)); // named: a stall here is reported as such
+  await loop.during('exit-pass', () => exitPass.run(broadcast)); // Phase 73: exits first, never behind the scan (held option quotes, PAPER exits)
   // Macro/FDA calendar (re-read every few hours): every setup is tagged with the
   // scheduled events inside its expected hold (candidate.catalysts).
   try { if (await macro.refresh()) broadcast('MACRO_EVENTS', macro.upcoming()); } catch (err) { console.error('[pipeline] macro calendar failed:', err.message); }
@@ -224,7 +226,6 @@ async function pipelinePass() {
     console.error('[pipeline] watch triggers failed:', err.message);
   }
 
-  await loop.during('exit-pass', () => exitPass.run(broadcast)); // held option quotes, PAPER exits, POSITIONS_UPDATED / JOURNAL_UPDATED (exit-pass.js)
   // Portfolio Pilot defense: SELL under the 200-day SMA, TRIM when far extended (Approvals queue).
   try { await loop.during('portfolio-pilot', () => reviewHoldings(broadcast)); } catch (err) { console.error('[pipeline] pilot review failed:', err.message); }
 
@@ -253,6 +254,7 @@ function startPipeline(options = {}) {
   expirySweeper.start(broadcast);
   exitPass.reconcile(broadcast); // Phase 67: book what the broker did while SignalDesk was down, right at boot (errors are logged inside)
   loop.watch(); // Phase 72: '[loop] event loop blocked N s (during X)' when the thread stalls
+  exitPass.startFast(broadcast); // Phase 73: PAPER stops / targets every 5 s, independent of the pass
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)

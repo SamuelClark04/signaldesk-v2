@@ -1,7 +1,7 @@
 // SignalDesk-V2 bootloader: HTTP (Express) + client-facing WebSocket hub.
 // Starts the market-data connectors and the execution pipeline; all trading
 // logic lives in server/execution/*, server/risk/* and server/strategies/*.
-require('dotenv').config();
+require('./boot'); // .env, IPv4-first DNS, the credentials vault (Phase 73)
 
 const http = require('http');
 const path = require('path');
@@ -61,7 +61,7 @@ app.get('/api/history/:symbol', async (req, res) => {
     return res.status(403).json({ error: 'forbidden' });
   }
   require('./connectors/coinbase-discovery').stream([String(req.params.symbol).toUpperCase()]); // a charted Coinbase gem joins the live stream
-  const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'));
+  const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'), Date.now(), { chart: true }); // Phase 73: cached at once, refreshed behind
   res.set('Cache-Control', 'no-store');
   if (result.ok) return res.json(result.bars);
   return res.status(result.status || 502).json({ error: result.error });

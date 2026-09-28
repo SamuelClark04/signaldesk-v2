@@ -51,6 +51,7 @@
         <strong class="m-account" id="m-account" title="Account value">—</strong>
         <button class="btn m-scan" id="m-scan" type="button">Scan</button>
       </header>
+      <div class="welcome-banner" id="welcome-banner" role="status" hidden></div>
 
       <section class="tab" id="tab-today" data-title="Today" hidden>
         <div class="today" id="today-root"></div>
@@ -92,6 +93,7 @@
       </section>
 
       <section class="tab" id="tab-settings" data-title="Settings" hidden>
+        <div class="panel settings-accounts" id="settings-accounts"></div>
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">Risk Management</h2>
@@ -131,6 +133,7 @@
                 </span>
               </label>
             </div>
+            <p class="settings-note" id="settings-bankroll-note"></p>
             <button class="btn btn-primary" id="settings-save" type="submit">Save Settings</button>
             <span class="settings-status" id="settings-status" role="status"></span>
           </form>
@@ -158,6 +161,7 @@
               </select>
             </label>
             <span class="live-warning" id="settings-live-warning" hidden></span>
+            <p class="settings-note" id="settings-mode-explain"></p>
           </div>
           <section class="settings-waterfall" id="settings-waterfall" aria-label="Crypto waterfall routing and broker status"></section>
 
@@ -252,6 +256,7 @@
   <script src="views/settings.js"></script>
   <script src="views/settings-waterfall.js"></script>
   <script src="views/settings-mobile.js"></script>
+  <script src="views/settings-accounts.js"></script>
   <script src="views/today.js"></script>
   <script src="lib/mobile.js"></script>
   <script src="app.js"></script>

@@ -50,7 +50,13 @@ function reconcile(broadcast = () => {}) {
   return running;
 }
 
-async function run(broadcast = () => {}) {
+// Phase 73: one run at a time (a pass the watchdog released may still be inside it).
+let runningExits = null;
+function run(broadcast = () => {}) {
+  if (!runningExits) runningExits = runOnce(broadcast).finally(() => { runningExits = null; });
+  return runningExits;
+}
+async function runOnce(broadcast) {
   const out = { positionsChanged: false, journalChanged: false };
   // Held option contracts: one quote request per pass (only while any are open),
   // so marks and paper exits use the real bid. Re-sent every pass while held.
@@ -81,4 +87,21 @@ async function run(broadcast = () => {}) {
   return out;
 }
 
-module.exports = { reconcile, run, logClose };
+// Phase 73: PAPER stops / targets checked every FAST_EXIT_MS from the live prices, independent of the
+// 60 s pass (a slow scan never delays an exit). Local only: no network, same exit-monitor rules.
+const FAST_EXIT_MS = 5000;
+let fastTimer = null;
+function startFast(broadcast = () => {}) {
+  if (fastTimer) return;
+  fastTimer = setInterval(() => {
+    try {
+      const closed = ledger.monitorPositions(prices.getLatestPrices());
+      closed.forEach(logClose);
+      if (closed.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
+    } catch (err) { console.error('[exits] fast paper exit check failed:', err.message); }
+  }, FAST_EXIT_MS);
+  fastTimer.unref();
+}
+const stopFast = () => { clearInterval(fastTimer); fastTimer = null; };
+
+module.exports = { reconcile, run, logClose, startFast, stopFast, FAST_EXIT_MS };

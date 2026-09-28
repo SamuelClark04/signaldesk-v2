@@ -75,7 +75,7 @@
       ];
     }
     const pills = SD.venue.pills(state); // LIVE venues' buying power + the paper pools' (Phase 70)
-    return [el('div', { className: 'today-metrics' }, items), ...(pills.length ? [el('div', { className: 'today-live' }, pills)] : [])];
+    return [el('div', { className: 'today-metrics' }, items), ...(pills.length ? [el('div', { className: 'today-live' }, pills)] : []), ...[SD.accounts.paperNote(state)].filter(Boolean)]; // Phase 73
   }
 
   // ---------- Briefing ----------

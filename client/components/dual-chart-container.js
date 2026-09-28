@@ -17,7 +17,7 @@
   const { el } = SD.ui;
   const KEY = 'signaldesk.dualChart';
 
-  let on = (() => { try { return localStorage.getItem(KEY) === 'on'; } catch { return false; } })();
+  let on = (() => { try { return localStorage.getItem(KEY) !== 'off'; } catch { return true; } })(); // Phase 73: on by default (a fresh browser / tunnel URL), until turned off
   let secondary = null; // the bottom chart's symbol (null: the default)
   let secondaryPos = null; // Phase 68: the open record Chart 2 shows when its symbol has several
   let pane = null; // the second chart instance (live-chart.js makeChart)

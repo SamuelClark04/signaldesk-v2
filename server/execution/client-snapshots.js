@@ -4,6 +4,6 @@
 const radar = require('../intelligence/moonshot-radar');
 const afterHours = require('./after-hours-plans');
 
-const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()]];
+const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()], ['ACCOUNTS_STATUS', require('../security/vault').status()]]; // + accounts (73)
 
 module.exports = { snapshots };

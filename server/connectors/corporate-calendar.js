@@ -33,7 +33,7 @@ async function fetchNextEarnings(ticker, now) {
   const to = etDate.format(now + LOOKAHEAD_DAYS * 86400000);
   let res;
   try {
-    res = await fetch(`${baseUrl()}/calendar/earnings?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}`,
+    res = await require('./net-guard').guardedFetch(`${baseUrl()}/calendar/earnings?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}`,
       { headers: { 'X-Finnhub-Token': key, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (err) {
     return { ok: false, error: err.name === 'TimeoutError' ? `Finnhub timed out after ${TIMEOUT_MS / 1000}s` : `Finnhub unreachable: ${err.message}` };

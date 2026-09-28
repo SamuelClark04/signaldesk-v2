@@ -61,14 +61,15 @@ function remember(item) {
 }
 
 function connect() {
-  const key = process.env.ALPACA_API_KEY;
-  const secret = process.env.ALPACA_API_SECRET;
-  if (!key || !secret) {
-    console.error('[alpaca-news] ALPACA_API_KEY / ALPACA_API_SECRET missing; stream disabled');
+  const k = require('./alpaca-api').dataKeys(); // Phase 73: live keys, else the Alpaca Paper keys
+  if (!k) {
+    console.log('[alpaca-news] no Alpaca keys yet: stream off until they are added (Settings > Accounts & Connections)');
     return;
   }
+  const { key, secret } = k;
 
   ws = new WebSocket(process.env.ALPACA_NEWS_WS_URL || DEFAULT_URL);
+  const sock = ws; // Phase 73: a restart's old socket closing late must not reconnect a second stream
   ws.isAlive = true;
 
   ws.on('open', () => {
@@ -87,6 +88,7 @@ function connect() {
   ws.on('error', (err) => { if (!quietRetry) console.error('[alpaca-news] socket error:', err.message); });
 
   ws.on('close', (code) => {
+    if (sock !== ws) return;
     clearInterval(pingTimer);
     if (!quietRetry) console.warn(`[alpaca-news] closed (${code})`);
     scheduleReconnect();
@@ -193,4 +195,6 @@ function stop() {
   ws = null;
 }
 
-module.exports = { init, stop, getNewsContext };
+function restart() { const opts = { symbols, onNews }; stop(); return init(opts); } // Phase 73: new keys
+
+module.exports = { init, stop, restart, getNewsContext };

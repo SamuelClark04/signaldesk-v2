@@ -27,6 +27,7 @@ const counts = { yields: 0, stalls: 0, worstMs: 0, worstStage: null };
 const breathe = () => new Promise((r) => { if (PAUSE_MS > 0) setTimeout(r, PAUSE_MS); else setImmediate(r); });
 
 async function pace() {
+  checkAlive(); // Phase 73: an abandoned pass stops here
   if (performance.now() - sliceStart < SLICE_MS) return;
   counts.yields += 1;
   await breathe();
@@ -37,6 +38,7 @@ async function pace() {
 // returned, so the stage current at that moment may already be the next one (or 'idle').
 let seen = new Set();
 async function during(name, fn) {
+  checkAlive();
   const prev = current;
   current = name;
   seen.add(name);
@@ -62,4 +64,29 @@ function watch() {
 
 const stats = () => ({ ...counts, sliceMs: SLICE_MS, pauseMs: PAUSE_MS });
 
-module.exports = { pace, during, watch, stats, SLICE_MS, PAUSE_MS };
+// ---------- Pass watchdog (Phase 73) ----------
+// A pipeline pass runs inside inPass() (its own async context). watchdog() gives it PASS_WATCHDOG_MS: past
+// that the lock is released (the next tick runs a NEW pass) and the stalled one is abandoned: its next
+// pace() / during() throws PASS_ABANDONED, so it never stages a setup or runs exits next to the new pass.
+const { AsyncLocalStorage } = require('async_hooks');
+const PASS_WATCHDOG_MS = num(process.env.PASS_WATCHDOG_MS, 45000);
+const passCtx = new AsyncLocalStorage();
+let currentPass = 0;
+const inPass = (fn) => { const gen = ++currentPass; return passCtx.run({ gen }, fn); };
+const abandoned = () => { const s = passCtx.getStore(); return !!s && s.gen !== currentPass; };
+function checkAlive() { if (abandoned()) throw Object.assign(new Error('PASS_ABANDONED: the watchdog released this pass'), { code: 'PASS_ABANDONED' }); }
+async function watchdog(pass, ms = PASS_WATCHDOG_MS) {
+  let timer;
+  const late = new Promise((r) => { timer = setTimeout(() => r(TIMED_OUT), ms); });
+  pass.catch(() => {}); // an abandoned pass's PASS_ABANDONED is expected
+  try {
+    const r = await Promise.race([pass, late]);
+    if (r !== TIMED_OUT) return r;
+    currentPass += 1; // the stalled pass is stale from here on
+    console.warn(`[pipeline] pass exceeded ${ms >= 10000 ? Math.round(ms / 1000) : (ms / 1000).toFixed(1)} s (during ${[...seen].join(', ') || current}); lock released, the stalled pass is abandoned at its next step`);
+    return { timedOut: true };
+  } finally { clearTimeout(timer); }
+}
+const TIMED_OUT = Symbol('timed out');
+
+module.exports = { pace, during, watch, stats, inPass, watchdog, checkAlive, abandoned, SLICE_MS, PAUSE_MS, PASS_WATCHDOG_MS };

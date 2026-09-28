@@ -28,8 +28,9 @@ const quotes = new Map(); // contract symbol -> { at, bid, ask, quoteTime, iv, d
 
 const dataBase = () => (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/$/, '');
 const feed = () => (process.env.ALPACA_OPTIONS_FEED || 'indicative').toLowerCase();
-const headers = () => ({ 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_API_SECRET, Accept: 'application/json' });
-const hasKeys = () => !!(process.env.ALPACA_API_KEY && process.env.ALPACA_API_SECRET);
+const keys = () => require('./alpaca-api').dataKeys(); // Phase 73: live keys, else the Alpaca Paper keys
+const headers = () => ({ 'APCA-API-KEY-ID': (keys() || {}).key, 'APCA-API-SECRET-KEY': (keys() || {}).secret, Accept: 'application/json' });
+const hasKeys = () => !!keys();
 const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 // 'SPY261030C00650000' -> { root, expiration: '2026-10-30', type: 'call', strike: 650 }
@@ -52,7 +53,7 @@ async function getJson(url) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const r = await fetch(url, { headers: headers(), signal: ctl.signal });
+    const r = await require('./net-guard').guardedFetch(url, { headers: headers(), signal: ctl.signal });
     const text = await r.text();
     if (!r.ok) {
       let msg = text.slice(0, 160);

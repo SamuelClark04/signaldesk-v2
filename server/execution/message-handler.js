@@ -180,7 +180,7 @@ function createMessageHandler({ send, broadcast }) {
     if (QUEUE_ACTIONS[msg.type]) {
       return handleQueueAction(ws, msg).catch((err) => console.error('[ledger] queue action crashed:', err));
     }
-    if (handlePilot(ws, msg) || handleManual(ws, msg) || require('../data/news-feed').handle(ws, msg, send)) return undefined; // + GET_CATALYST_FEED (Phase 62)
+    if (handlePilot(ws, msg) || handleManual(ws, msg) || require('../data/news-feed').handle(ws, msg, send) || require('../security/accounts').handle(ws, msg, send, broadcast)) return undefined; // + GET_CATALYST_FEED (62), accounts (73)
     // Phase 68: RATCHET_STOP (profit locks) and WATCH_SYMBOLS (1 s chart ticks).
     if (require('./ratchet').handle(ws, msg, send, broadcast, ledger) || require('./level-edit').handle(ws, msg, send, broadcast, ledger) || require('./external-close').handle(ws, msg, send, broadcast, ledger) || require('./chart-ticks').handle(ws, msg, send)) return undefined; // + EDIT_LEVELS (70D)
     if (msg.type === 'UPDATE_SETTINGS') return handleSettings(ws, msg);

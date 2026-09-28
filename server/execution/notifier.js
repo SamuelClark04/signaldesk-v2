@@ -232,6 +232,8 @@ function buildExternalActionEmail(a) {
 const sendExternalActionAlert = async (a) => dispatch(buildExternalActionEmail(a));
 
 const emailConfigured = () => REQUIRED.every((k) => String(process.env[k] || '').trim());
+// Phase 73: new SMTP keys (Settings > Accounts & Connections) -> a new transport on the next email.
+const resetTransport = () => { if (transporter) transporter.close(); transporter = null; warnedMissing = false; };
 
-module.exports = { sendApprovalAlert, sendTunnelReadyEmail, sendExternalActionAlert, buildAlert, buildTunnelEmail, buildExternalActionEmail, approvalsUrl, emailConfigured,
+module.exports = { resetTransport, sendApprovalAlert, sendTunnelReadyEmail, sendExternalActionAlert, buildAlert, buildTunnelEmail, buildExternalActionEmail, approvalsUrl, emailConfigured,
   lastTunnelEmail: () => lastTunnelEmail };

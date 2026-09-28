@@ -116,6 +116,7 @@ async function syncPortfolio(now = Date.now()) {
   }
   const { coinbase: cb, alpaca: al } = snapshot;
   if (cb.ok) console.log(`[broker-sync] Coinbase: ${cb.positions.length} holding(s), cash ${cb.cash.toFixed(2)}`);
+  else if (coinbaseApi.loadAuth().error) console.log('[broker-sync] Coinbase not connected (Settings > Accounts & Connections)'); // Phase 73: not an error
   else console.warn(`[broker-sync] Coinbase sync failed: ${cb.error}`);
   if (al.ok) console.log(`[broker-sync] Alpaca: ${al.positions.length} holding(s)`);
   else if (al.status !== 'not configured' && al.status !== 'data only') console.warn(`[broker-sync] Alpaca sync failed: ${al.error}`);

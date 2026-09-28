@@ -8,7 +8,18 @@
 // burst (42 coins x 5m / 15m / 1h / 1d) never leaves a coin without candles.
 // Identical requests in flight are shared. Failures are never cached.
 //
+// Phase 73 (no hanging passes, instant charts):
+//   - every request goes through net-guard (per-host circuit breaker: an unreachable host fails
+//     fast instead of costing each symbol an 8 s timeout)
+//   - STOCKS are fetched in BATCHES: a scan's miss on one stock fetches every stock of its batch set
+//     (1h: the optionable universe; 1d / 1d-long: all stocks + held ones) whose series is missing or
+//     stale, in ONE multi-symbol Alpaca request (paged): ~2-8 requests instead of one per symbol
+//   - CHART reads (opts.chart, /api/history): the cached series at once whatever its age (a stale one
+//     is refreshed in the background), a cold one fetched on its own ahead of the scan's Coinbase
+//     queue (priority slot); live ticks keep the forming candle current (chart-ticks.js)
 // Never throws: every outcome is { ok: true, ... } or { ok: false, status, error }.
+const guard = require('./net-guard');
+const NO_KEYS = 'Alpaca keys not set: add them in Settings > Accounts & Connections (or .env)';
 const SYMBOL_RE = /^[A-Z0-9.]{1,10}(-[A-Z]{2,5})?$/; // AAPL, BRK.B, BTC-USD
 const LIMIT = 100;
 const CACHE_MS = 30 * 1000;
@@ -34,21 +45,24 @@ const inflight = new Map(); // same key -> one shared request
 let nextSlot = 0;
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 // Reserve the next request slot (spaced PACE_MS apart) and wait for it.
-async function paced() {
+// priority (a chart the user opened): the next free slot of its own lane, never behind the scan's queue.
+let prioritySlot = 0;
+async function paced(priority = false) {
   const now = Date.now();
-  const at = Math.max(now, nextSlot);
-  nextSlot = at + PACE_MS;
+  const at = Math.max(now, priority ? prioritySlot : nextSlot);
+  if (priority) prioritySlot = at + PACE_MS; else nextSlot = at + PACE_MS;
   if (at > now) await sleep(at - now);
 }
-const retryable = (r) => !r.ok && (r.code === 429 || r.code >= 500 || !r.code); // no code: network / timeout
+const retryable = (r) => !r.ok && !r.circuit && (r.code === 429 || r.code >= 500 || !r.code); // no code: network / timeout (never an open circuit)
 const isCrypto = (symbol) => symbol.includes('-');
 
 async function getJson(url, headers = {}) {
   let res;
   try {
-    res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await guard.guardedFetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (err) {
-    return { ok: false, status: 502, error: err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS / 1000}s` : err.message };
+    if (err.name === 'CircuitOpen') return { ok: false, status: 503, circuit: true, error: err.message };
+    return { ok: false, status: 502, error: err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS / 1000}s` : (err.cause && err.cause.code) || err.message };
   }
   let json = null;
   try { json = await res.json(); } catch { /* non-JSON error page */ }
@@ -56,10 +70,9 @@ async function getJson(url, headers = {}) {
   return { ok: true, json };
 }
 
-function alpacaHeaders() {
-  const key = process.env.ALPACA_API_KEY;
-  const secret = process.env.ALPACA_API_SECRET;
-  return key && secret ? { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret } : null;
+function alpacaHeaders() { // Phase 73: the live keys, else the Alpaca Paper keys (both serve the free IEX data)
+  const k = require('./alpaca-api').dataKeys();
+  return k ? { 'APCA-API-KEY-ID': k.key, 'APCA-API-SECRET-KEY': k.secret } : null;
 }
 const alpacaData = () => (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/+$/, '');
 const coinbaseBase = () => (process.env.COINBASE_API_BASE_URL || 'https://api.coinbase.com').replace(/\/+$/, '');
@@ -67,7 +80,7 @@ const coinbaseBase = () => (process.env.COINBASE_API_BASE_URL || 'https://api.co
 // Latest LIMIT bars within the lookback window, newest first from Alpaca.
 async function fetchStock(symbol, tf) {
   const headers = alpacaHeaders();
-  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  if (!headers) return { ok: false, status: 503, error: NO_KEYS };
   const start = new Date(Date.now() - tf.lookbackDays * 86400000).toISOString();
   const query = `timeframe=${tf.alpaca}&limit=${tf.limit || LIMIT}&feed=iex&sort=desc&start=${encodeURIComponent(start)}`;
   const r = await getJson(`${alpacaData()}/v2/stocks/${encodeURIComponent(symbol)}/bars?${query}`, headers);
@@ -76,7 +89,7 @@ async function fetchStock(symbol, tf) {
   return { ok: true, bars };
 }
 
-async function fetchCrypto(symbol, tf) {
+async function fetchCrypto(symbol, tf, priority = false) {
   const group = tf.group || 1;
   const baseSec = tf.sec / group;
   const count = Math.min((tf.limit || LIMIT) * group, COINBASE_MAX_CANDLES);
@@ -85,7 +98,7 @@ async function fetchCrypto(symbol, tf) {
   let r;
   for (let attempt = 0; attempt <= RETRY_MS.length; attempt += 1) {
     if (attempt) await sleep(RETRY_MS[attempt - 1]);
-    await paced();
+    await paced(priority);
     r = await getJson(`${coinbaseBase()}/api/v3/brokerage/market/products/${encodeURIComponent(symbol)}/candles?${query}`);
     if (!retryable(r)) break;
   }
@@ -117,8 +130,46 @@ function clean(bars, limit = LIMIT) {
   return [...byTime.values()].sort((a, b) => a.time - b.time).slice(-limit);
 }
 
+// ---------- Stock batches (Phase 73) ----------
+const BATCH_MAX = 200;
+function batchUniverse(timeframe) {
+  const u = require('../market/universe');
+  if (timeframe === '1h') return u.OPTIONABLE_STOCKS;
+  if (timeframe === '1d' || timeframe === '1d-long') {
+    let held = [];
+    try { held = require('../execution/external-holdings').symbols().filter((x) => !isCrypto(x)); } catch { /* none */ }
+    return [...u.STOCKS, ...held];
+  }
+  return [];
+}
+// The requested stock + every stock of its batch set whose series is missing / stale and not in flight.
+function batchSet(symbol, timeframe, now) {
+  const stale = (x) => { const h = cache.get(`${x}|${timeframe}`); return (!h || now - h.at >= CACHE_MS) && !inflight.has(`${x}|${timeframe}`); };
+  return [symbol, ...new Set(batchUniverse(timeframe).filter((x) => x !== symbol && SYMBOL_RE.test(x) && stale(x)))].slice(0, BATCH_MAX);
+}
+// Many stocks' bars for one timeframe in ONE multi-symbol request (paged): { ok, bars: { SYM: [...] } }.
+async function fetchStocks(symbols, timeframe, tf) {
+  const headers = alpacaHeaders();
+  if (!headers) return { ok: false, status: 503, error: NO_KEYS };
+  const start = new Date(Date.now() - tf.lookbackDays * 86400000).toISOString();
+  const out = Object.fromEntries(symbols.map((x) => [x, []]));
+  let token = null;
+  for (let page = 0; page < 12; page += 1) {
+    const q = `symbols=${symbols.map(encodeURIComponent).join(',')}&timeframe=${tf.alpaca}&start=${encodeURIComponent(start)}&limit=10000&feed=iex&sort=asc`;
+    const r = await getJson(`${alpacaData()}/v2/stocks/bars?${q}${token ? `&page_token=${encodeURIComponent(token)}` : ''}`, headers);
+    if (!r.ok) return r;
+    for (const [sym, bars] of Object.entries(r.json.bars || {})) {
+      if (out[sym]) out[sym].push(...bars.map((b) => ({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v })));
+    }
+    token = r.json.next_page_token;
+    if (!token) break;
+  }
+  return { ok: true, bars: out };
+}
+
 // { ok: true, bars: [{ time (unix seconds), open, high, low, close, volume }] } or { ok: false, status, error }.
-async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
+// opts.chart: a chart read (cached series at once, background refresh; priority; never batched).
+async function getHistory(symbol, timeframe = '1m', now = Date.now(), opts = {}) {
   const s = String(symbol || '').trim().toUpperCase();
   if (!SYMBOL_RE.test(s)) return { ok: false, status: 400, error: `invalid symbol "${String(symbol).slice(0, 20)}"` };
   const tf = TIMEFRAMES[timeframe];
@@ -127,13 +178,18 @@ async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
   const hit = cache.get(key);
   if (hit && now - hit.at < CACHE_MS) return { ok: true, bars: hit.bars.map((b) => ({ ...b })) };
   if (!inflight.has(key)) {
-    inflight.set(key, (isCrypto(s) ? fetchCrypto(s, tf) : fetchStock(s, tf)).then((result) => {
+    const batch = !opts.chart && !isCrypto(s) ? batchSet(s, timeframe, now) : [s];
+    const single = () => (isCrypto(s) ? fetchCrypto(s, tf, !!opts.chart) : fetchStock(s, tf)).then((r) => (r.ok ? { ok: true, bars: { [s]: r.bars } } : r));
+    const job = batch.length > 1 ? fetchStocks(batch, timeframe, tf).then((r) => (r.ok || r.circuit || !(r.code >= 400 && r.code < 500) ? r : single())) : single(); // a refused batch: this symbol alone
+    const shared = job.then((result) => {
       if (!result.ok) return result;
-      const bars = clean(result.bars, tf.limit || LIMIT);
-      cache.set(key, { at: Date.now(), bars });
-      return { ok: true, bars };
-    }).finally(() => inflight.delete(key)));
+      for (const [sym, list] of Object.entries(result.bars)) cache.set(`${sym}|${timeframe}`, { at: Date.now(), bars: clean(list, tf.limit || LIMIT) });
+      const own = cache.get(key);
+      return own ? { ok: true, bars: own.bars } : { ok: true, bars: [] };
+    }).finally(() => { for (const x of batch) inflight.delete(`${x}|${timeframe}`); });
+    for (const x of batch) inflight.set(`${x}|${timeframe}`, shared);
   }
+  if (opts.chart && hit) return { ok: true, bars: hit.bars.map((b) => ({ ...b })), stale: true }; // at once; the refresh above runs in the background
   const result = await inflight.get(key);
   return result.ok ? { ok: true, bars: result.bars.map((b) => ({ ...b })) } : result;
 }
@@ -142,7 +198,7 @@ async function getHistory(symbol, timeframe = '1m', now = Date.now()) {
 // start, so its close is a minute later. { ok: true, closes: { SYM: { price, time } } }.
 async function getLatestStockCloses(symbols) {
   const headers = alpacaHeaders();
-  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  if (!headers) return { ok: false, status: 503, error: NO_KEYS };
   const list = symbols.filter((s) => SYMBOL_RE.test(s) && !isCrypto(s));
   if (!list.length) return { ok: true, closes: {} };
   const r = await getJson(`${alpacaData()}/v2/stocks/bars/latest?symbols=${list.map(encodeURIComponent).join(',')}&feed=iex`, headers);
@@ -163,7 +219,7 @@ const QUOTE_MAX_SPREAD = 0.01;
 const ms = (t) => Date.parse(String(t).replace(/(\.\d{3})\d+/, '$1')); // RFC 3339 with nanoseconds
 async function getLivePrices(symbols) {
   const headers = alpacaHeaders();
-  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  if (!headers) return { ok: false, status: 503, error: NO_KEYS };
   const list = symbols.filter((s) => SYMBOL_RE.test(s) && !isCrypto(s));
   if (!list.length) return { ok: true, prices: {} };
   const r = await getJson(`${alpacaData()}/v2/stocks/snapshots?symbols=${list.map(encodeURIComponent).join(',')}&feed=iex`, headers);
@@ -185,7 +241,7 @@ async function getLivePrices(symbols) {
 // bars: { symbol, open, high, low, close, volume, vwap, time ISO }.
 async function getMinuteBarsSince(symbols, startMs) {
   const headers = alpacaHeaders();
-  if (!headers) return { ok: false, status: 503, error: 'ALPACA_API_KEY / ALPACA_API_SECRET not set in .env' };
+  if (!headers) return { ok: false, status: 503, error: NO_KEYS };
   const list = symbols.filter((s) => SYMBOL_RE.test(s) && !isCrypto(s));
   const out = {};
   let token = null;
@@ -202,4 +258,4 @@ async function getMinuteBarsSince(symbols, startMs) {
   return { ok: true, bars: out };
 }
 
-module.exports = { getHistory, getLatestStockCloses, getLivePrices, getMinuteBarsSince, TIMEFRAMES };
+module.exports = { fetchStocks, batchSet, getHistory, getLatestStockCloses, getLivePrices, getMinuteBarsSince, TIMEFRAMES };

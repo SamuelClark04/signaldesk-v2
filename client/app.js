@@ -130,6 +130,7 @@
   };
   SD.portfolio.init(transport);
   SD.settings.init(transport);
+  SD.accounts.init(transport); // Phase 73: Settings > Accounts & Connections
 
   const HANDLERS = {
     JOURNAL_UPDATED: (trades) => SD.journal.render(trades || []),
@@ -139,7 +140,9 @@
     POSITIONS_UPDATED: (list) => { SD.portfolio.positionsUpdated(); SD.liveClose.watch(list); }, // closes a pending adoption form; UNARMORED toast (Phase 67)
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
-    SETTINGS_UPDATED: (settings) => SD.settings.render(settings),
+    SETTINGS_UPDATED: (settings) => { SD.settings.render(settings); SD.accounts.explain(settings); },
+    ACCOUNTS_STATUS: (s) => SD.accounts.status(s), // Phase 73: never a secret
+    ACCOUNT_RESULT: (r) => SD.accounts.result(r),
     BROKER_STATE: (broker) => SD.settingsWaterfall.render(broker), // Phase 70: the Settings waterfall strip
     SETTINGS_ERROR: (payload) => SD.settings.error(payload),
     LEDGER_RESET: (r) => SD.settings.resetDone(r),

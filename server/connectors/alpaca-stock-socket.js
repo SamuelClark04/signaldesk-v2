@@ -55,14 +55,15 @@ function remember(bar) {
 }
 
 function connect() {
-  const key = process.env.ALPACA_API_KEY;
-  const secret = process.env.ALPACA_API_SECRET;
-  if (!key || !secret) {
-    console.error('[alpaca] ALPACA_API_KEY / ALPACA_API_SECRET missing; stream disabled');
+  const k = require('./alpaca-api').dataKeys(); // Phase 73: live keys, else the Alpaca Paper keys
+  if (!k) {
+    console.log('[alpaca] no Alpaca keys yet: stream off until they are added (Settings > Accounts & Connections)');
     return;
   }
+  const { key, secret } = k;
 
   ws = new WebSocket(process.env.ALPACA_WS_URL || DEFAULT_URL);
+  const sock = ws; // Phase 73: a restart's old socket closing late must not reconnect a second stream
   ws.isAlive = true;
 
   ws.on('open', () => {
@@ -81,6 +82,7 @@ function connect() {
   ws.on('error', (err) => { if (!quietRetry) console.error('[alpaca] socket error:', err.message); });
 
   ws.on('close', (code) => {
+    if (sock !== ws) return;
     clearInterval(pingTimer);
     if (!quietRetry) console.warn(`[alpaca] closed (${code})`);
     scheduleReconnect();
@@ -203,4 +205,7 @@ function stop() {
   ws = null;
 }
 
-module.exports = { init, stop, getLatestBars, ingest, streamTimes };
+// Phase 73: reconnect with the current keys (Settings > Accounts & Connections saved new ones).
+function restart() { const opts = { symbols, onBar }; stop(); return init(opts); }
+
+module.exports = { init, stop, restart, getLatestBars, ingest, streamTimes };

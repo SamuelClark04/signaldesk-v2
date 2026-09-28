@@ -25,7 +25,11 @@
 // GET_CATALYST_FEED { scope: 'movers' } -> the All Movers feed: news on the leaderboard
 // top 20, CoinGecko trending coins, open positions and staged setups, every Reddit post
 // the gem scan matched to a Coinbase coin, and the trending list. Reply: CATALYST_FEED.
+// Phase 73 (never "Loading headlines..."): stale-while-revalidate. The FIRST reply is built from the
+// cache alone (< 50 ms: the breakdown is local, headlines are whatever is cached, stale or not) and
+// kicks the refresh of every stale source; when those land, a SECOND reply carries the fresh items.
 const social = require('../connectors/crypto-social');
+const guard = require('../connectors/net-guard'); // Phase 73: an unreachable news host fails fast
 const radar = require('../intelligence/moonshot-radar');
 const summary = require('../intelligence/catalyst-summary');
 const sentiment = require('../connectors/news-sentiment');
@@ -51,16 +55,24 @@ const decode = (s) => String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1
 const tag = (xml, name) => { const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`).exec(xml); return m ? m[1] : ''; };
 const validSymbol = (s) => /^[A-Z0-9.]{1,12}(-USD)?$/.test(s);
 
-// Cached fetch: fresh value, else refetch; a failure keeps the last good value.
-async function cached(key, ttl, fn, now = Date.now()) {
+// Cached fetch, stale-while-revalidate (Phase 73): a fresh value as is; a STALE one at once while it is
+// refetched in the background; nothing cached yet: quick -> [] now (refetch kicked), else wait for it.
+// A failure keeps the last good value. `waiting`: the refreshes in flight (handle() re-replies after them).
+const waiting = new Set();
+function cached(key, ttl, fn, now = Date.now(), quick = false) {
   const hit = cache.get(key);
-  if (hit && (now - hit.at < ttl)) return hit;
-  if (hit && hit.pending) return hit.pending;
-  const pending = fn().then((value) => ({ at: Date.now(), value, error: null }))
-    .catch((err) => ({ at: Date.now(), value: hit ? hit.value : [], error: err.name === 'TimeoutError' ? 'timed out' : err.message }))
-    .then((r) => { cache.set(key, r); return r; });
-  cache.set(key, { ...(hit || { at: 0, value: [] }), pending });
-  return pending;
+  if (hit && hit.at && (now - hit.at < ttl)) return Promise.resolve(hit);
+  let pending = hit && hit.pending;
+  if (!pending) {
+    pending = fn().then((value) => ({ at: Date.now(), value, error: null }))
+      .catch((err) => ({ at: Date.now(), value: hit ? hit.value : [], error: err.name === 'TimeoutError' ? 'timed out' : err.message }))
+      .then((r) => { cache.set(key, r); return r; })
+      .finally(() => waiting.delete(pending));
+    waiting.add(pending);
+    cache.set(key, { ...(hit || { at: 0, value: [] }), pending });
+  }
+  if (hit && hit.at) return Promise.resolve(hit); // stale: served now, refreshed behind it
+  return quick ? Promise.resolve({ at: 0, value: [], error: null, cold: true }) : pending;
 }
 
 // ---------- Alpaca News ----------
@@ -76,21 +88,21 @@ function normAlpaca(n, wanted) {
     url: safeUrl(n.url), at: Date.parse(n.created_at || n.updated_at) || null,
     symbols: tags.map((t) => byTag.get(t)).filter((s) => s && (tags.length <= PRIMARY_TAGS || subjectOf(s, lead))) };
 }
-async function alpacaNews(symbols, limit = 25) {
+async function alpacaNews(symbols, limit = 25, quick = false) {
   const list = [...new Set(symbols)].filter(validSymbol).sort();
   if (!list.length) return { at: Date.now(), value: [], error: null };
-  const key = process.env.ALPACA_API_KEY;
-  const secret = process.env.ALPACA_API_SECRET;
-  if (!key || !secret) return { at: Date.now(), value: [], error: 'Alpaca news: ALPACA_API_KEY / ALPACA_API_SECRET not set' };
+  const k = require('../connectors/alpaca-api').dataKeys(); // Phase 73: live keys, else the Alpaca Paper keys
+  if (!k) return { at: Date.now(), value: [], error: 'Alpaca news: no Alpaca keys (Settings > Accounts & Connections)' };
+  const { key, secret } = k;
   return cached(`alpaca|${list.join(',')}|${limit}`, CACHE_MS, async () => {
     const base = (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/+$/, '');
     const start = new Date(Date.now() - WINDOW_H * 3600000).toISOString();
-    const res = await fetch(`${base}/v1beta1/news?symbols=${encodeURIComponent(list.map(tagOf).join(','))}&limit=${limit}&sort=desc&start=${encodeURIComponent(start)}`,
+    const res = await guard.guardedFetch(`${base}/v1beta1/news?symbols=${encodeURIComponent(list.map(tagOf).join(','))}&limit=${limit}&sort=desc&start=${encodeURIComponent(start)}`,
       { headers: { Accept: 'application/json', 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) throw new Error(`Alpaca news HTTP ${res.status}`);
     const json = await res.json();
     return (json.news || []).map((n) => normAlpaca(n, list)).filter((x) => x.title && x.symbols.length);
-  });
+  }, Date.now(), quick);
 }
 
 // ---------- Crypto RSS ----------
@@ -100,12 +112,12 @@ function parseRss(xml, outlet) {
     return { outlet, title: decode(tag(it, 'title')).slice(0, 300), text: decode(decode(tag(it, 'description'))).slice(0, 500), url, at: Date.parse(decode(tag(it, 'pubDate'))) || null };
   }).filter((x) => x.title && x.url);
 }
-async function rssItems() {
+async function rssItems(quick = false) {
   const results = await Promise.all(RSS.map((f) => cached(`rss|${f.outlet}`, RSS_MS, async () => {
-    const res = await fetch(f.url, { headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/xml' }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await guard.guardedFetch(f.url, { headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/xml' }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseRss(await res.text(), f.outlet);
-  }).then((r) => ({ ...r, outlet: f.outlet }))));
+  }, Date.now(), quick).then((r) => ({ ...r, outlet: f.outlet }))));
   return { items: results.flatMap((r) => r.value), errors: results.filter((r) => r.error).map((r) => `${r.outlet}: ${r.error}`) };
 }
 // RSS articles -> feed items tagged with the crypto symbols they name (untagged: dropped).
@@ -144,18 +156,18 @@ function moverSymbols(ctx) {
     ...ctx.positions.map((p) => p.asset), ...ctx.pending.map((o) => o.asset)])].filter(validSymbol);
 }
 
-async function movers(ctx = summary.context()) {
+async function movers(ctx = summary.context(), quick = false) {
   const symbols = moverSymbols(ctx);
-  const [alp, rss] = await Promise.all([alpacaNews(symbols, 50), symbols.some((x) => x.includes('-')) ? rssItems() : { items: [], errors: [] }]);
+  const [alp, rss] = await Promise.all([alpacaNews(symbols, 50, quick), symbols.some((x) => x.includes('-')) ? rssItems(quick) : { items: [], errors: [] }]);
   const reddit = social.recentPosts(120).map(redditItem); // every post the gem scan matched to a Coinbase coin
   const items = merge([alp.value, matchRss(rss.items, symbols), reddit, trendingItems(null)]);
   return { ok: true, scope: 'movers', symbols, items, counts: counts(items), errors: [...(alp.error ? [alp.error] : []), ...rss.errors], at: Date.now() };
 }
 
 // The symbol's news items (the feed's own, 48 h, subject-filtered): { items, errors }.
-async function newsFor(symbol) {
+async function newsFor(symbol, quick = false) {
   const crypto = symbol.includes('-');
-  const [alp, rss] = await Promise.all([alpacaNews([symbol]), crypto ? rssItems() : { items: [], errors: [] }]);
+  const [alp, rss] = await Promise.all([alpacaNews([symbol], 25, quick), crypto ? rssItems(quick) : { items: [], errors: [] }]);
   return { items: merge([alp.value, crypto ? matchRss(rss.items, [symbol]) : []]), errors: [...(alp.error ? [alp.error] : []), ...rss.errors] };
 }
 
@@ -172,17 +184,19 @@ function sentimentOf(symbol, items, errors = []) {
     source: `${total} headline${total === 1 ? '' : 's'} in ${WINDOW_H}h (the Catalyst Feed's news: Alpaca${symbol.includes('-') ? ' + CoinDesk / Cointelegraph / Decrypt' : ''}, SignalDesk scoring)` };
 }
 
-async function forSymbol(symbol, ctx = summary.context()) {
+async function forSymbol(symbol, ctx = summary.context(), quick = false) {
   const crypto = symbol.includes('-');
-  const [news, rssErr] = await newsFor(symbol).then((n) => [n, n.errors]);
+  const [news, rssErr] = await newsFor(symbol, quick).then((n) => [n, n.errors]);
   const reddit = crypto ? social.postsFor(symbol, 40).map(redditItem) : [];
   const items = merge([news.items, reddit, crypto ? trendingItems([symbol]) : []]);
   const row = radar.rowOf(symbol);
   // One count everywhere (Phase 66): the feed's own news is the symbol's sentiment (a Finnhub score is kept).
-  const snt = sentiment.usesFinnhub(symbol) ? await sentiment.getSentiment(symbol).catch(() => null) : sentiment.store(sentimentOf(symbol, news.items, news.errors));
+  // quick: never wait on Finnhub, and never overwrite a stored score with a cold (empty) read.
+  const snt = sentiment.usesFinnhub(symbol) ? (quick ? sentiment.peek(symbol) : await sentiment.getSentiment(symbol).catch(() => null))
+    : quick && !news.items.length ? sentiment.peek(symbol) : sentiment.store(sentimentOf(symbol, news.items, news.errors));
   const catalystSummary = row && row.catalystSummary ? row.catalystSummary : summary.forSymbol(symbol, ctx);
   const out = { ok: true, scope: 'symbol', symbol, items, counts: counts(items), catalystSummary, sentiment: snt, errors: rssErr, at: Date.now() };
-  if (!items.some((x) => x.kind !== 'trending')) { const m = await movers(ctx); out.fallback = m.items.slice(0, 25); }
+  if (!items.some((x) => x.kind !== 'trending')) { const m = await movers(ctx, quick); out.fallback = m.items.slice(0, 25); }
   return out;
 }
 
@@ -191,8 +205,15 @@ function handle(ws, msg, send) {
   if (!msg || msg.type !== 'GET_CATALYST_FEED') return false;
   const symbol = String(msg.symbol || '').toUpperCase();
   const reply = (r) => send(ws, 'CATALYST_FEED', { ...r, requestId: msg.requestId || null });
-  const job = msg.scope === 'movers' ? movers() : validSymbol(symbol) ? forSymbol(symbol) : Promise.resolve({ ok: false, error: 'invalid symbol' });
-  job.then(reply).catch((err) => reply({ ok: false, scope: msg.scope || 'symbol', symbol, error: err.message }));
+  const run = (quick) => (msg.scope === 'movers' ? movers(undefined, quick) : validSymbol(symbol) ? forSymbol(symbol, undefined, quick) : Promise.resolve({ ok: false, error: 'invalid symbol' }));
+  const fail = (err) => reply({ ok: false, scope: msg.scope || 'symbol', symbol, error: err.message });
+  // Phase 73: from the cache at once (refreshing: stale sources are being refetched), then fresh.
+  run(true).then((r) => {
+    const refreshing = waiting.size > 0;
+    reply({ ...r, refreshing });
+    if (refreshing) return Promise.allSettled([...waiting]).then(() => run(false)).then((x) => reply({ ...x, refreshing: false }));
+    return null;
+  }).catch(fail);
   return true;
 }
 

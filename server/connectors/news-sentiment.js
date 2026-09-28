@@ -24,7 +24,7 @@ const cache = new Map(); // symbol -> { at, result }
 const label = (s) => (s === null ? 'No recent news' : s < 20 ? 'Extreme bearish' : s < 40 ? 'Bearish' : s <= 60 ? 'Neutral' : s <= 80 ? 'Bullish' : 'Extreme bullish');
 
 async function getJson(url, headers) {
-  const res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const res = await require('./net-guard').guardedFetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   let json = null;
   try { json = await res.json(); } catch { /* non-JSON */ }
   return { ok: res.ok, status: res.status, json };

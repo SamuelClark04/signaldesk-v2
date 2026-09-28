@@ -44,23 +44,26 @@ function failure(err) {
 // read the balance together). Private calls therefore go out ONE AT A TIME, each nonce taken at
 // send time; an "Invalid nonce" refusal (never processed by Kraken) is retried once.
 let queue = Promise.resolve();
-function privateCall(method, params = {}) {
-  const run = queue.then(() => sendPrivate(method, params)).catch((err) => {
+// creds { key, secret } (Phase 73, Settings > Accounts: Test & Save): candidate keys, through the same queue.
+function privateCall(method, params = {}, creds = null) {
+  const run = queue.then(() => sendPrivate(method, params, creds)).catch((err) => {
     if (!(err.kraken || []).some((e) => /^EAPI:Invalid nonce/.test(e))) throw err;
-    return sendPrivate(method, params);
+    return sendPrivate(method, params, creds);
   });
   queue = run.catch(() => {});
   return run;
 }
 
-async function sendPrivate(method, params = {}) {
-  if (!configured()) throw Object.assign(new Error('Kraken: KRAKEN_API_KEY / KRAKEN_API_SECRET not set in .env'), { kraken: ['EAPI:not configured'] });
+async function sendPrivate(method, params = {}, creds = null) {
+  const key = creds ? creds.key : process.env.KRAKEN_API_KEY;
+  const secret = creds ? creds.secret : process.env.KRAKEN_API_SECRET;
+  if (!key || !secret) throw Object.assign(new Error('Kraken: KRAKEN_API_KEY / KRAKEN_API_SECRET not set in .env'), { kraken: ['EAPI:not configured'] });
   const path = `/0/private/${method}`;
   const n = nonce();
   const postData = new URLSearchParams({ nonce: n, ...Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null)) }).toString();
   const res = await fetch(`${baseUrl()}${path}`, {
     method: 'POST',
-    headers: { 'API-Key': process.env.KRAKEN_API_KEY, 'API-Sign': sign(path, postData, n, process.env.KRAKEN_API_SECRET), 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { 'API-Key': key, 'API-Sign': sign(path, postData, n, secret), 'Content-Type': 'application/x-www-form-urlencoded' },
     body: postData,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -71,7 +74,7 @@ async function sendPrivate(method, params = {}) {
   if (!j || j.result === undefined) throw Object.assign(new Error('Kraken: unexpected response'), { kraken: ['EGeneral:Unexpected'] });
   return j.result;
 }
-const call = (method, params) => privateCall(method, params).then((result) => ({ ok: true, result }), failure);
+const call = (method, params, creds = null) => privateCall(method, params, creds).then((result) => ({ ok: true, result }), failure);
 
 // ---------- Balances ----------
 const CASH = { ZUSD: 'USD', USD: 'USD', USDC: 'USDC' };

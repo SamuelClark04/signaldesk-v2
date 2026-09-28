@@ -85,6 +85,10 @@ async function routeApproved(order, livePrice) {
   // the venue was on paper (or before this check existed) is refused, never sent.
   const needed = requiredBasis(order.market, settings, venue.venueId);
   if (order.sizingBasis !== needed) throw new Error(`SIZED_FOR_OTHER_VENUE: sized from ${order.sizingBasis || 'the paper bankroll'}, venue needs ${needed}`);
+  if (order.market === 'stocks') { // Phase 73: a connected but unfunded Alpaca Live account: refused with a clear reason, nothing sent
+    const a = await alpacaApi.getAccount();
+    if (a.ok && !(a.buyingPower > 0)) throw new Error('LIVE_NO_BUYING_POWER: Alpaca Live has $0 buying power. Fund the account, or switch Alpaca mode to Paper in Settings; nothing was sent');
+  }
 
   console.warn(`[LIVE] submitting ${order.direction} ${order.positionSize} ${order.asset} to ${venue.broker} (${order.id})`);
   const tick = order.market === 'crypto' ? coinbaseSocket.getLatest()[order.asset] : null; // best bid for a post-only limit entry

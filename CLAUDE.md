@@ -24,6 +24,11 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
   against real Coinbase. Unit tests stub `connectors/coinbase-api` and `coinbase-orders`.
 - **Secrets:** never print or commit `.env` values; API keys travel in headers only.
+- **Credentials vault (Phase 73)**: `security/vault.js` (server/data/credentials.enc.json, AES-256-GCM keyed from
+  LAN_ACCESS_TOKEN) is applied OVER .env at server boot (`server/boot.js`). A vault on this PC could override a
+  harness's mock keys with real ones: every harness / spawned server sets `CREDENTIALS_PATH` to a scratch file
+  (ph55real.js does); unit tests never call vault.load(). Never read or write the real credentials.enc.json.
+  The browser only gets vault.status() (masked previews), never a secret.
 - **Alpaca paper keys (PK...)**: for the LIVE client data-only (market data / news / clock: never
   live holdings, cash, sizing or orders; alpaca-api.dataOnly). They ARE the PAPER broker
   (alpaca-api.paper -> execution/alpaca-paper.js, Settings paperStockBroker 'alpaca'): paper stock
@@ -33,7 +38,13 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   scratchpad `alpacamock.js` (never the user's real paper account).
 - **Event loop (Phase 72)**: a loop over symbols awaits `loop-pace.pace()` once per symbol (an `await` on cached data
   never yields); no synchronous per-symbol pass over bars without it. The VM is an e2-micro (0.25 vCPU).
-- **Deploy (Compute Engine VM, pm2):** `bash scripts/deploy-vm.sh [pm2-app]` on the VM.
+- **Deploy (Compute Engine VM, pm2):** `bash scripts/deploy-vm.sh [pm2-app]` on the VM. New family VMs:
+  `scripts/install-free-vm.sh` (swap, Node 20, pm2, cloudflared, .env with LAN_ACCESS_TOKEN / LAN_ACCESS / TUNNEL,
+  prints the tunnel sign-in link); idempotent.
+- **Network (Phase 73)**: market data / news fetches go through `connectors/net-guard.js` (per-host circuit breaker:
+  3 network failures -> fail fast 30 s); broker order / exit calls never do. boot.js sets IPv4-first DNS. A pass runs
+  under `loop-pace.watchdog` (PASS_WATCHDOG_MS 45 s): past it the lock is released and the stalled pass is abandoned
+  at its next pace() (PASS_ABANDONED). Paper exits run right after broker reconcile, and every 5 s (exit-pass.startFast).
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
@@ -42,7 +53,7 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
 ## Module map
 
 Server (`server/`)
-- `server.js` wiring · `client-assets.js` cache-busted client files
+- `server.js` wiring · `boot.js` (.env, IPv4-first DNS, vault) · `client-assets.js` cache-busted client files
 - `execution/` `pipeline.js` (60 s loop: reconcile -> strategies -> gates -> risk engine ->
   stage), `exit-pass.js` (broker reconcile first in every pass + at boot; paper exits),
   `paper-ledger.js` + `ledger-live.js` (split / broker fill / bracketStatus / adopted) +
@@ -74,8 +85,12 @@ Server (`server/`)
   auth, AssetPairs, conditional-close stops; KRAKEN_API_KEY / SECRET / BASE_URL)
   `coinbase-api.js` `coinbase-socket.js` (ticker: bid/ask/qty)
   `coinbase-fees.js` (account fee tier) `coinbase-discovery.js` (gem catalog)
-  `crypto-social.js` (Reddit RSS + CoinGecko trending) `news-sentiment.js` `alpaca-*.js`
-- `data/news-feed.js` Catalyst & News Feed (Alpaca + crypto RSS + Reddit + trending, 48 h,
+  `crypto-social.js` (Reddit RSS + CoinGecko trending) `news-sentiment.js` `alpaca-*.js` (alpaca-api.dataKeys(): live keys,
+  else the Alpaca Paper keys, for market data / news / streams) `history-bars.js` (stock bars BATCHED: one multi-symbol
+  request per timeframe; chart reads `{ chart: true }` = cached at once + background refresh + priority slot) `net-guard.js`
+- `security/` access-policy, auth-gate, tunnel, `vault.js` + `accounts.js` (Settings > Accounts & Connections: Test & Save
+  against the venue, encrypted save, hot reload; WS GET_ACCOUNTS / SAVE_ACCOUNT / REMOVE_ACCOUNT)
+- `data/news-feed.js` Catalyst & News Feed (Phase 73: stale-while-revalidate: the first reply from cache < 50 ms, a second when fresh) (Alpaca + crypto RSS + Reddit + trending, 48 h,
   subject-filtered; also the symbol's news sentiment). The rest of `server/data/` is
   ledger state and is git-ignored.
 
@@ -83,7 +98,7 @@ Client (`client/`)
 - `app.js` state + WS dispatch · `lib/` (ui, mobile tab bar, venue)
 - `views/` `opportunities*.js` (Setups / Approvals / Scanner / Moonshots), `live-chart.js`
   (pane factory), `trade-hud.js` (per-chart HUD factory), `position-detail.js`,
-  `opportunity-detail.js`, `moonshots-panel.js`, `setup-analysis.js`, `journal.js`, ...
+  `opportunity-detail.js`, `moonshots-panel.js`, `setup-analysis.js`, `journal.js`, `settings-accounts.js` (Accounts & Connections, welcome banner, bankroll / mode notes), ...
 - `components/` `net-pnl.js` (net-first P&L, one-tick re-mark), `catalyst-feed.js`,
   `dual-chart-container.js` (Chart 2 + right-column switcher), `live-close.js`,
   `manual-trade-ticket.js`, `chart-data.js`

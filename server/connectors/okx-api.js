@@ -41,9 +41,10 @@ function failure(err) {
   return { ok: false, error: reason.startsWith('OKX') ? reason : `OKX unreachable: ${reason}`, uncertain, code: err.okx || null };
 }
 
-async function request(method, path, { query = null, body = null } = {}) {
-  const c = config.okx();
-  if (!configured()) throw Object.assign(new Error('OKX: OKX_API_KEY / OKX_API_SECRET / OKX_API_PASSPHRASE not set in .env'), { okx: 'config' });
+// creds { apiKey, apiSecret, passphrase } (Phase 73, Settings > Accounts: Test & Save): candidate keys.
+async function request(method, path, { query = null, body = null, creds = null } = {}) {
+  const c = creds ? { ...config.okx(), ...creds } : config.okx();
+  if (!(c.apiKey && c.apiSecret && c.passphrase)) throw Object.assign(new Error('OKX: OKX_API_KEY / OKX_API_SECRET / OKX_API_PASSPHRASE not set in .env'), { okx: 'config' });
   const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString() : '';
   const requestPath = qs ? `${path}?${qs}` : path;
   const payload = body ? JSON.stringify(body) : '';
