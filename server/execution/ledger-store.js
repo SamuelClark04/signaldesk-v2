@@ -9,6 +9,7 @@ const STATE_PATH = process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', '
 const { RISK_PROFILES, DEFAULT_PROFILE, riskPctFor } = require('../risk/risk-profiles');
 const { LEVELS: STRICTNESS_LEVELS, DEFAULT_LEVEL: DEFAULT_STRICTNESS } = require('../risk/strictness');
 const { CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT } = require('../risk/risk-engine');
+const toggles = require('../strategies/strategy-toggles');
 
 const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: older files load with none)
 
@@ -33,12 +34,22 @@ const SETTINGS_RULES = {
   // bullish / bearish equity trades open or staged at once.
   maxOpenRiskPct: { type: 'number', default: 0.06, min: 0.005, max: 0.5 },
   maxEquityPerDirection: { type: 'number', default: 2, min: 1, max: 20, integer: true },
+  // Phase 78: per-strategy on / off (strategies/strategy-toggles.js; Crypto Swing off by default). A full map is saved.
+  strategiesEnabled: { type: 'toggles', default: toggles.DEFAULTS, keys: toggles.IDS },
 };
-const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.default]));
+const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
 let lists = null; // the ledger's { pendingOrders, activePositions, tradeJournal, discardedOrders }
 
 function cleanValue(key, value, rule) {
+  if (rule.type === 'toggles') { // { id: true|false } for known ids; missing ids keep their defaults
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object of on / off switches`);
+    for (const [k, v] of Object.entries(value)) {
+      if (!rule.keys.includes(k)) throw new Error(`${key}: unknown strategy "${k}"`);
+      if (typeof v !== 'boolean') throw new Error(`${key}.${k} must be true or false`);
+    }
+    return { ...rule.default, ...value };
+  }
   if (rule.type === 'choice') {
     if (!rule.values.includes(value)) throw new Error(`${key} must be one of: ${rule.values.join(', ')}`);
     return value;
@@ -154,7 +165,7 @@ function attach(ledgerLists) {
 // ---------- Settings ----------
 // riskPct and the profile/strictness tables are derived (never stored), so the
 // UI shows the server's numbers instead of keeping its own copy.
-const getSettings = () => ({ ...settings, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
+const getSettings = () => ({ ...settings, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
   strictnessLevels: Object.fromEntries(Object.entries(STRICTNESS_LEVELS).map(([k, v]) => [k, { ...v }])) });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.

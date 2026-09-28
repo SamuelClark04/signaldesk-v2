@@ -68,6 +68,11 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   partial + runner = one trade) and Backtest (server/backtest: history.js paged bars, engine.js replay with the live exits / cost
   gates, rules-stocks.js / rules-crypto.js ports of the live rules, runner.js reports, handler.js RUN_BACKTEST / GET_BACKTESTS).
   Moonshots / options / Pilot are not replayable (no archived buzz / option chains). The backtest follows the live Strictness dial.
+- **Strategy switches (Phase 78)**: settings.strategiesEnabled (strategies/strategy-toggles.js; Settings > Strategies): a strategy
+  that is off is never run (strategy-runner), hidden from heating-up / Watching triggers, and "off" in the Scanner log; its open
+  trades and staged setups are untouched. Crypto Swing is OFF by default: every replayed variant lost money over 2 x 90 days (base
+  PF 0.82-0.96; + BTC daily / 4h regime filter worse; + confirmed reversal candle 0-6 trades). Research script: scratchpad
+  ph78exp.js. Re-enable only after a backtest shows an edge; never tune on the window you judge it on.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

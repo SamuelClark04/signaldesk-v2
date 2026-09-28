@@ -10,6 +10,8 @@ const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const alpacaNews = require('../connectors/alpaca-news-socket');
 const prices = require('../market/latest-prices');
 const loop = require('./loop-pace');
+const toggles = require('../strategies/strategy-toggles'); // Phase 78: Settings > Strategies (a strategy that is off never runs)
+const settingsNow = () => { try { return require('./ledger-store').getSettings(); } catch { return {}; } };
 
 const S = {
   equityDay: require('../strategies/1-equity-day'),
@@ -40,7 +42,9 @@ const LATE = Symbol('late');
 
 async function collect() {
   const all = [];
+  const set = settingsNow();
   for (const [name, generate] of STRATEGIES) {
+    if (!toggles.isEnabled(name, set)) { carried.delete(name); continue; }
     const c = carried.get(name);
     if (c) { carried.delete(name); if (Date.now() - c.at <= CARRY_MAX_MS) all.push(...c.list); }
     if (running.has(name)) { console.warn(`[pipeline] ${name}: still finishing the previous pass's scan; not started again`); continue; }
@@ -64,7 +68,7 @@ async function collect() {
 
 // Rejection blocks and scan tallies of every strategy (read and cleared after each pass).
 const takeBlocks = () => [S.equitySwing, S.cryptoSwing, S.cryptoIntraday, S.optionsSystem, S.speculativeCrypto].flatMap((m) => m.takeBlocks());
-const scans = () => [['equity-day', S.equityDay], ['crypto-swing', S.cryptoSwing], ['crypto-intraday', S.cryptoIntraday], ['equity-swing', S.equitySwing],
-  ['options-system', S.optionsSystem], ['speculative-crypto', S.speculativeCrypto]].map(([id, m]) => [id, m.takeScan()]);
+const scans = () => { const set = settingsNow(); return [['equity-day', S.equityDay], ['crypto-swing', S.cryptoSwing], ['crypto-intraday', S.cryptoIntraday], ['equity-swing', S.equitySwing],
+  ['options-system', S.optionsSystem], ['speculative-crypto', S.speculativeCrypto]].map(([id, m]) => [id, toggles.isEnabled(id, set) ? m.takeScan() : { checked: 0, setups: 0, reasons: {}, disabled: true }]); };
 
 module.exports = { collect, takeBlocks, scans, STRATEGIES, BUDGET_MS, _state: { running, carried } };

@@ -13,6 +13,7 @@ const cryptoIntraday = require('../strategies/2-crypto-intraday');
 const optionsSystem = require('../strategies/5-options-system');
 
 const { pace } = require('../execution/loop-pace');
+const toggles = require('../strategies/strategy-toggles');
 
 const THRESHOLD_PCT = 0.015; // 1.5%
 
@@ -23,7 +24,10 @@ async function computeProximity(stockBars, latestPrices, now = Date.now()) {
     await pace();
     reports.push(...read());
   }
+  let set = {};
+  try { set = require('../execution/ledger-store').getSettings(); } catch { /* defaults */ }
   const all = reports
+    .filter((p) => toggles.isEnabled(p.strategyId, set)) // Phase 78: a strategy that is off is not "heating up"
     .filter((p) => Number.isFinite(p.distancePct) && p.distancePct >= 0 && p.distancePct <= THRESHOLD_PCT)
     .sort((a, b) => a.distancePct - b.distancePct);
   const nearest = new Map();

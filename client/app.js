@@ -145,11 +145,11 @@
     POSITIONS_UPDATED: (list) => { SD.portfolio.positionsUpdated(); SD.liveClose.watch(list); }, // closes a pending adoption form; UNARMORED toast (Phase 67)
     ADOPTION_SUGGESTIONS: (r) => SD.portfolioAdopt.suggestions(r), // auto-filled stop/target
     ALLOCATION_PROPOSAL: (proposal) => SD.portfolio.renderAllocation(proposal),
-    SETTINGS_UPDATED: (settings) => { SD.settings.render(settings); SD.accounts.explain(settings); SD.portfolioRiskSettings.render(settings); },
+    SETTINGS_UPDATED: (settings) => { SD.settings.render(settings); SD.accounts.explain(settings); SD.portfolioRiskSettings.render(settings); SD.strategySettings.render(settings); },
     ACCOUNTS_STATUS: (s) => SD.accounts.status(s), // Phase 73: never a secret
     ACCOUNT_RESULT: (r) => SD.accounts.result(r),
     BROKER_STATE: (broker) => SD.settingsWaterfall.render(broker), // Phase 70: the Settings waterfall strip
-    SETTINGS_ERROR: (payload) => { SD.settings.error(payload); SD.portfolioRiskSettings.render(payload && payload.settings); },
+    SETTINGS_ERROR: (payload) => { SD.settings.error(payload); SD.portfolioRiskSettings.render(payload && payload.settings); SD.strategySettings.render(payload && payload.settings); },
     LEDGER_RESET: (r) => SD.settings.resetDone(r),
     PRICES_UPDATED: (prices) => SD.liveChart.record(prices), // builds candles even while another tab is open
     POSITION_MARKS: (m) => SD.liveChart.record(Object.fromEntries(Object.entries((m && m.book) || {}).map(([s, b]) => [s, b.last]))), // held symbols every 5 s
@@ -198,5 +198,6 @@
   SD.journal.render([]);
   SD.journalScorecard.render([]);
   SD.portfolioRiskSettings.render(null);
+  SD.strategySettings.render(null);
   connect();
 })();

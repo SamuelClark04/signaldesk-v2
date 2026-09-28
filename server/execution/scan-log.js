@@ -30,8 +30,8 @@ function scanned(strategyId, scan, now = Date.now()) {
   const reasons = Object.entries(scan.reasons || {}).sort((a, b) => b[1].length - a[1].length)
     .map(([reason, symbols]) => ({ reason, count: symbols.length, symbols: symbols.slice(0, SYMBOLS_SHOWN), more: Math.max(0, symbols.length - SYMBOLS_SHOWN) }));
   const setups = scan.setups || 0;
-  add(`scan|${strategyId}`, { kind: 'scan', strategyId, strategy: NAMES[strategyId] || strategyId, checked: scan.checked, setups, reasons,
-    text: `${NAMES[strategyId] || strategyId}: checked ${scan.checked} symbol${scan.checked === 1 ? '' : 's'}, ${setups ? `${setups} setup${setups === 1 ? '' : 's'} formed` : 'no setup formed'}` }, now);
+  add(`scan|${strategyId}`, { kind: 'scan', strategyId, strategy: NAMES[strategyId] || strategyId, checked: scan.checked, setups, reasons, disabled: !!scan.disabled,
+    text: scan.disabled ? `${NAMES[strategyId] || strategyId}: off (Settings > Strategies); not scanned` : `${NAMES[strategyId] || strategyId}: checked ${scan.checked} symbol${scan.checked === 1 ? '' : 's'}, ${setups ? `${setups} setup${setups === 1 ? '' : 's'} formed` : 'no setup formed'}` }, now);
 }
 
 function rejected(id, rawReason, candidate = {}, now = Date.now()) {

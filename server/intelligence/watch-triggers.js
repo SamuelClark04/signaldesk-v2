@@ -74,7 +74,10 @@ function flushLevel(bars, price) {
 // items: watchlist items ({ symbol, market, lastPrice }); latestPrices: fresh prices;
 // stockBars: today's 1m bars per stock. -> { SYMBOL: trigger }.
 async function computeTriggers(items, latestPrices, stockBars, now = Date.now()) {
-  const strategy = [...equityDay.proximity(stockBars), ...cryptoSwing.proximity(latestPrices), ...optionsSystem.proximity(latestPrices)];
+  let set = {};
+  try { set = require('../execution/ledger-store').getSettings(); } catch { /* defaults */ }
+  const strategy = [...equityDay.proximity(stockBars), ...cryptoSwing.proximity(latestPrices), ...optionsSystem.proximity(latestPrices)]
+    .filter((p) => require('../strategies/strategy-toggles').isEnabled(p.strategyId, set)); // Phase 78: not a trigger of a strategy that is off
   const out = {};
   for (const item of items) {
     await pace(); // Phase 72
