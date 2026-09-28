@@ -4,7 +4,8 @@
   const SD = window.SignalDesk;
   const { $, el, td, price, money, signed, pnlClass, clock, dirCell, assetCell, setTable } = SD.ui;
 
-  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit', TAKE_PROFIT_T1: 'T1 partial (runner open)', BROKER_EXIT: 'Broker exit' };
+  const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit', TAKE_PROFIT_T1: 'T1 partial (runner open)', BROKER_EXIT: 'Broker exit',
+    SESSION_CLOSE: 'Day trade closed before the bell', EXPIRY_EXIT: 'Closed before expiry' }; // Phase 76 time exits
   const LEG_LABELS = { take_profit: 'Broker take profit', stop_loss: 'Broker stop loss' };
 
   // Execution audit (Phase 63): a live close's expected cashout (right before the sell: best

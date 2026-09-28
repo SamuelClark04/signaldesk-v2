@@ -27,7 +27,7 @@ const MIN_DAYS_TO_EARNINGS = 3;
 const CONFIG = {
   tradeType: 'Swing Trade',
   expectedDuration: '3-10 days',
-  symbols: ['NVDA'],
+  symbols: [...require('../market/universe').STOCKS], // Phase 76: the whole stock universe (was NVDA only); daily bars are batched + cached
   fast: 20,
   slow: 50,
   highLookback: 10,

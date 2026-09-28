@@ -36,10 +36,23 @@ function validateApproval(candidate, currentLivePrice, now = Date.now()) {
 // Phase 68: an AUTOMATED setup (a strategy or the Portfolio Pilot) on a coin / stock that already
 // has an open LIVE position (bracketed or adopted) would stack a second record on the same
 // broker balance. Manual Trade Ticket orders ("manual:" ids) are the user's explicit choice.
-function stackingConflict(order, positions) {
+// Phase 76 (audit): ONE automated trade per symbol per market, paper included. The paper book held three
+// SOFI put spreads at once, and a BAC call spread next to a BAC put spread (paying twice to bet both ways).
+// A strategy setup is refused while the same symbol has an open position (or, at staging, another staged
+// setup) in the same market. Portfolio Pilot buys / holdings are long-term allocations with their own 30%
+// cap: they neither block nor are blocked by this rule (the LIVE rule above still applies to them).
+const PILOT = 'portfolio-pilot';
+const sameBook = (order, x) => x.asset === order.asset && x.market === order.market && x.id !== order.id && x.strategyId !== PILOT;
+function stackingConflict(order, positions, pending = []) {
   if (!order || String(order.id).startsWith('manual:')) return null;
   const held = (positions || []).find((p) => p.asset === order.asset && p.execution === 'LIVE' && p.id !== order.id);
-  return held ? `ALREADY_HOLDING: ${order.asset} already has an open ${held.adopted ? 'adopted' : 'LIVE'} position (${held.id}); an automated setup would stack a second one on the same coin` : null;
+  if (held) return `ALREADY_HOLDING: ${order.asset} already has an open ${held.adopted ? 'adopted' : 'LIVE'} position (${held.id}); an automated setup would stack a second one on the same coin`;
+  if (order.strategyId === PILOT) return null;
+  const open = (positions || []).find((p) => sameBook(order, p));
+  if (open) return `ALREADY_IN_TRADE: ${order.asset} already has an open ${order.market} trade (${open.id}${open.direction !== order.direction ? ', the OPPOSITE direction' : ''}); one automated trade per symbol`;
+  const staged = (pending || []).find((o) => sameBook(order, o) && !String(o.id).startsWith('manual:'));
+  if (staged) return `ALREADY_STAGED: ${order.asset} already has a ${order.market} setup waiting in Approvals (${staged.id}${staged.direction !== order.direction ? ', the OPPOSITE direction' : ''})`;
+  return null;
 }
 
 module.exports = { validateApproval, stackingConflict, MAX_CANDIDATE_AGE_MS };

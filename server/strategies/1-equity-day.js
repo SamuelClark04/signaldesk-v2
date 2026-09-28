@@ -96,7 +96,21 @@ function pickCatalyst(headlines) {
 
 const tally = createTally(); // why each symbol produced no setup (scanner log)
 
-function detectOrb(symbol, rawBars, headlines) {
+// Phase 76 (audit): session VWAP of the 1m bars (typical price x volume). A long ORB must break out ABOVE its
+// own VWAP, and none is taken while SPY trades under ITS session VWAP (breakouts fail most in a weak tape).
+function vwap(bars) {
+  let pv = 0; let v = 0;
+  for (const b of bars) { pv += ((b.high + b.low + b.close) / 3) * (b.volume || 0); v += b.volume || 0; }
+  return v > 0 ? pv / v : null;
+}
+function marketTape(marketDataMap) {
+  const { bars } = sessionBars(lookup(marketDataMap, 'SPY'));
+  const w = bars.length >= CONFIG.minOpeningRangeBars ? vwap(bars) : null;
+  const last = bars.length ? bars[bars.length - 1].close : null;
+  return w && last ? { weak: last < w, text: `SPY ${last} ${last < w ? 'under' : 'over'} its session VWAP ${cents(w)}` } : { weak: false, text: 'SPY tape unknown' };
+}
+
+function detectOrb(symbol, rawBars, headlines, tape = { weak: false }) {
   const c = CONFIG;
   const { date, bars } = sessionBars(rawBars);
   const orEnd = SESSION_OPEN + c.openingRangeMinutes;
@@ -117,6 +131,9 @@ function detectOrb(symbol, rawBars, headlines) {
   if (breakout.start > c.lastEntryMinute) return tally.skip(symbol, 'Past the entry cutoff');
   if (breakout.close > orHigh * (1 + c.maxChasePct)) return tally.skip(symbol, 'Breakout too extended (no chasing)');
   if (breakout.volume < orAvgVolume * c.volumeMultiple) return tally.skip(symbol, 'Breakout volume too low');
+  const vw = vwap(bars);
+  if (vw && breakout.close <= vw) return tally.skip(symbol, 'Breakout under the session VWAP');
+  if (tape.weak) return tally.skip(symbol, `Weak market: ${tape.text}`);
 
   const catalyst = pickCatalyst(headlines);
   if (catalyst && catalyst.classification === 'NEGATIVE') return tally.skip(symbol, 'Negative news catalyst'); // no longs into bad news
@@ -150,6 +167,7 @@ function detectOrb(symbol, rawBars, headlines) {
     confirmationCriteria: [
       `${c.barMinutes}m close above OR high ${cents(orHigh)}`,
       `Breakout volume >= ${c.volumeMultiple}x opening-range average`,
+      `Above the session VWAP${vw ? ` ${cents(vw)}` : ''}; ${tape.text || 'SPY tape unknown'}`,
       `Entry at or below ${entryMax} (no chasing)`,
       `Stop ${((risk / entryMax) * 100).toFixed(2)}% from worst-case entry (min ${(c.minStopPct * 100).toFixed(2)}%)`,
     ],
@@ -160,10 +178,11 @@ function detectOrb(symbol, rawBars, headlines) {
 async function generateCandidates(marketDataMap, newsContext) {
   const candidates = [];
   tally.start();
+  const tape = marketTape(marketDataMap);
   for (const [symbol, bars] of entries(marketDataMap)) {
     await pace();
     tally.checked();
-    const candidate = detectOrb(symbol, bars, lookup(newsContext, symbol));
+    const candidate = detectOrb(symbol, bars, lookup(newsContext, symbol), symbol === 'SPY' ? { weak: false, text: tape.text } : tape);
     if (candidate) { candidates.push(candidate); tally.setup(); }
   }
   return candidates;
@@ -190,4 +209,4 @@ function proximity(marketDataMap) {
   return out;
 }
 
-module.exports = { generateCandidates, proximity, takeScan: tally.take, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, proximity, vwap, marketTape, takeScan: tally.take, STRATEGY_ID, CONFIG };

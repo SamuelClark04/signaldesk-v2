@@ -53,6 +53,12 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   into the next pass. Only watchdog-released passes are abandoned. CPU-heavy per-contract math: no Intl / toLocaleString
   per call (memoize, like options-data.expiryMs / 1-equity-day toEastern); spread-builder build() is async and paced.
   The Moonshot leaderboard persists next to the ledger file (moonshot-radar.json), restored for 6 h.
+- **Audit (Phase 76)**: ONE automated trade per symbol per market (order-guard.stackingConflict: open positions, and staged
+  setups at the pipeline; Pilot and manual exempt, the LIVE rule unchanged). Time exits (execution/time-exits.js, every exit
+  pass): equity-day flattened 10 min before the close (SESSION_CLOSE), automated option spreads closed 3 days before expiry
+  (EXPIRY_EXIT); PAPER only (LIVE is reported, never sold). Alpaca stock brackets are GTC except day trades
+  (alpaca-api.bracketTif). Equity swing scans all STOCKS. ORB: breakout above the session VWAP, none while SPY is under its VWAP.
+  Tests that call moonshot-radar.compute set RADAR_CACHE_PATH (it otherwise writes next to the REAL ledger).
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

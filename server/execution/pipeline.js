@@ -145,7 +145,7 @@ async function pipelinePass() {
     }
     const top = result.market === 'crypto' ? depthGate(result.asset, result.notional) : null; // Phase 66: can the best ask take the order?
     if (top && !top.ok) { recordRejection(result.id, top.reason, candidate); continue; }
-    const stack = stackingConflict(result, ledger.getActivePositions()); // Phase 68: never a second automated position on a held coin
+    const stack = stackingConflict(result, ledger.getActivePositions(), ledger.getPendingOrders()); // Phase 68 / 76: one automated trade per symbol
     if (stack) { recordRejection(result.id, stack, candidate); continue; }
     counts.approved += 1;
     try {
