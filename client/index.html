@@ -117,6 +117,18 @@
           <div class="empty" id="journal-empty">No closed trades yet.</div>
         </div>
 
+        <!-- Phase 80: Taxes & Accounting (lib/tax-report.js): 8949 CSV export, TTS readiness, entity / deduction roadmap. -->
+        <div class="panel tax">
+          <div class="panel-header">
+            <h2 class="panel-title">Taxes &amp; Accounting</h2>
+            <span class="panel-hint">Form 8949 export for your CPA / TurboTax, Trader Tax Status readiness, election and deduction roadmap</span>
+          </div>
+          <div class="bt-body">
+            <div id="tax-hub"></div>
+            <div id="tax-guide"></div>
+          </div>
+        </div>
+
         <!-- Phase 77: replay a strategy's live rules over past bars (server/backtest). Market data only. -->
         <div class="panel bt">
           <div class="panel-header">
@@ -262,6 +274,7 @@
   <!-- Order matters: helpers, then views, then the shell that wires them up. -->
   <script src="lib/ui.js"></script>
   <script src="lib/scorecard.js"></script>
+  <script src="lib/tax-report.js"></script>
   <script src="lib/venue.js"></script>
   <script src="lib/auto-cycle.js"></script>
   <script src="components/chart-data.js"></script>
@@ -309,6 +322,8 @@
   <script src="views/journal.js"></script>
   <script src="views/journal-scorecard.js"></script>
   <script src="views/journal-backtest.js"></script>
+  <script src="views/journal-tax-guide.js"></script>
+  <script src="views/journal-taxes.js"></script>
   <script src="views/settings.js"></script>
   <script src="views/settings-portfolio-risk.js"></script>
   <script src="views/settings-strategies.js"></script>

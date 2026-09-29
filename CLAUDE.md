@@ -83,6 +83,13 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   on Approvals, setup detail, the position panel and Portfolio. Holdings: execution/live-sync.js re-syncs broker balances
   (read-only) when a LIVE trade opens / closes / resizes; portfolio-metrics lists a LIVE ledger trade its venue's snapshot lacks
   (or with no snapshot) and counts it in Managed / account value. Tests reaching the radar need a scratch LEDGER_STATE_PATH.
+- **Taxes & Accounting (Phase 80)**: Journal panel, client-only (no server change). client/lib/tax-report.js (UMD, tested in Node):
+  one Form 8949 line per closed journal record (partials = separate sales); basis = paid + buy fee (venue's entryFeeActual, else
+  pro rata; options half each), proceeds = basis + netPnl so the gain is the ledger's to the cent; options at debit x 100; shorts:
+  (b) = the cover date; long-term only if held MORE than 1 year; New York trade dates / tax year. LIVE only by default (paper rows
+  say "do not report"). TTS readiness on LIVE trades (trades / week vs 20, active weekdays vs 75%, average hold vs 31 days, volume;
+  period from the first trade to now / year end). 475(f) deadlines (April 15, weekend-rolled). views/journal-taxes.js (hub, CSV
+  download via Blob) + views/journal-tax-guide.js (roadmap, built once; expense ticks in localStorage). Education, not tax advice.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

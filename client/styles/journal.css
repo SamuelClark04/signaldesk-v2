@@ -34,3 +34,28 @@
 .tc-line strong { color: var(--text); font-weight: 600; }
 .tc-score.is-weak { color: var(--warn); }
 .tc-score.is-ok { color: var(--long); }
+
+/* Phase 80: Taxes & Accounting (8949 export, TTS readiness, roadmap). */
+.tax-controls .field { min-width: 0; }
+.tax-controls .btn { align-self: flex-end; }
+.tax-h { margin: 14px 0 0; font-size: 14px; font-weight: 600; }
+.tax-tile { position: relative; }
+.tax-bench { font-size: 11.5px; color: var(--text-muted); }
+.tax-chip { justify-self: start; margin-top: 2px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--border); }
+.tax-tile.is-ok .tax-chip { color: var(--long); background: var(--long-bg); }
+.tax-tile.is-near .tax-chip { color: var(--warn); }
+.tax-tile.is-short .tax-chip { color: var(--short); background: var(--short-bg); }
+.tax-warn { color: var(--warn); }
+.tax-guide { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.tax-guide > summary { cursor: pointer; }
+.tax-sec { margin-top: 10px; font-size: 12.5px; color: var(--text-muted); }
+.tax-sec > summary { cursor: pointer; color: var(--text); font-weight: 600; font-size: 13px; }
+.tax-sec p { margin: 6px 0; }
+.tax-list { margin: 6px 0; padding-left: 18px; display: grid; gap: 4px; }
+.tax-list strong { color: var(--text); }
+.tax-open { color: var(--long); }
+.tax-passed { color: var(--text-muted); }
+.tax-checks { display: grid; gap: 6px; margin-top: 6px; }
+.tax-check { display: flex; gap: 8px; align-items: flex-start; }
+.tax-check input { margin-top: 2px; accent-color: var(--accent); }
+.tax-check strong { color: var(--text); }

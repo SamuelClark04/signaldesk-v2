@@ -134,7 +134,7 @@
   SD.backtest.init(transport); // Phase 77: Journal > Backtest
 
   const HANDLERS = {
-    JOURNAL_UPDATED: (trades) => { SD.journal.render(trades || []); SD.journalScorecard.render(trades || []); }, // + Strategy Scorecard (77)
+    JOURNAL_UPDATED: (trades) => { SD.journal.render(trades || []); SD.journalScorecard.render(trades || []); SD.journalTaxes.render(trades || []); }, // + Scorecard (77), Taxes (80)
     PORTFOLIO_RISK: (r) => SD.journalScorecard.renderRisk(r), // Phase 77: open risk vs the ceiling, equity direction counts
     BACKTEST_CATALOG: (c) => SD.backtest.received(c),
     BACKTEST_PROGRESS: (p) => SD.backtest.progress(p),
@@ -197,6 +197,7 @@
   showTab(location.hash.slice(1));
   SD.journal.render([]);
   SD.journalScorecard.render([]);
+  SD.journalTaxes.render([]); SD.taxGuide.mount(); // Phase 80
   SD.portfolioRiskSettings.render(null);
   SD.strategySettings.render(null);
   connect();
