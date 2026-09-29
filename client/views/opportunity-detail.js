@@ -236,7 +236,7 @@
         ...(ready && ctx.onToggleSave ? [bookmark(o, ctx)] : []),
         el('span', { className: `opp-pill${ready ? ' is-ready' : ''}`, textContent: ready ? 'Ready for review' : 'Waiting for setup' }),
       ]),
-      ...[ready ? holdChip(o) : null].filter(Boolean),
+      ...[ready ? holdChip(o) : null, ready ? SD.tradeContext.block(o, { hold: false, why: false }) : null].filter(Boolean), // + setup vs live score (79)
       ...(ready ? SD.oppApprovals.catalystChips(o.catalysts) : []), // FOMC / CPI / FDA inside the expected hold
       ...(ready && o.speculative ? [el('p', { className: 'opp-size-warn opp-moon-note', textContent: `Speculative Moonshot: micro-sized at ${Math.round(o.speculativeScale * 100)}% of normal risk (conviction ${o.conviction}).` })] : []),
       ...(summary ? [el('p', { className: 'opp-right-summary', textContent: summary })] : []),

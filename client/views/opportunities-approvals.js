@@ -99,6 +99,7 @@
       ...(o.capitalCapped ? [el('p', { className: 'apv-note', textContent: `Capital cap: risking ${(o.actualRiskPct * 100).toFixed(2)}% instead of ${(o.riskPct * 100).toFixed(2)}%.` })] : []),
       ...(o.cappedByAmount && amount.amount === null ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
       ...catalystChips(o.catalysts),
+      ...[SD.tradeContext.block(o, { why: false })].filter(Boolean), // Phase 79: expected hold + setup vs live score (Moonshots)
       el('p', { className: 'apv-thesis', textContent: o.thesis ? o.thesis.split(/(?<=\.)\s/).slice(0, 2).join(' ') : '' }),
       SD.tradeAmount.control(staged, amount, ctx.rerender),
       el('div', { className: 'apv-actions' }, [approve, review, dismiss]),

@@ -73,6 +73,16 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   trades and staged setups are untouched. Crypto Swing is OFF by default: every replayed variant lost money over 2 x 90 days (base
   PF 0.82-0.96; + BTC daily / 4h regime filter worse; + confirmed reversal candle 0-6 trades). Research script: scratchpad
   ph78exp.js. Re-enable only after a backtest shows an edge; never tune on the window you judge it on.
+- **Moonshots entry + live holdings (Phase 79)**: replayed (backtest/rules-moonshots.js, offline: scratchpad ph79exp.js, 62 gems x
+  90 days of 5m) the old entry lost (PF 0.86, -24R). strategies/moonshot-entry.js (shared by the live strategy and the replay):
+  skip > 18% up over 24h or 15m RSI > 70; a trigger is ARMED, never bought on its breakout bar, and staged only when the price
+  retests (Ignition: half the surge back; Coil: the base top) within 1 hour, as a maker buy (no pullback = no trade). Stop floor =
+  Coinbase's on every venue (stopFloor: the validated one). Replay: 65 trades PF 1.40 (Kraken 1.21, OKX 1.34), both halves > 1.
+  Setups carry expectedDuration (hold window), entrySnapshot (score / parts / volume / spread / 24h / RSI / pullback) and
+  entryReason; client/components/trade-context.js shows hold + entry vs live score (the radar always scores held Moonshots) + why,
+  on Approvals, setup detail, the position panel and Portfolio. Holdings: execution/live-sync.js re-syncs broker balances
+  (read-only) when a LIVE trade opens / closes / resizes; portfolio-metrics lists a LIVE ledger trade its venue's snapshot lacks
+  (or with no snapshot) and counts it in Managed / account value. Tests reaching the radar need a scratch LEDGER_STATE_PATH.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

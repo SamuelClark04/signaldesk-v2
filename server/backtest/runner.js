@@ -14,7 +14,7 @@ const { getStrictness } = require('../risk/strictness'); // the live Settings di
 
 const RULES = Object.fromEntries([stocks.equitySwing, stocks.equityDay, crypto.swing, crypto.intra].map((r) => [r.id, r]));
 const UNAVAILABLE = {
-  'speculative-crypto': 'Moonshots: the historical gem catalog, Reddit / CoinGecko buzz and live spreads are not archived',
+  'speculative-crypto': 'Moonshots: buzz and spreads are not archived, and 60 coins of 5m candles is too heavy to replay here; its technical trigger is replayed offline (backtest/rules-moonshots.js: result under Settings > Strategies)',
   'options-system': 'Options spreads: no free historical option chains (bids / asks per strike) to price the spreads',
   'portfolio-pilot': 'Portfolio Pilot: a months-long allocator (rank, deposit, rebalance), not an entry / exit rule',
 };

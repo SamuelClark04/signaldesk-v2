@@ -27,3 +27,10 @@
 .bt-trades td, .bt-trades th { font-size: 12.5px; }
 .settings-portfolio-risk { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .settings-portfolio-risk .input-wrap .input-prefix { order: 2; }
+
+/* Phase 79: trade context (setup cards, position panel, holding details): expected hold, entry vs live score, why. */
+.tc { display: grid; gap: 4px; margin: 6px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 12.5px; color: var(--text-muted); }
+.tc-line { margin: 0; }
+.tc-line strong { color: var(--text); font-weight: 600; }
+.tc-score.is-weak { color: var(--warn); }
+.tc-score.is-ok { color: var(--long); }

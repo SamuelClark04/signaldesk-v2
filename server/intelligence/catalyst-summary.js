@@ -88,6 +88,11 @@ function verdict(r, ctx, now) {
   const label = spec.LABEL[r.trigger] || spec.LABEL[r.kind] || 'Trigger';
   const rej = rejections.latestFor(r.symbol, { strategyId: SPEC_ID }, now);
   const cd = spec.cooldownOf(r.symbol, now);
+  // Phase 79: triggered, not chasing: waiting up to 1 hour for the retest it will buy (never the breakout bar).
+  const armed = spec.armed().find((x) => x.symbol === r.symbol);
+  if (armed && now <= armed.until) {
+    return { status: 'ARMED', text: `${spec.LABEL[armed.kind]} triggered at ${armed.trigger} (${clock(armed.at)}): Moonshots buys only a pullback to ${armed.limit} until ${clock(armed.until)}, never the breakout bar. No pullback, no trade.` };
+  }
   // Phase 66: staged, then left unapproved past its window (or the price left it): say so plainly.
   if (cd && rej && rej.at >= cd.proposedAt - 1000 && /^(EXPIRED|PRICE_ESCAPED|INVALIDATED)/.test(rej.detail || '')) {
     const m = /after (\d+)m/.exec(rej.detail);
@@ -100,7 +105,7 @@ function verdict(r, ctx, now) {
     }
     if (cd) return { status: 'COOLDOWN', text: `${label} live at ${r.score}/100: proposed at ${clock(cd.proposedAt)} (approved, dismissed or expired since). 4-hour cooldown until ${clock(cd.until)}.` };
     if (rej && now - rej.at < RECENT_REJECTION_MS) return { status: 'FILTERED', text: `${label} live at ${r.score}/100, filtered by a downstream gate: ${rejectionText(rej)}.` };
-    return { status: 'QUALIFIES', text: `${label} live at ${r.score}/100 (needs ${spec.CONFIG.qualify}): the risk engine sizes it on the next scan pass (every 60 s).` };
+    return { status: 'QUALIFIES', text: `${label} live at ${r.score}/100 (needs ${spec.CONFIG.qualify}): the next scan pass (every 60 s) arms it: skipped if already > 18% up over 24h or 15m RSI > 70, otherwise bought only on a pullback within 1 hour.` };
   }
   if (r.trigger) return { status: 'LOW_SCORE', text: `${label} is live, but conviction ${r.score}/100 is under ${spec.CONFIG.qualify}: not proposed.` };
   if (r.score >= spec.CONFIG.qualify) return { status: 'WAITING', text: `Scores ${r.score}/100, but no entry trigger is live: a score alone is not a trade. Next: ${r.nearest || 'a fresh surge or coil breakout'}.` };

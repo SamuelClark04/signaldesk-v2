@@ -51,7 +51,7 @@
   const radarRow = (symbol) => { const r = SD.app && SD.app.state.moonshotRadar; return ((r && r.rows) || []).find((x) => x.symbol === symbol) || null; };
 
   // ---------- Section A: the decision breakdown ----------
-  const STATUS = { STAGED: 'is-go', HELD: 'is-go', QUALIFIES: 'is-go', FILTERED: 'is-stop', COOLDOWN: 'is-warn', EXPIRED: 'is-warn', LOW_SCORE: 'is-warn', WAITING: 'is-warn', WATCHING: 'is-idle' };
+  const STATUS = { STAGED: 'is-go', HELD: 'is-go', QUALIFIES: 'is-go', ARMED: 'is-go', FILTERED: 'is-stop', COOLDOWN: 'is-warn', EXPIRED: 'is-warn', LOW_SCORE: 'is-warn', WAITING: 'is-warn', WATCHING: 'is-idle' };
   function basis(symbol, s) {
     const head = el('div', { className: 'cfeed-basis-head' }, [el('strong', { textContent: 'What SignalDesk is basing this move on' }),
       ...(s ? [el('span', { className: `cfeed-status ${STATUS[s.verdict.status] || ''}`, textContent: s.verdict.status.replace('_', ' ') })] : [])]);

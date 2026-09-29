@@ -129,6 +129,7 @@
     return el('div', { className: 'opp-kv-group' }, [
       el('h3', { className: 'opp-section', textContent: `${venueOf(p)} · ${p.direction === 'short' ? 'Short' : 'Long'} ${p.setupType || ''}` }),
       ...[SD.liveClose.armor(p)].filter(Boolean), // Phase 67: UNARMORED / SELL UNCONFIRMED
+      ...[SD.tradeContext.block(p)].filter(Boolean), // Phase 79: expected hold, entry vs live score, why we entered
       ...(isRealOption(p) || !opt ? [heroRow(p, m)] : []),
       ...(isRealOption(p) ? realOptionRows(p, m) : opt ? legacyOptionRows(p) : linearRows(p, m)),
       ...exitRows(p),

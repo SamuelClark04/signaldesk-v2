@@ -228,6 +228,7 @@ function startPipeline(options = {}) {
   exitPass.reconcile(broadcast); // Phase 67: book what the broker did while SignalDesk was down, right at boot (errors are logged inside)
   loop.watch(); // Phase 72: '[loop] event loop blocked N s (during X)' when the thread stalls
   exitPass.startFast(broadcast); // Phase 73: PAPER stops / targets every 5 s, independent of the pass
+  require('./live-sync').start(ledger, broadcast); // Phase 79: a LIVE trade opened / closed -> broker holdings re-synced (Portfolio)
   require('./options-migration').run(ledger, broadcast); // Phase 58 stats + mid-hold targets on open option spreads
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)

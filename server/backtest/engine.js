@@ -2,7 +2,8 @@
 // exit rules and the real cost model. Long setups (every replayable rule is long).
 //   entry    a plan fills at bars[i].close ('close'), at its own price inside bar i ('at': e.g. the crypto
 //            swing's reclaim of the mean), or at the NEXT bar's open ('nextOpen': a setup read off a completed
-//            bar, approved and filled after it). A next open above plan.entryMax (PRICE_ESCAPED) or at / under
+//            bar, approved and filled after it), or as a resting buy ('limit': the first bar within plan.validBars that trades
+//            down to plan.limit, e.g. a pullback after a breakout; the fill bar is checked for the stop). A next open above plan.entryMax (PRICE_ESCAPED) or at / under
 //            the stop (INVALIDATED) is skipped, like the order guard at approval.
 //   gates    the risk engine's: fee drag <= the market's cap, and T1 ALONE >= minT1NetRR : 1 net after fees
 //   exits    from the bar after the entry, the stop first (a bar that touches both counts as a loss), a gap
@@ -38,14 +39,18 @@ function open(plan, bars, i) {
     if (n.open > plan.entryMax) return { skip: 'PRICE_ESCAPED' };
     if (plan.minFill && !(n.open > plan.minFill)) return { skip: 'FELL_BACK_UNDER_LEVEL' };
     entry = n.open; at = i + 1;
+  } else if (plan.fill === 'limit') { // Phase 79: a resting buy at plan.limit for plan.validBars bars (a pullback entry); never filled = no trade
+    const k = bars.findIndex((b, j) => j > i && j <= i + plan.validBars && b.low <= plan.limit);
+    if (k < 0) return { skip: 'NO_PULLBACK_FILL' };
+    entry = Math.min(bars[k].open, plan.limit); at = k;
   } else { entry = plan.fill === 'at' ? plan.price : bars[i].close; at = i; }
   const lv = plan.build(entry, at);
   if (!lv || lv.reject) return { skip: (lv && lv.reject) || 'NO_LEVELS' };
   const p = { symbol: plan.symbol, tag: plan.tag, market: plan.market, feeKey: plan.feeKey, entryLiquidity: plan.entryLiquidity || 'taker', speculative: !!plan.speculative,
-    entry, stop: lv.stop, targets: lv.targets.map((t) => ({ ...t })), openedAt: bars[at].time, bar: at, legs: [], left: 1 };
+    entry, stop: lv.stop, targets: lv.targets.map((t) => ({ ...t })), openedAt: bars[at].time, bar: at, legs: [], left: 1, meta: plan.meta || null };
   if (!(entry > p.stop)) return { skip: 'INVALIDATED' };
   const g = gates(p);
-  return g ? { skip: g } : { pos: p, firstExitBar: plan.fill === 'nextOpen' ? at : at + 1 };
+  return g ? { skip: g } : { pos: p, firstExitBar: plan.fill === 'nextOpen' || plan.fill === 'limit' ? at : at + 1 }; // a limit fill bar is checked for the stop too
 }
 
 // One bar of exits for an open position (mutates it). true when it is flat.
@@ -73,7 +78,7 @@ function result(p, lastBar) {
   const gross = legs.reduce((s, l) => s + l.share * (l.price - p.entry), 0);
   const netR = (gross - fees(p.feeKey, p.entry, p.entryLiquidity, legs)) / risk;
   return { symbol: p.symbol, tag: p.tag, entry: p.entry, stop: p.stop, t1: p.targets[0].price, openedAt: p.openedAt, closedAt: open ? null : legs[legs.length - 1].time,
-    exit: legs.map((l) => l.why).join(' + '), netR, open };
+    exit: legs.map((l) => l.why).join(' + '), netR, open, ...(p.meta ? { meta: p.meta } : {}) }; // meta: the rule's own notes (research)
 }
 
 // rule.signal(bars, i, ctx) -> plan | null. from: the first bar index a NEW trade may open (warm-up before it).

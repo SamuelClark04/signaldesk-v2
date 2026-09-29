@@ -72,14 +72,19 @@ async function rowFor(w, latest, btc, now) {
 async function compute(latestPrices, now = Date.now()) {
   const btcLive = lookup(latestPrices, 'BTC-USD');
   const btc = btcLive > 0 ? { live: btcLive, bars: await spec.bars5('BTC-USD', now) } : null;
-  const list = discovery.watchlist().length ? discovery.watchlist() : await spec.gemWatchlist(now);
+  const gems = discovery.watchlist().length ? discovery.watchlist() : await spec.gemWatchlist(now);
+  // Phase 79: an OPEN Moonshot is always scored, on the watchlist or not, so its panel can show entry score vs live score.
+  let held = [];
+  try { held = require('../execution/paper-ledger').getActivePositions().filter((p) => p.strategyId === 'speculative-crypto' || p.speculative).map((p) => p.asset); } catch { /* ledger not loaded */ }
+  const list = [...gems, ...[...new Set(held)].filter((s) => !gems.some((w) => w.symbol === s)).map((s) => { const c = discovery.coinOf(s);
+    return { symbol: s, name: c ? c.name : s, source: 'held', reasons: ['open Moonshot position'], change24h: c ? c.change24h : null, volumeUsd: c ? c.volumeUsd : null, volChange: c ? c.volChange : null }; })];
   const rows = [];
   const missing = [];
   for (const w of list) {
     await pace(); // Phase 72: yield between gems
     try {
       const r = await rowFor(w, latestPrices, btc, now);
-      if (r) rows.push(r); else missing.push(w.symbol);
+      if (r) rows.push({ ...r, held: held.includes(w.symbol) }); else missing.push(w.symbol);
     } catch (err) {
       console.error(`[moonshot-radar] ${w.symbol} failed: ${err.message}`);
     }

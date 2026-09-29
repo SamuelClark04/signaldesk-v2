@@ -165,10 +165,11 @@
             kv('Strategy', `${p.strategyId || '—'} · ${p.setupType || 'Setup'} · ${p.timeframe || '—'}`),
           ]),
         ]),
-        el('div', {}, [el('h4', { className: 'pf-h4', textContent: broker ? 'About this holding' : 'Investment thesis' }), el('p', { className: 'pf-text', textContent: broker
+        el('div', {}, [...[SD.tradeContext.block(broker ? (p.tracked && p.tracked.length === 1 ? p.tracked[0] : null) : p, { why: false })].filter(Boolean), // Phase 79
+          el('h4', { className: 'pf-h4', textContent: broker ? 'About this holding' : 'Why we entered' }), el('p', { className: 'pf-text', textContent: broker
           ? `Synced from your ${p.broker} account: ${p.managedQty > 0 ? `${p.managedQty} managed by SignalDesk` : 'not managed by SignalDesk'}${p.freeQty > 0 ? `, ${p.freeQty} external` : ''}. `
             + `SignalDesk's own live trades have stop/target orders at ${p.broker}; adopted coins are watched with alerts only. Selling happens at ${p.broker}.`
-          : p.thesis || 'No thesis recorded.' }),
+          : p.entryReason || p.thesis || 'No thesis recorded.' }),
         ...(broker ? [SD.portfolioAdopt.releaseList(row, opts)].filter(Boolean) : [])]),
         el('div', {}, [
           el('h4', { className: 'pf-h4', textContent: 'Position performance' }),

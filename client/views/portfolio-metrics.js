@@ -174,7 +174,14 @@
     if (!synced && keys.has('coinbase')) keys.add('coinbase-ledger'); // no snapshot yet: show what the ledger knows
     if (!alSynced && keys.has('alpaca')) keys.add('alpaca-ledger');
     for (const k of Object.values(XV)) if (keys.has(k) && !xs.some((x) => x.k === k)) keys.add(`${k}-ledger`);
-    const rows = [...ledger, ...broker, ...manual, ...paperAccountRows(state)].filter((r) => keys.has(r.key))
+    // Phase 79: a LIVE SignalDesk trade its venue's last snapshot does not hold (bought after that sync, or missing from
+    // its balance list: AVT / CRV / MORPHO) is listed from the ledger, never hidden, until the next sync shows it.
+    const snaps = { coinbase: synced ? cb : null, alpaca: alSynced ? al : null, ...Object.fromEntries(xs.map((x) => [x.k, x.h])) };
+    const unsynced = ledger.filter((r) => { const snap = snaps[r.key.replace(/-ledger$/, '')]; return r.key !== 'paper' && snap && !snap.positions.some((h) => h.asset === r.p.asset); })
+      .map((r) => ({ ...r, key: r.key.replace(/-ledger$/, '-live'), snap: snaps[r.key.replace(/-ledger$/, '')], alert: alerts.get(r.p.id) || { asset: r.p.asset, tone: 'info', action: `SignalDesk LIVE trade at ${r.p.broker}`,
+        detail: `Not in the last ${r.p.broker} sync (${clock(snaps[r.key.replace(/-ledger$/, '')].syncedAt)}): listed from SignalDesk's ledger; the holdings re-sync after every live trade` } }));
+    for (const k of [...keys]) keys.add(`${k}-live`);
+    const rows = [...ledger, ...broker, ...manual, ...paperAccountRows(state), ...unsynced].filter((r) => keys.has(r.key))
       .sort((a, b) => (b.p.openedAt || 0) - (a.p.openedAt || 0))
       // No live price: the latest session close, else the server's markPrice (external holdings, Phase 55).
       .map((r) => ({ ...r, m: mark(r.p, state.prices && state.prices[r.p.asset], closeOf(state, r.p.asset) || markOf(state, r.p)), alert: r.alert || alerts.get(r.p.id) || null }));
@@ -185,7 +192,13 @@
     const alRows = rows.filter((r) => r.key === 'alpaca');
     const extRows = rows.filter((r) => r.key === 'external');
     const apRows = rows.filter((r) => r.key === 'alpaca-paper'); // paper money (71)
-    const counted = [...paper, ...cbRows, ...krRows, ...alRows, ...extRows, ...apRows];
+    const liveRows = rows.filter((r) => r.key.endsWith('-live')); // Phase 79: managed LIVE trades the snapshot lacks
+    const liveBefore = liveRows.filter((r) => (r.p.openedAt || 0) <= (r.snap.syncedAt || 0)).reduce((s, r) => s + r.m.marketValue, 0); // bought after it: still in that sync's cash
+    // ...and LIVE trades at a venue with no snapshot at all (sync failed / not run yet): listed from the ledger, and counted.
+    const unsyncedRows = rows.filter((r) => r.key.endsWith('-ledger') && r.key !== 'alpaca-ledger');
+    const unsyncedValue = unsyncedRows.reduce((s, r) => s + r.m.marketValue, 0); // no snapshot cash holds it: part of the account
+    const liveValue = liveRows.reduce((s, r) => s + r.m.marketValue, 0) + unsyncedValue;
+    const counted = [...paper, ...cbRows, ...krRows, ...alRows, ...extRows, ...apRows, ...liveRows, ...unsyncedRows];
     const usePaper = keys.has('paper');
     const useCb = keys.has('coinbase') && synced;
     const useAl = keys.has('alpaca') && alSynced;
@@ -214,10 +227,10 @@
     const paperCash = usePaper ? bankroll + realized - paperCost : 0;
     const totals = {
       venue, bankroll, pools, realized, committed, paperCost, unrealized, synced, usePaper, useCb, cbCash, paperCash, syncedAt: cb && cb.syncedAt,
-      holdingsValue: paperValue + cbValue + krValue + alValue + extValue + apValue,
-      managedValue: paperValue + cbManaged + managedOf(krRows) + managedOf(alRows),
+      holdingsValue: paperValue + cbValue + krValue + alValue + extValue + apValue + liveValue,
+      managedValue: paperValue + cbManaged + managedOf(krRows) + managedOf(alRows) + liveValue,
       externalValue: cbValue - cbManaged + krValue - managedOf(krRows) + outside + apValue,
-      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0) + (useAl ? alValue + alCash : 0) + extValue,
+      accountValue: (usePaper ? bankroll + realized + paper.reduce((s, r) => s + (r.m.gross || 0), 0) : 0) + (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0) + (useAl ? alValue + alCash : 0) + extValue + liveBefore + unsyncedValue,
       cash: paperCash + cbCash + krCash + alCash, alCash, krCash, extValue,
       venueCash: [...(useCb ? [['Coinbase', cbCash]] : []), ...xUse.map((x) => [XNAME[x.k], x.h.cash || 0])], // live crypto cash per venue (69B)
       unrealizedPct: committed > 0 ? unrealized / committed : null,
@@ -228,7 +241,7 @@
       live: rows.length - counted.length,
       // Venue-isolated bankroll: paper = configured bankroll; Live Crypto = the
       // Coinbase account's value (holdings + cash); Combined = both.
-      liveAccountValue: (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0),
+      liveAccountValue: (useCb ? cbValue + cbCash : 0) + (useKr ? krValue + krCash : 0) + liveBefore + unsyncedValue,
     };
     totals.currentBankroll = (usePaper ? bankroll : 0) + totals.liveAccountValue;
     totals.bankrollLabel = [usePaper ? 'paper bankroll' : '', useCb ? 'Coinbase account value' : '', ...xUse.map((x) => `${XNAME[x.k]} account value`)].filter(Boolean).join(' + ');

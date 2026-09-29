@@ -2,11 +2,8 @@
 // are untouched). PROPOSER ONLY: returns Canonical Candidates tagged "Speculative
 // Moonshot"; the risk engine sizes them at a small fraction of normal risk.
 //
-// Universe (Phase 56): the Active Gem Watchlist from coinbase-discovery.js, rebuilt
-// every pass from the WHOLE Coinbase spot catalog (~390 coins): trending / Reddit
-// coins, 24h volume + momentum anomalies and curated high-beta small / mid-caps.
-// Mega-caps (BTC ETH SOL XRP DOGE ADA LTC BCH LINK AVAX XLM DOT UNI SUI SHIB HBAR
-// TON BNB) and stable / wrapped / staked tokens are never scanned here.
+// Universe (Phase 56): the Active Gem Watchlist (coinbase-discovery.js) from the whole Coinbase spot catalog:
+// trending / Reddit coins, volume + momentum anomalies; never mega-caps or stable / wrapped / staked tokens.
 // Two entry triggers on real Coinbase 5-minute candles (gem-triggers.js):
 //   IGNITION  +2.5% to +14% in 15 / 30 min on >= 2.2x relative volume, at a fresh
 //             30-minute (5m) / 2-hour (15m) closing high. Stop under the 30-minute
@@ -30,6 +27,8 @@
 // the volume-only catalyst credit (12/30) needs a real catalyst, or >= $500k of 24h volume
 // (>= $250k when 24h volume is up >= 75%). Bid/ask <= 0.80% (pipeline.js spread gate).
 // conviction = (score - 60) / 40: the Smart Investment Amount, 10-25% of normal risk.
+// Phase 79 (replayed on 90 days of 5m candles): a trigger is never bought on its breakout bar; > 18% up over 24h or a
+// 15m RSI > 70 is skipped, the rest wait up to 1 hour for a retest (moonshot-entry.js, evaluate / fillArmed).
 const { getHistory } = require('../connectors/history-bars');
 const { minStopPct } = require('../risk/cost-authority');
 const { chartStop } = require('../risk/reality-gate');
@@ -38,6 +37,7 @@ const social = require('../connectors/crypto-social');
 const coinbase = require('../connectors/coinbase-socket');
 const discovery = require('../connectors/coinbase-discovery');
 const gem = require('./gem-triggers');
+const entry = require('./moonshot-entry'); // Phase 79: no chasing, no overbought, buy the pullback
 const { createTally } = require('./scan-tally');
 const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 
@@ -50,6 +50,8 @@ const CONFIG = {
   tradeType: TAG, expectedDuration: 'Minutes to hours (momentum; exits at stop or targets)', ...gem.CONFIG.ignition,
 };
 const LABEL = { IGNITION: 'Momentum Ignition', COIL: 'Accumulation Coil' };
+// Phase 79: the hold window each trigger is built for (shown on the setup card and the open position).
+const HOLD = { IGNITION: '30m – 3h (momentum burst — do not hold if volume dies)', COIL: '1h – 6h (accumulation breakout — do not hold if volume dies)' };
 const SLOT_SEC = 300;
 
 const decimals = (x) => (x >= 100 ? 2 : x >= 1 ? 4 : Math.min(12, 3 - Math.floor(Math.log10(x))));
@@ -148,7 +150,26 @@ function block(symbol, reason, now, kind = 'MOON') {
     candidate: { asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: TAG, direction: 'long', timeframe: '5m', speculative: true } });
 }
 
+// Phase 79: the stop floor on EVERY venue is Coinbase's (coil 4.6%, ignition 6.7%), the one the replay validated. OKX /
+// Kraken fees would allow tighter floors (70D), but those admit trades the replay found losing (tight coil breakouts).
+const stopFloor = (kind) => minStopPct('crypto', kind === 'COIL' ? 'maker' : 'taker', CONFIG.feeBudget);
+
+// Stop for a trigger bought at `ref` (shared with backtest/rules-moonshots.js). -> { price, basis } | { reject }
+function stopFor(kind, ref, structural, floor) {
+  if (kind === 'COIL') {
+    const cs = chartStop(ref, structural, floor);
+    return cs.ok ? { price: floorPx(cs.invalidation), basis: cs.widened ? 'widened to the crypto fee floor' : 'under the 3-hour base low' } : { reject: cs.reason };
+  }
+  const price = floorPx(Math.min(structural, ref * (1 - floor)));
+  return { price, basis: price < structural ? 'the crypto fee floor' : 'under the 30-minute low' };
+}
+
+// Phase 79: a qualifying trigger is never bought on its breakout bar. Chasing (> 18% up over 24h) and overbought
+// (15m RSI > 70) triggers are skipped; the rest are ARMED (moonshot-entry.js) and staged only when the price comes
+// back to the retest within 1 hour (fillArmed), as a resting maker buy. The 4-hour cooldown runs from the trigger.
 async function evaluate(symbol, live, now, btc, watchRow) {
+  const armed = entry.armedFor(symbol);
+  if (armed) return fillArmed(symbol, armed, live, now);
   if (now - (lastSignal.get(symbol) || 0) < CONFIG.cooldownMs) return tally.skip(symbol, 'Proposed in the last 4 hours');
   const volumeUsd = watchRow ? watchRow.volumeUsd : null;
   const volChange = watchRow ? watchRow.volChange : null;
@@ -172,46 +193,65 @@ async function evaluate(symbol, live, now, btc, watchRow) {
     block(symbol, `SPECULATIVE_SCORE_LOW: ${LABEL[kind]}: ${move}, conviction ${s.total}/100 (needs ${CONFIG.qualify}): ${describe(s)}`, now, kind === 'COIL' ? 'COIL' : 'MOON');
     return tally.skip(symbol, `Rejected: ${LABEL[kind]} conviction ${s.total}/100`);
   }
+  const change24h = watchRow && Number.isFinite(watchRow.change24h) ? watchRow.change24h : null;
+  const chase = entry.chase(b, change24h);
+  if (chase) { block(symbol, `${chase.code}: ${LABEL[kind]}: ${move}: ${chase.text}`, now, kind === 'COIL' ? 'COIL' : 'MOON'); return tally.skip(symbol, chase.short); }
+  const floor = stopFloor(kind);
+  const structural = kind === 'COIL' ? a.coil.structural : Math.min(...b.slice(-CONFIG.swingBars).map((x) => x.low)) * (1 - CONFIG.stopBufferPct);
+  lastSignal.set(symbol, now);
+  entry.arm(symbol, { kind, limit: floorPx(entry.pullbackLimit(kind, a, live, b)), until: now + entry.FILTERS.armMs, at: now, triggerLive: live, structural, floor,
+    s, a, buzz, news, watchRow, move, change24h, rsi: entry.rsi15(b), btcVs: btcMove(btc, kind === 'COIL' ? '1h' : a.ign.m.frame) });
+  return tally.skip(symbol, 'Armed: waiting for its pullback (buys only a retest within 1 hour)');
+}
 
-  const entryMax = round(live * (1 + CONFIG.entryBufferPct));
-  const floor = minStopPct(require('./venue-floor').floorKey(symbol), kind === 'COIL' ? 'maker' : 'taker', CONFIG.feeBudget); // the routed venue's fees (70D); Coinbase: coil 4.6%, ignition 6.7%
-  let invalidation;
-  let stopBasis;
-  if (kind === 'COIL') {
-    const cs = chartStop(entryMax, a.coil.structural, floor);
-    if (!cs.ok) { block(symbol, `CHART_STOP_TOO_TIGHT: ${LABEL.COIL}: ${cs.reason}`, now, 'COIL'); return tally.skip(symbol, 'Rejected: coil base too shallow for the fee floor'); }
-    invalidation = floorPx(cs.invalidation);
-    stopBasis = cs.widened ? 'widened to the crypto fee floor' : 'under the 3-hour base low';
-  } else {
-    const structural = Math.min(...b.slice(-CONFIG.swingBars).map((x) => x.low)) * (1 - CONFIG.stopBufferPct);
-    invalidation = floorPx(Math.min(structural, entryMax * (1 - floor)));
-    stopBasis = invalidation < structural ? 'the crypto fee floor' : 'under the 30-minute low';
-  }
+function fillArmed(symbol, w, live, now) {
+  if (now > w.until) { entry.disarm(symbol); return tally.skip(symbol, 'No pullback within 1 hour of its trigger: no trade (never chases)'); }
+  if (!(live <= w.limit)) return tally.skip(symbol, 'Armed: waiting for its pullback (buys only a retest within 1 hour)');
+  entry.disarm(symbol);
+  const entryMax = Math.min(w.limit, round(live * (1 + CONFIG.entryBufferPct)));
+  const stop = stopFor(w.kind, entryMax, w.structural, w.floor);
+  if (stop.reject) { block(symbol, `CHART_STOP_TOO_TIGHT: ${LABEL.COIL}: ${stop.reject}`, now, 'COIL'); return tally.skip(symbol, 'Rejected: coil base too shallow for the fee floor'); }
+  if (!(stop.price < live) || live <= w.structural) return tally.skip(symbol, 'Fell through its stop before the pullback was bought: no trade');
+  tally.setup();
+  return candidate(symbol, w, live, entryMax, stop, now);
+}
+
+function candidate(symbol, w, live, entryMax, stop, now) {
+  const { kind, s, a, buzz, news, watchRow, move, change24h } = w;
+  const invalidation = stop.price;
   const risk = entryMax - invalidation;
   const [t1R, t2R] = kind === 'COIL' ? [CONFIG.coilT1R, CONFIG.coilT2R] : [CONFIG.t1R, CONFIG.t2R];
   const conviction = Math.round(clamp01((s.total - CONFIG.qualify) / (100 - CONFIG.qualify)) * 100) / 100;
-  lastSignal.set(symbol, now);
-  tally.setup();
   const why = [buzz.reddit.titles[0], buzz.trending ? `CoinGecko trending #${buzz.trending.rank}` : null, news.ok && news.score !== null ? `news ${news.score}/100 (${news.label})` : null].filter(Boolean);
   const found = watchRow && watchRow.reasons.length ? ` On the gem watchlist for: ${watchRow.reasons.join(', ')}.` : '';
+  const retest = `Bought the pullback, not the breakout: triggered at ${round(w.triggerLive)}, bought the retest at ${entryMax} (${pct(entryMax / w.triggerLive - 1)}) ${Math.max(1, Math.round((now - w.at) / 60000))} min later`;
+  // Phase 79: what the trade was entered on, kept on the record (the live radar score moves on; this does not).
+  const entrySnapshot = { at: w.at, kind, score: s.total, parts: Object.fromEntries(Object.entries(s.parts).map(([k, v]) => [k, Math.round(v)])),
+    relVol: Math.round((kind === 'COIL' ? a.coil.volRatio : a.ign.m.relVol) * 100) / 100, move: kind === 'COIL' ? a.coil.move : a.ign.m.surge,
+    spreadPct: a.spreadPct, change24h, rsi15: w.rsi === null ? null : Math.round(w.rsi), volumeUsd: watchRow ? watchRow.volumeUsd : null, buzz: Math.round(s.parts.buzz),
+    pullback: { trigger: w.triggerLive, limit: w.limit, filledAt: now } };
+  const entryReason = `${LABEL[kind]}: ${move}${change24h !== null ? `; ${pct(change24h)} over 24h` : ''}. ${retest}. Conviction ${s.total}/100: ${describe(s)}. `
+    + `${why.length ? `Buzz: ${why.join('; ')}.` : 'No forum or news coverage: the volume was the catalyst.'}`;
   return {
     id: `${STRATEGY_ID}:${kind === 'COIL' ? 'COIL' : 'MOON'}:${symbol}:${new Date(now).toISOString().slice(0, 16)}`,
     asset: symbol, market: 'crypto', strategyId: STRATEGY_ID, setupType: `Moonshot · ${LABEL[kind]}`, tag: TAG, speculative: true, gemTrigger: kind,
-    ...(kind === 'COIL' ? { entryLiquidity: 'maker' } : {}),
+    entryLiquidity: 'maker', // a resting buy at the retest (post-only live), like the replay
     conviction, convictionScore: s.total, scoreParts: s.parts, direction: 'long', timeframe: kind === 'COIL' ? '15m' : a.ign.m.frame, tradeType: CONFIG.tradeType,
-    expectedDuration: CONFIG.expectedDuration, newsSentiment: news.ok && news.score !== null ? { score: news.score, label: news.label, source: news.source } : null,
+    expectedDuration: HOLD[kind], entrySnapshot, entryReason, newsSentiment: news.ok && news.score !== null ? { score: news.score, label: news.label, source: news.source } : null,
     entryZone: { min: round(live), max: entryMax },
     invalidation,
     targets: [{ level: 1, price: round(entryMax + t1R * risk), allocation: 0.5 }, { level: 2, price: round(entryMax + t2R * risk), allocation: 0.5 }],
     catalyst: { type: why.length ? 'social' : 'volume', headline: why[0] || `Volume ${(kind === 'COIL' ? a.coil.volRatio : a.ign.m.relVol).toFixed(1)}x`, sentimentScore: s.total },
-    thesis: `SPECULATIVE MOONSHOT · ${LABEL[kind].toUpperCase()}. ${move} (vs BTC ${pct(btcMove(btc, kind === 'COIL' ? '1h' : a.ign.m.frame))}).${found} Conviction ${s.total}/100: ${describe(s)}. `
+    thesis: `SPECULATIVE MOONSHOT · ${LABEL[kind].toUpperCase()}. ${move} (vs BTC ${pct(w.btcVs)}).${found} ${retest}. Conviction ${s.total}/100: ${describe(s)}. `
       + `${why.length ? `Buzz: ${why.join('; ')}. ` : 'No forum or news coverage found: the volume is the catalyst. '}`
-      + `Stop ${invalidation} (${((risk / entryMax) * 100).toFixed(1)}% under entry: ${stopBasis}), `
+      + `Stop ${invalidation} (${((risk / entryMax) * 100).toFixed(1)}% under entry: ${stop.basis}), `
       + `T1 ${t1R}R (50%), T2 ${t2R}R. Hype moves reverse fast: sized at ${Math.round((0.1 + 0.15 * conviction) * 100)}% of normal risk.`,
     confirmationCriteria: [
       kind === 'COIL'
         ? `${a.coil.volRatio.toFixed(1)}x volume vs 6h (needs 2.8x), EMA9 > EMA21, close at ${Math.round(a.coil.closePos * 100)}% of the bar, ${pct(a.coil.move)} in 1h (needs +1.5% to +5%) above a ${pct(a.coil.baseRange)} base`
         : `${pct(a.ign.m.surge)} in ${a.ign.m.minutes} min (needs ${pct(CONFIG.surgeMin)} to ${pct(CONFIG.surgeMax)}) on ${a.ign.m.relVol.toFixed(1)}x relative volume (needs ${CONFIG.relVolMin}x)`,
+      `Not chasing: ${change24h === null ? '24h change unknown' : `${pct(change24h)} over 24h`} (max +18%), 15m RSI ${w.rsi === null ? 'n/a' : w.rsi.toFixed(0)} (max 70) at the trigger`,
+      `Pullback: ${round(live)} at or under the retest ${w.limit} within 1 hour of the trigger`,
       `Conviction ${s.total}/100 (needs ${CONFIG.qualify}): ${describe(s)}`,
       `Sources: ${buzz.sources}${buzz.errors.length ? ` (unavailable: ${buzz.errors.join('; ')})` : ''}`,
     ],
@@ -223,7 +263,7 @@ async function evaluate(symbol, live, now, btc, watchRow) {
 async function gemWatchlist(now) {
   await discovery.refresh(now);
   await social.refresh(now);
-  const list = discovery.buildWatchlist(social.snapshot(discovery.gems().map((c) => c.symbol), now), [], now);
+  const list = discovery.buildWatchlist(social.snapshot(discovery.gems().map((c) => c.symbol), now), entry.armedSymbols(), now);
   discovery.stream(list.map((w) => w.symbol));
   return list;
 }
@@ -251,9 +291,9 @@ async function generateCandidates(latestPricesMap, now = Date.now()) {
 }
 
 function takeBlocks() { const b = blocks; blocks = []; return b; }
-function reset() { candles.clear(); lastSignal.clear(); blocks = []; }
+function reset() { candles.clear(); lastSignal.clear(); blocks = []; entry.reset(); }
 // When a gem was last proposed and until when its cooldown holds (null: not cooling down).
 const cooldownOf = (symbol, now = Date.now()) => { const at = lastSignal.get(symbol); return at && now - at < CONFIG.cooldownMs ? { proposedAt: at, until: at + CONFIG.cooldownMs } : null; };
 
-module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, cooldownOf, liquidity, assess, score, describe, bars5, btcMove, gemWatchlist,
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, cooldownOf, liquidity, assess, score, describe, stopFor, stopFloor, armed: entry.armedList, bars5, btcMove, gemWatchlist,
   frames: gem.frames, to15: gem.to15, STRATEGY_ID, TAG, CONFIG, LABEL };

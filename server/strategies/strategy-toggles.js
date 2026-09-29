@@ -4,6 +4,7 @@
 // already waiting in Approvals stay (the user can still approve or reject them). The Portfolio Pilot is driven by
 // the user's deposits and holdings, not a scanner, so it has no switch here.
 // Crypto Swing is OFF by default: the Phase 77/78 replays lost money on every variant (details: REASONS).
+// REASONS: the replay result behind each strategy's rules, shown under its switch (on or off).
 const LABELS = Object.freeze({
   'crypto-swing': 'Crypto Swing (4h flush + reclaim)',
   'crypto-intraday': 'Crypto Intraday (15m / 1h)',
@@ -18,6 +19,11 @@ const REASONS = Object.freeze({
   'crypto-swing': 'Off by default (Phase 78): replayed on real Coinbase 4h candles it lost money in both the last 90 days and the 90 before '
     + '(profit factor 0.82-0.96), and neither a BTC trend filter nor a confirmed reversal candle fixed it (worse, or almost no trades). '
     + 'Turn it on only after a backtest shows an edge.',
+  'speculative-crypto': 'Phase 79 replay (90 days of 5m candles, 62 Coinbase gems): the old entry (buy the breakout bar) lost money: '
+    + '194 trades, profit factor 0.86, -24R. Now it skips coins already up > 18% over 24h or with a 15m RSI > 70 and buys only a '
+    + 'pullback within 1 hour of the trigger (no pullback, no trade): 65 trades, 46% wins, profit factor 1.40, +17.7R at Coinbase fees '
+    + '(1.21 at Kraken, 1.34 at OKX; profitable in both halves of the window). A thin sample, and buzz / spreads are not in the replay: '
+    + 'size small, and switch it off if live results disagree.',
 });
 
 // settings.strategiesEnabled may be missing (older ledger) or partial: DEFAULTS fill the gaps.
