@@ -54,10 +54,12 @@
       <div class="welcome-banner" id="welcome-banner" role="status" hidden></div>
 
       <section class="tab" id="tab-today" data-title="Today" hidden>
+        <div class="shield-banner" data-shield hidden aria-live="polite"></div><!-- Phase 81: kill switch / macro blackout -->
         <div class="today" id="today-root"></div>
       </section>
 
       <section class="tab" id="tab-opportunities" data-title="Opportunities" hidden>
+        <div class="shield-banner" data-shield hidden aria-live="polite"></div>
         <div class="opp" id="opportunities-root"></div>
       </section>
 
@@ -285,6 +287,7 @@
   <script src="views/news-panel.js"></script>
   <script src="components/catalyst-feed.js"></script>
   <script src="components/net-pnl.js"></script>
+  <script src="components/shield-banner.js"></script>
   <script src="components/trade-context.js"></script>
   <script src="components/live-close.js"></script>
   <script src="components/ratchet-button.js"></script>

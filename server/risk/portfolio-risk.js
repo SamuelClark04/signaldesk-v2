@@ -81,4 +81,4 @@ function summary(positions, settings, bankrolls) {
   return { ...lim, books, at: Date.now() };
 }
 
-module.exports = { check, summary, riskOf, openRisk, limits, DEFAULTS };
+module.exports = { check, summary, riskOf, openRisk, limits, DEFAULTS, holding, sameBook, manualOrder };

@@ -4,6 +4,7 @@
 const ledger = require('./paper-ledger');
 const { validateApproval, stackingConflict } = require('./order-guard');
 const portfolioRisk = require('../risk/portfolio-risk'); // Phase 77
+const entryShields = require('../risk/entry-shields'); // Phase 81
 const prices = require('../market/latest-prices');
 const { recordRejection } = require('./rejection-stats');
 const { requiredBasis, sizingBankroll } = require('../risk/venue-capital');
@@ -132,7 +133,10 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
   const livePrice = prices.getLatestPrice(order.asset);
   const stack = stackingConflict(order, ledger.getActivePositions()); // Phase 68: e.g. a Pilot rotation into a coin already held
   // Phase 77: the book's open-risk ceiling / equity direction limit, again at approval (other trades may have opened).
-  const book = (o) => portfolioRisk.check(o, { positions: ledger.getActivePositions(), bankroll: o.sizingBankroll, settings: ledger.getSettings() });
+  // Phase 81: + the entry shields (kill switch, macro blackout, sector cap); like the book limits, a shielded setup stays pending.
+  entryShields.refresh(ledger, ledger.getSettings());
+  const book = (o) => portfolioRisk.check(o, { positions: ledger.getActivePositions(), bankroll: o.sizingBankroll, settings: ledger.getSettings() })
+    || entryShields.check(o, { positions: ledger.getActivePositions(), settings: ledger.getSettings() });
   const heat = stack ? null : book(order);
   const check = stack || heat ? { valid: false, reason: stack || heat } : validateApproval(order, livePrice);
   if (check.valid && amount !== undefined && amount !== null) {

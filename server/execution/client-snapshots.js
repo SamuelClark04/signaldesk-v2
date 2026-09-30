@@ -9,6 +9,7 @@ function portfolioRisk() {
   const s = ledger.getSettings();
   return ['PORTFOLIO_RISK', require('../risk/portfolio-risk').summary(ledger.getActivePositions(), s, { stocks: s.bankroll, crypto: s.cryptoBankroll })];
 }
-const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()], ['ACCOUNTS_STATUS', require('../security/vault').status()], portfolioRisk()]; // + accounts (73), book risk (77)
+const shields = () => ['ENTRY_SHIELDS', require('../risk/entry-shields').status(require('./paper-ledger').getSettings())]; // Phase 81 banners
+const snapshots = () => [...radar.snapshots(), ['OPTIONS_PLANS', afterHours.snapshot()], ['ACCOUNTS_STATUS', require('../security/vault').status()], portfolioRisk(), shields()]; // + accounts (73), book risk (77)
 
 module.exports = { snapshots };

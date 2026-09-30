@@ -90,6 +90,17 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   say "do not report"). TTS readiness on LIVE trades (trades / week vs 20, active weekdays vs 75%, average hold vs 31 days, volume;
   period from the first trade to now / year end). 475(f) deadlines (April 15, weekend-rolled). views/journal-taxes.js (hub, CSV
   download via Blob) + views/journal-tax-guide.js (roadmap, built once; expense ticks in localStorage). Education, not tax advice.
+- **Entry shields (Phase 81)**: risk/entry-shields.js, on NEW entries only: pipeline staging (after portfolio-risk) and order-router
+  approval (a shielded setup STAYS pending); never exits (stops / targets / closes: exit paths must not require it). Manual, Pilot and
+  adopted / external are exempt. (1) DAILY_LOSS_LIMIT_REACHED: risk/daily-loss.js, today (New York day) realized + unrealized
+  moves across ALL books (paper + live) <= -settings.dailyLossLimit ($150; 0 = off); latched for the day (only raising the limit
+  releases it); in memory. (2) MACRO_SHIELD_ACTIVE: services/macro-calendar.js, 30 min before -> 15 min after a high-impact USD
+  release (CPI / PCE / payrolls / unemployment / FOMC / Fed rate): feed MACRO_CALENDAR_URL (Forex Factory weekly JSON; boot + 06:00
+  ET, 5 s abort) merged with the built-in official schedule (macro-events FOMC / CPI + BLS / BEA dates: extend yearly); fail-open;
+  stocks / options when settings.macroShield, crypto only with macroShieldCrypto. (3) SECTOR_CAP_REACHED: risk/sectors.js groups (mega-cap
+  tech + internet = Technology), <= settings.maxTradesPerSector (1) open + staged per book. services/et-time.js: ET <-> epoch (DST-safe).
+  ENTRY_SHIELDS each pass + on connect -> components/shield-banner.js ([data-shield] on Today / Opportunities). Test: tests/ph81unit.js
+  (in the repo; scratch fixtures in the OS temp dir; a real pipeline pass + approval).
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

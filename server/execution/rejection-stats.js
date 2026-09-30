@@ -38,6 +38,11 @@ const BUCKETS = [
   [/^OPTIONS_REWARD_TOO_LOW/, 'Options: reward too low inside the Expected Move'],
   [/^SPECULATIVE_SENTIMENT_WEAK/, 'Moonshot: spike without strong news sentiment'],
   [/^SPECULATIVE_SCORE_LOW/, 'Moonshot: conviction score under 60/100'],
+  [/^MACRO_SHIELD_ACTIVE/, 'MACRO_SHIELD_ACTIVE: macro release blackout (30 min before - 15 min after)'],
+  [/^SECTOR_CAP_REACHED/, 'SECTOR_CAP_REACHED: sector already has its max open trades'],
+  [/^DAILY_LOSS_LIMIT_REACHED/, 'DAILY_LOSS_LIMIT_REACHED: daily loss kill switch'],
+  [/^PORTFOLIO_RISK_CAP/, 'Portfolio open-risk ceiling reached'],
+  [/^DIRECTION_LIMIT/, 'Equity direction limit reached'],
 ];
 
 const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD

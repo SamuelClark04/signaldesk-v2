@@ -109,4 +109,4 @@ function catalystsFor(candidate, now = Date.now()) {
     .map(({ type, title, date, time, daysAway, source }) => ({ type, title, date, time, daysAway, source }));
 }
 
-module.exports = { refresh, upcoming, catalystsFor, appliesTo, HORIZON_DAYS };
+module.exports = { refresh, upcoming, catalystsFor, appliesTo, HORIZON_DAYS, FOMC, CPI }; // FOMC / CPI: also the Phase 81 macro shield's fallback

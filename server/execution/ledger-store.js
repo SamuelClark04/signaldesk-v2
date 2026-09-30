@@ -36,6 +36,11 @@ const SETTINGS_RULES = {
   maxEquityPerDirection: { type: 'number', default: 2, min: 1, max: 20, integer: true },
   // Phase 78: per-strategy on / off (strategies/strategy-toggles.js; Crypto Swing off by default). A full map is saved.
   strategiesEnabled: { type: 'toggles', default: toggles.DEFAULTS, keys: toggles.IDS },
+  // Phase 81: entry shields (risk/entry-shields.js): macro blackout (stocks / options; crypto opt-in), sector cap, daily loss ($, 0 = off).
+  macroShield: { type: 'choice', values: [true, false], default: true },
+  macroShieldCrypto: { type: 'choice', values: [true, false], default: false },
+  maxTradesPerSector: { type: 'number', default: 1, min: 1, max: 20, integer: true },
+  dailyLossLimit: { type: 'number', default: 150, min: 0, max: 1000000 },
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 

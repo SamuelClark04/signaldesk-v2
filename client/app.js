@@ -136,6 +136,7 @@
   const HANDLERS = {
     JOURNAL_UPDATED: (trades) => { SD.journal.render(trades || []); SD.journalScorecard.render(trades || []); SD.journalTaxes.render(trades || []); }, // + Scorecard (77), Taxes (80)
     PORTFOLIO_RISK: (r) => SD.journalScorecard.renderRisk(r), // Phase 77: open risk vs the ceiling, equity direction counts
+    ENTRY_SHIELDS: (s) => SD.shieldBanner.render(s), // Phase 81: kill switch / macro blackout banners
     BACKTEST_CATALOG: (c) => SD.backtest.received(c),
     BACKTEST_PROGRESS: (p) => SD.backtest.progress(p),
     BACKTEST_RESULT: (r) => SD.backtest.result(r),
