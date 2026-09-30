@@ -76,7 +76,7 @@ async function runOnce(broadcast) {
     const sent = await require('./alpaca-paper').exits(ledger);
     if (sent.length) { out.positionsChanged = true; out.journalChanged = true; }
   } catch (err) { console.error('[pipeline] Alpaca Paper exits failed:', err.message); }
-  // Phase 76: automated option spreads closed 3 days before expiry (time-exits.js); nothing else closes on time.
+  // Phase 82: every option spread closed at 2 DTE from 10:00 AM ET (time-exits.js); nothing else closes on time.
   try {
     const t = await require('./time-exits').run(ledger, { isBusy: require('./order-router').isBusy });
     if (t.some((x) => x.trade || x.pending || x.canceled)) { out.positionsChanged = true; out.journalChanged = true; }

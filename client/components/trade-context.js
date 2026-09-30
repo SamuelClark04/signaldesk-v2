@@ -43,6 +43,8 @@
       lines.push(el('p', { className: `tc-line tc-score${s.verdict === 'Thesis weakened' ? ' is-weak' : s.verdict === 'Thesis intact' ? ' is-ok' : ''}`,
         textContent: s.live === null ? `${head}not on the radar right now` : `${head}${s.live}/100 · ${s.verdict}${s.why.length ? `: ${s.why.join(', ')}` : ''}` }));
     }
+    // Phase 82: an option stop / target hit after the 3:45 PM cutoff is held and sold at 9:35 AM ET.
+    if (o.deferredExit) lines.push(el('p', { className: 'tc-line tc-score is-weak', textContent: `${o.deferredExit.reason === 'STOP_LOSS' ? 'Stop' : 'Target'} hit ${new Date(o.deferredExit.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })} ET after the 3:45 PM cutoff (option quotes too wide): sells at 9:35 AM ET` }));
     const reason = o.entryReason || sentences(o.thesis, 2);
     if (why && reason) lines.push(el('p', { className: 'tc-line tc-why' }, [el('strong', { textContent: open ? 'Why we entered: ' : 'Why this setup: ' }), reason]));
     return lines.length ? el('div', { className: 'tc' }, lines) : null;

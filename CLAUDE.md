@@ -55,7 +55,7 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   The Moonshot leaderboard persists next to the ledger file (moonshot-radar.json), restored for 6 h.
 - **Audit (Phase 76)**: ONE automated trade per symbol per market (order-guard.stackingConflict: open positions, and staged
   setups at the pipeline; Pilot and manual exempt, the LIVE rule unchanged). Time exits (execution/time-exits.js, every exit
-  pass): ONLY automated option spreads, closed 3 days before expiry (EXPIRY_EXIT); PAPER only (LIVE is reported, never sold).
+  pass): ONLY option spreads, closed at 2 DTE (Phase 82 AUTO_CLOSE_2_DTE; was EXPIRY_EXIT at 3 days); PAPER only (LIVE is reported, never sold).
   Phase 76B (the user's rule): NOTHING else is ever closed on time alone: day trades carry overnight (every Alpaca stock
   bracket is GTC, day trades included), stale Moonshots only get a UI tag (portfolio-table staleBadge, 24 h+); stop,
   target and manual exits decide. Equity swing scans all STOCKS. ORB: breakout above the session VWAP, none while SPY is under its VWAP.
@@ -101,6 +101,12 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   tech + internet = Technology), <= settings.maxTradesPerSector (1) open + staged per book. services/et-time.js: ET <-> epoch (DST-safe).
   ENTRY_SHIELDS each pass + on connect -> components/shield-banner.js ([data-shield] on Today / Opportunities). Test: tests/ph81unit.js
   (in the repo; scratch fixtures in the OS temp dir; a real pipeline pass + approval).
+- **Options liquidity (Phase 82)**: execution/options-exit-window.js gates EVERY automated option exit (exit-monitor.premiumExit:
+  internal paper + Alpaca Paper) to 9:35 AM - 3:45 PM ET on trading days; a stop / target hit while the market is open outside it
+  is saved on the position (p.deferredExit, persisted) and sold at the next 9:35 AM; signals while closed are ignored; manual
+  [Close] is never gated. Entry shield OPTIONS_SPREAD_TOO_WIDE: net natural bid / ask from the legs (buy at ask / bid, sell at bid /
+  ask) > 25% of its mid. time-exits AUTO_CLOSE_2_DTE: every option position from 10:00 AM ET (before 3:45 PM) once within 2 calendar
+  OR 2 trading days of expiry (a Monday expiry closes Thursday), profit or loss. Test: tests/ph82unit.js (controlled clock + marks).
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

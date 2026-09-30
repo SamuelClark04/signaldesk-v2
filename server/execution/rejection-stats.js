@@ -41,6 +41,7 @@ const BUCKETS = [
   [/^MACRO_SHIELD_ACTIVE/, 'MACRO_SHIELD_ACTIVE: macro release blackout (30 min before - 15 min after)'],
   [/^SECTOR_CAP_REACHED/, 'SECTOR_CAP_REACHED: sector already has its max open trades'],
   [/^DAILY_LOSS_LIMIT_REACHED/, 'DAILY_LOSS_LIMIT_REACHED: daily loss kill switch'],
+  [/^OPTIONS_SPREAD_TOO_WIDE/, 'OPTIONS_SPREAD_TOO_WIDE: option bid/ask over 25% of the mid'],
   [/^PORTFOLIO_RISK_CAP/, 'Portfolio open-risk ceiling reached'],
   [/^DIRECTION_LIMIT/, 'Equity direction limit reached'],
 ];

@@ -6,6 +6,9 @@
 //                             settings.macroShieldCrypto (default off)
 //   SECTOR_CAP_REACHED        stocks / options: at most settings.maxTradesPerSector (default 1) trades per sector group
 //                             (risk/sectors.js) open or staged in the same book (paper vs live, like portfolio-risk)
+//   OPTIONS_SPREAD_TOO_WIDE   (Phase 82) an option position whose NET natural bid/ask (buy legs at ask / bid, sell legs at
+//                             bid / ask, from the legs' quotes) is wider than 25% of its mid: it would lose that much
+//                             getting in and out
 // Manual Trade Ticket orders, Portfolio Pilot and adopted / external holdings are never blocked (the user's own call, and
 // long-term allocations); open manual trades still occupy their sector.
 const macro = require('../services/macro-calendar');
@@ -16,6 +19,7 @@ const { holding, sameBook, manualOrder } = require('./portfolio-risk');
 
 const EQUITY = new Set(['stocks', 'options']);
 const DEFAULT_SECTOR_MAX = 1;
+const MAX_OPTION_SPREAD_PCT = 0.25;
 const exempt = (o) => !o || manualOrder(o) || o.strategyId === 'portfolio-pilot' || holding(o);
 const usd = (x) => `${x < 0 ? '-' : ''}$${Math.abs(x).toFixed(2)}`;
 const sectorMax = (settings = {}) => (settings.maxTradesPerSector >= 1 ? Math.floor(settings.maxTradesPerSector) : DEFAULT_SECTOR_MAX);
@@ -48,10 +52,32 @@ function sectorReason(order, positions = [], pending = [], settings = {}) {
   return `SECTOR_CAP_REACHED: Max ${max} open trade${max === 1 ? '' : 's'} for ${sector} (${names}); a new ${sector} setup waits until one closes`;
 }
 
+// An option position's net bid / ask from its legs' quotes -> { bid, ask, mid, width, pct } | null (no quotes).
+function spreadWidth(od) {
+  const legs = (od && od.legs) || [];
+  if (legs.length && legs.every((l) => l.bid >= 0 && l.ask > 0 && l.ask >= l.bid)) {
+    let ask = 0; let bid = 0;
+    for (const l of legs) { const r = l.ratio || 1; if (l.side === 'sell') { ask -= l.bid * r; bid -= l.ask * r; } else { ask += l.ask * r; bid += l.bid * r; } }
+    const mid = (ask + bid) / 2;
+    return mid > 0 ? { bid, ask, mid, width: ask - bid, pct: (ask - bid) / mid } : null;
+  }
+  if (od && od.netMid > 0 && od.combinedLegSpread >= 0) return { bid: od.netMid - od.combinedLegSpread / 2, ask: od.netMid + od.combinedLegSpread / 2, mid: od.netMid, width: od.combinedLegSpread, pct: od.combinedLegSpread / od.netMid };
+  return null;
+}
+
+function optionsSpreadReason(order) {
+  if (order.market !== 'options') return null;
+  const w = spreadWidth(order.optionsData);
+  if (!w || w.pct <= MAX_OPTION_SPREAD_PCT + 1e-9) return null;
+  const c = (x) => x.toFixed(2);
+  return `OPTIONS_SPREAD_TOO_WIDE: net bid ${c(w.bid)} / ask ${c(w.ask)} is ${c(w.width)} wide = ${Math.round(w.pct * 100)}% of its ${c(w.mid)} mid `
+    + `(max ${Math.round(MAX_OPTION_SPREAD_PCT * 100)}%): getting in and out would cost that much`;
+}
+
 // A setup (sized or not) -> null (allowed) or the rejection reason. ctx: { positions, pending (staging), settings, now }
 function check(order, { positions = [], pending = [], settings = {}, now = Date.now() } = {}) {
   if (exempt(order)) return null;
-  return killReason() || macroReason(order, settings, now) || sectorReason(order, positions, pending, settings);
+  return killReason() || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings);
 }
 
 // Once per pass (and before an approval): re-measure today's P/L (may trip the kill switch). Never throws.
@@ -73,4 +99,4 @@ function status(settings = {}, now = Date.now()) {
   };
 }
 
-module.exports = { check, refresh, status, killReason, macroReason, sectorReason, DEFAULT_SECTOR_MAX };
+module.exports = { check, refresh, status, killReason, macroReason, sectorReason, optionsSpreadReason, spreadWidth, DEFAULT_SECTOR_MAX, MAX_OPTION_SPREAD_PCT };

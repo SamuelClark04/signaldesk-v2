@@ -1,7 +1,8 @@
-// Time exits (Phase 76 audit): an option's expiration, not only its price, ends a trade.
-//   EXPIRY_EXIT    an automated options position (System 5) is closed EXPIRY_DAYS calendar days before
-//                  its expiration: a debit spread held into expiry week carries pin / assignment risk and
-//                  the fastest theta, which the plan (exits "well before expiry") never meant to take.
+// Time exits (Phase 76 audit; Phase 82 rule): an option's expiration, not only its price, ends a trade.
+//   AUTO_CLOSE_2_DTE  every open options position (automated or manual) is closed at the first daily check from
+//                     10:00 AM ET (before the 3:45 PM cutoff) once it is within 2 days of expiration: 2 calendar days
+//                     or 2 trading days, whichever comes first (a Monday expiry closes the Thursday before), profit or
+//                     loss: pin / assignment and gamma risk. It replaced Phase 76's EXPIRY_EXIT (3 days, any hour).
 // Phase 76B (the user's rule): NOTHING else is closed on time alone. A day trade that has not hit its stop or
 // target by the bell carries into the next session (its Alpaca bracket is GTC), and a stale Moonshot is only
 // flagged in the UI (Stale, 24 h+): stop, target and the user's manual exits decide.
@@ -11,21 +12,34 @@
 // One attempt per position per RETRY_MS; a position already closing is left alone.
 const prices = require('../market/latest-prices');
 const session = require('../market/market-session');
-const { daysToExpiry } = require('../connectors/options-data');
+const et = require('../services/et-time');
 
-const EXPIRY_DAYS = 3;
+const DTE_CLOSE = 2;
+const CHECK_MIN = 10 * 60; // 10:00 AM ET
+const CUTOFF_MIN = 15 * 60 + 45; // the options exit window's end (options-exit-window.js)
+// Calendar and trading days (weekdays after today, through expiry) from `now` (New York date) to `expiration`.
+function dte(expiration, now = Date.now()) {
+  const today = et.ymd(now);
+  const day = (ymd) => Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10));
+  const calendar = Math.round((day(expiration) - day(today)) / 864e5);
+  let trading = 0;
+  for (let t = day(today) + 864e5; t <= day(expiration); t += 864e5) if (![0, 6].includes(new Date(t).getUTCDay())) trading += 1;
+  return { calendar, trading };
+}
 const RETRY_MS = 60 * 1000;
 const tries = new Map(); // position id -> last attempt (ms)
 const warned = new Set();
 
 // Why `p` must be closed now, or null.
 function due(p, now = Date.now()) {
-  if (!session.isEquityMarketOpen(now)) return null;
   const od = p.optionsData;
-  if (p.market === 'options' && p.strategyId === 'options-system' && od && od.expiration && daysToExpiry(od.expiration, now) <= EXPIRY_DAYS) {
-    return { reason: 'EXPIRY_EXIT', leg: 'expiry_exit', why: `${daysToExpiry(od.expiration, now)} day(s) to its ${od.expiration} expiration (exits ${EXPIRY_DAYS} days before)` };
-  }
-  return null;
+  if (p.market !== 'options' || !od || !/^\d{4}-\d{2}-\d{2}$/.test(od.expiration || '') || !session.isEquityMarketOpen(now)) return null;
+  const clock = et.parts(now);
+  const m = clock.h * 60 + clock.m;
+  if (m < CHECK_MIN || m >= CUTOFF_MIN) return null;
+  const d = dte(od.expiration, now);
+  if (Math.min(d.calendar, d.trading) > DTE_CLOSE) return null;
+  return { reason: 'AUTO_CLOSE_2_DTE', leg: 'auto_close_2_dte', why: `${d.calendar} calendar / ${d.trading} trading day(s) to its ${od.expiration} expiration (closed at ${DTE_CLOSE} DTE: pin / gamma risk)` };
 }
 
 // -> [{ id, reason, trade? | pending? | error? | live? }]
@@ -65,4 +79,4 @@ async function run(ledger, { isBusy = () => false } = {}, now = Date.now()) {
 
 const reset = () => { tries.clear(); warned.clear(); };
 
-module.exports = { run, due, reset, EXPIRY_DAYS };
+module.exports = { run, due, dte, reset, DTE_CLOSE };

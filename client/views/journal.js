@@ -5,7 +5,7 @@
   const { $, el, td, price, money, signed, pnlClass, clock, dirCell, assetCell, setTable } = SD.ui;
 
   const EXIT_LABELS = { STOP_LOSS: 'Stop loss', TAKE_PROFIT: 'Take profit', TAKE_PROFIT_T1: 'T1 partial (runner open)', BROKER_EXIT: 'Broker exit',
-    EXPIRY_EXIT: 'Closed before expiry' }; // Phase 76: options 3 days before expiration
+    EXPIRY_EXIT: 'Closed before expiry', AUTO_CLOSE_2_DTE: 'Auto-closed at 2 DTE' }; // Phase 76 (3 days) / Phase 82 (2 DTE, 10:00 AM ET)
   const LEG_LABELS = { take_profit: 'Broker take profit', stop_loss: 'Broker stop loss' };
 
   // Execution audit (Phase 63): a live close's expected cashout (right before the sell: best

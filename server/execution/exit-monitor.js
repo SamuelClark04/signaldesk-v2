@@ -44,7 +44,11 @@ function t1Share(pos) {
 const STOP_CONFIRMATIONS = 2;
 const stopHits = new Map(); // position id -> consecutive evaluations at / through the stop
 
-function premiumExit(pos, price) {
+// Phase 82: every automated option exit passes the time window (options-exit-window.js): 9:35 AM - 3:45 PM ET only;
+// a late-day hit is held and sold at 9:35 AM. -> 'STOP_LOSS' | 'TAKE_PROFIT' | null
+const premiumExit = (pos, price, now = Date.now()) => require('./options-exit-window').gate(pos, premiumSignal(pos, price), now);
+
+function premiumSignal(pos, price) {
   const rule = pos.optionsData.exitRule;
   const m = saleValue(pos, price);
   if (!m) return null;
@@ -98,4 +102,4 @@ function monitorPositions(latestPricesMap) {
   return closed;
 }
 
-module.exports = { bind, monitorPositions, nextTarget, premiumExit };
+module.exports = { bind, monitorPositions, nextTarget, premiumExit, premiumSignal };
