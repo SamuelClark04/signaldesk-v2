@@ -51,9 +51,13 @@
       field('settings-sector-cap', 'Max trades per sector', saved.maxTradesPerSector || 1, { min: 1, max: 20, step: 1, suffix: 'each',
         hint: 'Stock / options trades open or staged at once in one sector group (e.g. AMZN, GOOGL and NVDA are all Technology).',
         onCommit: (v) => SD.settings.request({ maxTradesPerSector: Math.round(v) }) }),
-      field('settings-daily-loss', 'Daily loss kill switch ($)', Number.isFinite(saved.dailyLossLimit) ? saved.dailyLossLimit : 150, { min: 0, max: 1000000, step: 10, suffix: '$',
-        hint: `When today's realized + unrealized P/L (all accounts) reaches -${money(Number.isFinite(saved.dailyLossLimit) ? saved.dailyLossLimit : 150)}, no new entries until tomorrow. 0 = off.`,
-        onCommit: (v) => SD.settings.request({ dailyLossLimit: Math.round(v * 100) / 100 }) }));
+      // Phase 83: one kill switch per book: a bad paper day never pauses live entries, and the reverse.
+      ...[['Paper', 'dailyLossLimitPaper', 150, 'paper'], ['Live', 'dailyLossLimitLive', 25, 'real-money']].map(([name, key, def, what]) => {
+        const v = Number.isFinite(saved[key]) ? saved[key] : def;
+        return field(`settings-daily-loss-${name.toLowerCase()}`, `Daily loss kill switch: ${name} ($)`, v, { min: 0, max: 1000000, step: 5, suffix: '$',
+          hint: `When today's ${what} P/L (realized + unrealized) reaches -${money(v)}, no new ${name.toLowerCase()} entries until tomorrow. 0 = off.`,
+          onCommit: (x) => SD.settings.request({ [key]: Math.round(x * 100) / 100 }) });
+      }));
   }
 
   SD.portfolioRiskSettings = { render };

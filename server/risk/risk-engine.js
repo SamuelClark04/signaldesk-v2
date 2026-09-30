@@ -9,11 +9,11 @@
 //                  also capped so the WHOLE premium (the loss if the stop is gapped
 //                  or the option decays to zero) is at most MAX_PREMIUM_R x budget.
 //                  Without riskPerShare, the whole debit is the risk (old setups).
-//                  1-Contract Small-Account Cap: contracts are whole, so when the
-//                  budget rounds to 0 contracts, ONE is allowed if its risk to the
-//                  stop is at most SMALL_ACCOUNT.maxRiskPct (5.5%) of the bankroll
-//                  and its whole debit at most SMALL_ACCOUNT.maxDebitPct (12%);
-//                  tagged smallAccountCap so the user sees the real dollar risk.
+//                  Phase 83 (strict): 1R per contract is measured at the EXPECTED EXIT FILL (stop value
+//                  minus half the spread's bid / ask gap, option-spread-width.js), and ONE contract over
+//                  the budget is allowed only within OPTIONS_CAP.riskMultiple (1.25x) of it; a contract
+//                  risking more, or whose whole debit is over OPTIONS_CAP.maxDebitPct (6%) of the
+//                  bankroll, is refused OPTIONS_RISK_EXCEEDS_CAP (the old 5.5% / 12% override is gone).
 //   T1 reality gate (Phase 54): live brackets exit 100% at T1, so the NET
 //   reward : risk of T1 ALONE (after fees, the ledger's own scenarios) must be
 //   >= minT1NetRR (1.25 : 1; crypto 1.5 : 1, Moonshots 1.35 : 1) for every trade, whatever T2 would add.
@@ -28,7 +28,10 @@ const DEFAULT_RISK_PCT = 0.01; // 1% of bankroll per trade
 const DEFAULT_MAX_LEVERAGE = 1; // cash account: notional may not exceed bankroll
 const MARKETS = ['crypto', 'stocks', 'options'];
 const MAX_PREMIUM_R = 3; // full-premium loss capped at 3x the per-trade risk budget
-const SMALL_ACCOUNT = Object.freeze({ maxRiskPct: 0.055, maxDebitPct: 0.12, label: '1-Contract Small-Account Cap' });
+const OPTIONS_CAP = Object.freeze({ riskMultiple: 1.25, maxDebitPct: 0.06, label: '1 contract within 1.25x the risk budget' }); // Phase 83
+// Phase 83: a Trade Amount ABOVE the risk engine's size may never pass these (no confirmation bypasses them).
+const OVERRIDE_CEILING = Object.freeze({ riskPct: 0.03, capitalPct: 0.08 });
+const { expectedExitRisk } = require('./option-spread-width');
 // Capital cap ("Max Capital Per Trade", Settings: options.maxCapitalPct, one of
 // CAPITAL_CHOICES, default 10%): no single position may tie up more than this
 // share of the bankroll (notional for stocks/crypto, premium for options),
@@ -126,22 +129,22 @@ function sizeUpToMin(candidate, riskCap, capitalCap, cashCap, entryPrice, stopDi
 // Options (long premium), sized on the real premium: risk to the stop per
 // contract, and the whole premium capped at MAX_PREMIUM_R budgets and the bankroll.
 function sizeOptions(candidate, riskBudget, bankroll, capPct, cashCap = Infinity) {
-  const { debit, multiplier, riskPerShare } = candidate.optionsData;
-  const premiumPerContract = debit * multiplier;
-  const riskPerContract = (riskPerShare || debit) * multiplier;
-  const byRisk = Math.floor(riskBudget / riskPerContract);
-  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, bankroll * capPct, cashCap) / premiumPerContract);
+  const od = candidate.optionsData;
+  const premiumPerContract = od.debit * od.multiplier;
+  const riskPerContract = expectedExitRisk(od) * od.multiplier; // Phase 83: to the expected exit fill, not the mid
+  const maxRisk = riskBudget * OPTIONS_CAP.riskMultiple;
+  const maxDebit = OPTIONS_CAP.maxDebitPct * bankroll;
+  const usd = (x) => `$${x.toFixed(2)}`;
+  if (riskPerContract > maxRisk + 1e-9 || premiumPerContract > maxDebit + 1e-9) {
+    return { error: `OPTIONS_RISK_EXCEEDS_CAP: one contract risks ${usd(riskPerContract)} to the stop's expected fill (max ${usd(maxRisk)} = ${OPTIONS_CAP.riskMultiple}x the `
+      + `${usd(riskBudget)} risk budget) and costs ${usd(premiumPerContract)} (max ${usd(maxDebit)} = ${OPTIONS_CAP.maxDebitPct * 100}% of the bankroll, the most it can lose)` };
+  }
+  const byRisk = Math.floor(riskBudget / riskPerContract + 1e-9) || 1; // one contract within the 1.25x tolerance
+  const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, maxDebit, bankroll * capPct, cashCap) / premiumPerContract + 1e-9);
   const positionSize = Math.min(byRisk, byPremium);
-  if (positionSize < 1 && riskPerContract <= SMALL_ACCOUNT.maxRiskPct * bankroll && premiumPerContract <= Math.min(SMALL_ACCOUNT.maxDebitPct * bankroll, cashCap)) {
-    return { positionSize: 1, dollarRisk: riskPerContract, notional: premiumPerContract, cappedByNotional: false, smallAccountCap: true };
-  }
-  if (positionSize < 1) {
-    return { error: byRisk < 1
-      ? `Bankroll too small: one contract risks $${riskPerContract.toFixed(2)} to the stop, budget is $${riskBudget.toFixed(2)} `
-        + `(1-contract cap: risk <= ${SMALL_ACCOUNT.maxRiskPct * 100}% and debit <= ${SMALL_ACCOUNT.maxDebitPct * 100}% of the bankroll)`
-      : `Bankroll too small: one contract's premium $${premiumPerContract.toFixed(2)} exceeds ${MAX_PREMIUM_R}x the $${riskBudget.toFixed(2)} risk budget or ${capPct * 100}% of the bankroll` };
-  }
-  return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk };
+  if (positionSize < 1) return { error: `Bankroll too small: one contract's premium ${usd(premiumPerContract)} exceeds ${capPct * 100}% of the bankroll or the cash available` };
+  return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk,
+    ...(riskPerContract > riskBudget + 1e-9 ? { smallAccountCap: true } : {}) };
 }
 
 function processCandidate(candidate, configuredBankroll, options = {}) {
@@ -197,8 +200,8 @@ function processCandidate(candidate, configuredBankroll, options = {}) {
     riskPct,
     ...(candidate.speculative ? { speculativeScale: scale, speculativeRiskPct: riskPct * scale } : {}),
     ...(sizing.sizedUpToMin ? { sizedUpToMin: true } : {}), // raised to the $20 crypto minimum (Phase 66)
-    // One contract above the profile budget (options on a small account): shown to the user as such.
-    ...(sizing.smallAccountCap ? { smallAccountCap: true, smallAccountLabel: SMALL_ACCOUNT.label, budgetRisk: riskBudget } : {}),
+    // One contract above the profile budget, within the 1.25x tolerance (Phase 83): shown to the user as such.
+    ...(sizing.smallAccountCap ? { smallAccountCap: true, smallAccountLabel: OPTIONS_CAP.label, budgetRisk: riskBudget } : {}),
     // What it was sized against: the approval step refuses a LIVE execution of
     // an order that was not sized from that live account (venue-capital.js).
     sizingBankroll: configuredBankroll,
@@ -247,6 +250,15 @@ function resizeOrder(order, amount, { confirmed = false, fractional = false } = 
   if (notional > order.sizingBankroll + 0.005) return reject(order, `AMOUNT_ABOVE_BANKROLL: $${notional.toFixed(2)} is more than the $${order.sizingBankroll.toFixed(2)} bankroll it was sized from`);
   const k = qty / order.positionSize;
   const dollarRisk = order.dollarRisk * k;
+  if (qty > order.positionSize) { // Phase 83: a bigger amount never passes the hard ceiling, confirmed or not
+    const bank = order.sizingBankroll;
+    const riskCap = Math.min(OVERRIDE_CEILING.riskPct, options ? OPTIONS_CAP.riskMultiple * (order.riskPct || DEFAULT_RISK_PCT) : Infinity) * bank;
+    const capCap = (options ? Math.min(OVERRIDE_CEILING.capitalPct, OPTIONS_CAP.maxDebitPct) : OVERRIDE_CEILING.capitalPct) * bank;
+    if (dollarRisk > riskCap + 0.005 || notional > capCap + 0.005) {
+      return reject(order, `AMOUNT_ABOVE_HARD_CAP: $${notional.toFixed(2)} risks $${dollarRisk.toFixed(2)}; the most any trade may take is $${riskCap.toFixed(2)} of risk and $${capCap.toFixed(2)} `
+        + `of capital (${(riskCap / bank * 100).toFixed(1)}% / ${(capCap / bank * 100).toFixed(1)}% of the $${bank.toFixed(2)} bankroll)`);
+    }
+  }
   const { scenarios, costs, ...base } = order; // previews of the old size: the ledger recomputes them
   const resized = Object.freeze({
     ...base,
@@ -267,5 +279,5 @@ function isApproved(order) {
   return approvedOrders.has(order);
 }
 
-module.exports = { processCandidate, resizeOrder, isApproved, roundSize, DEFAULT_RISK_PCT, MAX_PREMIUM_R, CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT, MIN_TRADE_USD, MIN_CRYPTO_NOTIONAL, SPECULATIVE_SCALE, SMALL_ACCOUNT,
+module.exports = { processCandidate, resizeOrder, isApproved, roundSize, DEFAULT_RISK_PCT, MAX_PREMIUM_R, CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT, MIN_TRADE_USD, MIN_CRYPTO_NOTIONAL, SPECULATIVE_SCALE, OPTIONS_CAP, OVERRIDE_CEILING,
   CASH_BOUND_MIN_NOTIONAL, CASH_FEE_BUFFER, CASH_TRIM, feeInclusiveCash };

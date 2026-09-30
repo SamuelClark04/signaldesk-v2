@@ -85,7 +85,7 @@ async function autoFind(symbol, type, spot, { bankroll, settings, afterHours = f
   const e = ETFS.has(symbol) ? { ok: true, date: null } : await getEarningsStatus(symbol, now);
   const cap = exitSpreadCap(settings);
   const run = (maxExitSpread) => builder.build({ chain: main.contracts, calls: type === 'call' ? main.contracts : other.contracts || [], puts: type === 'put' ? main.contracts : other.contracts || [],
-    type, horizon: 'swing', spot, ctx, structuralStop: spot - (type === 'call' ? 1 : -1) * STOP_ATR * ctx.atr, bankroll, single: false, now, afterHours, earnings: e.ok ? e.date : null, maxExitSpread, alternatives: true });
+    type, horizon: 'swing', spot, ctx, structuralStop: spot - (type === 'call' ? 1 : -1) * STOP_ATR * ctx.atr, bankroll, single: false, now, afterHours, earnings: e.ok ? e.date : null, maxExitSpread, alternatives: true, riskPct: settings && settings.riskPct }); // Phase 83 caps
   let b = await run(cap);
   // Only the cap stood in the way: show them anyway, flagged (System 5 would skip them; a manual ticket may take one).
   const capOnly = !b.ok && b.wide;

@@ -105,7 +105,7 @@ async function propose(symbol, px, sig, ctx, bars, env) {
   const single = !!(atm && hv && atm.iv <= hv && bankroll >= builder.CONFIG.single.minBankroll);
   const ivText = atm && hv ? `${(atm.iv * 100).toFixed(0)}% ${atm.iv <= hv ? '<=' : '>'} 20-day HV ${(hv * 100).toFixed(0)}%` : 'vs HV unavailable';
   const b = await builder.build({ chain: main.contracts, calls, puts, type, horizon: sig.horizon, spot: px, ctx, structuralStop: sig.stop, bankroll, single, now, afterHours, earnings: cat.earnings,
-    maxExitSpread: env.maxExitSpread });
+    maxExitSpread: env.maxExitSpread, riskPct: env.riskPct }); // Phase 83: the builder's caps follow the risk setting
   if (!b.ok) return { id, reason: b.wide ? b.error : `OPTIONS_NO_STRUCTURE: ${b.error}` };
   const p = b.plan;
   const k = p.long;
@@ -204,7 +204,7 @@ async function generateCandidates(marks, { live = marks, bankroll = null } = {},
     const px = afterHours ? lookup(marks, symbol) : lookup(live, symbol);
     if (!(px > 0)) { tally.skip(symbol, afterHours ? 'No price (live or last close)' : 'Market open: no fresh price yet (next pass)'); continue; }
     try {
-      const cand = await evaluate(symbol, px, { now, afterHours, bankroll: bank, maxExitSpread }, bench);
+      const cand = await evaluate(symbol, px, { now, afterHours, bankroll: bank, maxExitSpread, riskPct: set.riskPct }, bench);
       if (cand) { out.push(cand); tally.setup(); }
     } catch (err) {
       console.error(`[options-system] ${symbol} failed: ${err.message}`);

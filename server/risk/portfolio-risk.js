@@ -3,7 +3,8 @@
 //                      plus the new setup's, may not pass settings.maxOpenRiskPct (default 6%) of the
 //                      bankroll it is sized from. A stop moved up (ratchet / edit) counts only what is still
 //                      at risk: dollarRisk x (distance to the stop now / at entry), 0 once it locks profit.
-//                      Option spreads count their full dollarRisk (the debit that can be lost).
+//                      Option spreads count their WHOLE DEBIT (Phase 83: what a gapped / slipped exit can lose,
+//                      e.g. -1.78R on GOOGL), not the distance to their stop.
 //   Direction limit    at most settings.maxEquityPerDirection (default 2) bullish and 2 bearish EQUITY trades
 //                      (stocks + options; a put spread is bearish) open or staged at once, so the book cannot
 //                      pile into one market move (the audit found 8 bearish spreads open together).
@@ -22,10 +23,13 @@ const manualOrder = (o) => String(o.id).startsWith('manual:');
 const sameBook = (a, b) => poolOf(a.market) === poolOf(b.market) && isLive(a) === isLive(b);
 const bullish = (x) => x.direction !== 'short';
 
+// An option position's whole debit (premium paid x multiplier x contracts): the most it can lose. null: unknown.
+const debitOf = (p) => { const od = p.optionsData; return od && od.debit > 0 ? od.debit * (od.multiplier || 100) * (p.positionSize || 0) : null; };
+
 // Dollars still at risk on one open position (0 for holdings and positions with no stop).
 function riskOf(p) {
+  if (p.market === 'options' && !holding(p)) return debitOf(p) || p.dollarRisk || 0;
   if (holding(p) || !(p.dollarRisk > 0)) return 0;
-  if (p.market === 'options') return p.dollarRisk;
   const init = Number.isFinite(p.initialStop) ? p.initialStop : p.invalidation;
   const sign = p.direction === 'short' ? -1 : 1;
   const d0 = sign * (p.fillPrice - init);
@@ -46,7 +50,7 @@ function check(order, { positions = [], pending = [], bankroll, settings } = {})
   if (bankroll > 0) {
     const open = openRisk(order, positions);
     const cap = lim.maxOpenRiskPct * bankroll;
-    const add = order.dollarRisk > 0 ? order.dollarRisk : 0;
+    const add = order.market === 'options' ? riskOf(order) : order.dollarRisk > 0 ? order.dollarRisk : 0; // options: the whole debit (83)
     if (open + add > cap + 1e-9) {
       return `PORTFOLIO_RISK_CAP: ${usd(open)} already at risk on open trades + ${usd(add)} for this setup = ${((open + add) / bankroll * 100).toFixed(1)}% of the `
         + `${usd(bankroll)} bankroll, over the ${(lim.maxOpenRiskPct * 100).toFixed(1)}% portfolio ceiling (${usd(cap)}); new setups wait until open risk comes down`;
@@ -81,4 +85,4 @@ function summary(positions, settings, bankrolls) {
   return { ...lim, books, at: Date.now() };
 }
 
-module.exports = { check, summary, riskOf, openRisk, limits, DEFAULTS, holding, sameBook, manualOrder };
+module.exports = { check, summary, riskOf, debitOf, openRisk, limits, DEFAULTS, holding, sameBook, manualOrder };

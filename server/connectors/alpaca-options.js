@@ -2,8 +2,10 @@
 //   openSpread   buy_to_open / sell_to_open every leg of the plan (optionsData.legs; a single
 //                contract: one leg) as ONE limit order at the plan's net debit, day. Alpaca's mleg
 //                limit_price is the NET price: positive = a debit (what a debit spread costs).
-//   closeSpread  the opposite legs (sell_to_close / buy_to_close) as one MARKET order: SignalDesk
-//                decides the exit (premium stop / target, exit-monitor.premiumExit) and Alpaca fills it.
+//   closeSpread  the opposite legs (sell_to_close / buy_to_close) as one LIMIT order at `limit` (the net credit
+//                per share to receive; Phase 83: never a market order). Alpaca's mleg limit_price is signed: a
+//                credit is NEGATIVE. A single contract: a plain sell limit. The price is SignalDesk's
+//                (execution/spread-exit.js: mid-pegged steps for exits, the target value for take-profits).
 // Refused outside regular hours (a queued day order fills far from the approved price).
 // Never throws: { ok, brokerId, ... } or { ok: false, error }.
 const { paper } = require('./alpaca-api');
@@ -39,15 +41,16 @@ async function openSpread(order, contracts, limit = null, suffix = '') {
   return r.ok ? { ...r, environment: 'alpaca-paper', entryType: 'limit', limitPrice: Number(px2(limit || od.debit)), product: od.label || order.asset } : r;
 }
 
-async function closeSpread(pos, clientOrderId) {
+async function closeSpread(pos, clientOrderId, limit) {
   const legs = legsOf(pos.optionsData);
   if (!legs.length) return { ok: false, error: 'no option contract on this position' };
+  if (!(limit > 0)) return { ok: false, error: 'no limit price for the closing order (market orders are not used)' };
   const open = await marketOpen();
   if (!open.ok) return open;
   const flip = (side) => (side === 'buy' ? 'sell' : 'buy');
-  const common = { qty: String(pos.positionSize), type: 'market', time_in_force: 'day', client_order_id: String(clientOrderId).slice(0, 128) };
-  const body = legs.length === 1 ? { ...common, symbol: legs[0].contract, side: 'sell' }
-    : { ...common, order_class: 'mleg', legs: legs.map((l) => ({ symbol: l.contract, ratio_qty: String(l.ratio || 1), side: flip(l.side), position_intent: l.side === 'buy' ? 'sell_to_close' : 'buy_to_close' })) };
+  const common = { qty: String(pos.positionSize), type: 'limit', time_in_force: 'day', client_order_id: String(clientOrderId).slice(0, 128) };
+  const body = legs.length === 1 ? { ...common, symbol: legs[0].contract, side: 'sell', limit_price: px2(limit) }
+    : { ...common, limit_price: `-${px2(limit)}`, order_class: 'mleg', legs: legs.map((l) => ({ symbol: l.contract, ratio_qty: String(l.ratio || 1), side: flip(l.side), position_intent: l.side === 'buy' ? 'sell_to_close' : 'buy_to_close' })) };
   return place(body, 'closing spread order');
 }
 

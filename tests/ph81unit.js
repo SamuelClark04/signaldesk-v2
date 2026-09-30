@@ -94,17 +94,17 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x 
   check('today = realized since midnight ET (yesterday\'s -$500 ignored) + unrealized moves TODAY (an older position counts from its first mark)', m0.realized === -40 && m0.pnl === -40 && m2.pnl === -70, `${m0.pnl} -> ${m2.pnl}`);
   daily.reset();
   const lossDay = { journal: [{ closedAt: NOW - 120e3, netPnl: -289.15 }], positions: [] };
-  const k = daily.refresh({ ...lossDay, settings: settings(), now: NOW });
+  const k = daily.refresh({ ...lossDay, settings: settings(), now: NOW }).paper; // Phase 83: one switch per book (these trades are paper)
   const kr = shields.check(setup('JPM'), ctx);
-  check('-$289.15 today past the $150 default -> tripped: every new setup (any market) is DAILY_LOSS_LIMIT_REACHED', k.active && k.limit === 150 && /^DAILY_LOSS_LIMIT_REACHED: today's P\/L -\$289\.15 hit the -\$150/.test(kr || '')
+  check('-$289.15 of PAPER losses today past the $150 default -> the paper switch trips: every new paper setup (any market) is DAILY_LOSS_LIMIT_REACHED', k.active && k.limit === 150 && /^DAILY_LOSS_LIMIT_REACHED: today's paper P\/L -\$289\.15 hit the -\$150/.test(kr || '')
     && /^DAILY_LOSS_LIMIT_REACHED/.test(shields.check(setup('ETH-USD', { market: 'crypto' }), ctx) || '') && shields.check(setup('NVDA', { id: 'manual:2' }), ctx) === null, kr);
-  const still = daily.refresh({ journal: [{ closedAt: NOW - 120e3, netPnl: -289.15 }, { closedAt: NOW - 60e3, netPnl: 300 }], positions: [], settings: settings(), now: NOW + 1000 });
+  const still = daily.refresh({ journal: [{ closedAt: NOW - 120e3, netPnl: -289.15 }, { closedAt: NOW - 60e3, netPnl: 300 }], positions: [], settings: settings(), now: NOW + 1000 }).paper;
   check('latched for the day: a later +$300 does not re-open entries; raising the limit past the loss (Settings) releases it; 0 = off',
-    still.active && daily.refresh({ ...lossDay, settings: { ...settings(), dailyLossLimit: 500 }, now: NOW + 2000 }).active === false && daily.refresh({ ...lossDay, settings: { ...settings(), dailyLossLimit: 0 }, now: NOW + 3000 }).active === false);
+    still.active && daily.refresh({ ...lossDay, settings: { ...settings(), dailyLossLimitPaper: 500 }, now: NOW + 2000 }).paper.active === false && daily.refresh({ ...lossDay, settings: { ...settings(), dailyLossLimitPaper: 0 }, now: NOW + 3000 }).paper.active === false);
   daily.refresh({ ...lossDay, settings: settings(), now: NOW + 4000 }); // tripped again at $150
   ledger.getActivePositions(); // the KO paper stock: a stop at 57 must still close it while tripped
   const closed = ledger.monitorPositions(new Map([['KO', 56.5]]));
-  check('while tripped, a stop-loss still executes (paper KO closed STOP_LOSS at 56.5): the shields never touch exits', closed.length === 1 && closed[0].exitReason === 'STOP_LOSS' && daily.current().active, closed.map((c) => `${c.asset} ${c.exitReason}`).join(', '));
+  check('while tripped, a stop-loss still executes (paper KO closed STOP_LOSS at 56.5): the shields never touch exits', closed.length === 1 && closed[0].exitReason === 'STOP_LOSS' && daily.current().paper.active, closed.map((c) => `${c.asset} ${c.exitReason}`).join(', '));
   const exitSrc = ['execution/exit-pass.js', 'execution/exit-monitor.js', 'execution/ratchet.js', 'execution/time-exits.js', 'execution/bracket-ops.js', 'execution/coinbase-exit.js'].map((f) => fs.readFileSync(S + f, 'utf8')).join('\n');
   check('no exit path references the entry shields', !/entry-shields|daily-loss|macro-calendar/.test(exitSrc));
 
@@ -133,27 +133,27 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x 
   check('...during a blackout the next pass stages nothing (XOM: MACRO_SHIELD_ACTIVE)', !ledger.getPendingOrders().some((o) => o.asset === 'XOM') && why('MACRO_SHIELD_ACTIVE') === 1);
   macro._setFeed([]);
   const jpm = ledger.getPendingOrders().find((o) => o.asset === 'JPM');
-  ledger.updateSettings({ dailyLossLimit: 30 }); // today's real KO stop-out (~-$35, above) now passes the limit
+  ledger.updateSettings({ dailyLossLimitPaper: 30 }); // today's real KO paper stop-out (~-$35, above) now passes the paper limit
   let err = null;
   try { await require(S + 'execution/order-router').approveWithGuard(jpm.id); } catch (e) { err = e.message; }
   check('approval after the kill switch trips: refused with DAILY_LOSS_LIMIT_REACHED and the setup STAYS pending', /^DAILY_LOSS_LIMIT_REACHED/.test(err || '') && ledger.getPendingOrders().some((o) => o.id === jpm.id), err);
 
   // ---------- 5. Settings, buckets, banner ----------
-  const defaults = { ...settings(), dailyLossLimit: 150 };
+  const defaults = { ...settings(), dailyLossLimitPaper: 150 };
   const refused = (v) => { try { ledger.updateSettings(v); return false; } catch { return true; } };
-  ledger.updateSettings({ dailyLossLimit: 150 });
+  ledger.updateSettings({ dailyLossLimitPaper: 150 });
   check('settings: defaults Macro Shield on / crypto off / 1 per sector / $150; invalid values refused; 0 (off) accepted', defaults.macroShield === true && defaults.macroShieldCrypto === false
-    && defaults.maxTradesPerSector === 1 && settings().dailyLossLimit === 150 && refused({ macroShield: 'maybe' }) && refused({ dailyLossLimit: -5 }) && refused({ maxTradesPerSector: 0 })
-    && !refused({ macroShield: false }) && settings().macroShield === false && !refused({ dailyLossLimit: 0 }) && settings().dailyLossLimit === 0);
+    && defaults.maxTradesPerSector === 1 && settings().dailyLossLimitPaper === 150 && settings().dailyLossLimitLive === 25 && refused({ macroShield: 'maybe' }) && refused({ dailyLossLimitPaper: -5 }) && refused({ maxTradesPerSector: 0 })
+    && !refused({ macroShield: false }) && settings().macroShield === false && !refused({ dailyLossLimitPaper: 0 }) && settings().dailyLossLimitPaper === 0);
   const labels = ['MACRO_SHIELD_ACTIVE: x', 'SECTOR_CAP_REACHED: x', 'DAILY_LOSS_LIMIT_REACHED: x'].map((r) => stats.bucket(r));
   check('rejection breakdown shows MACRO_SHIELD_ACTIVE / SECTOR_CAP_REACHED / DAILY_LOSS_LIMIT_REACHED', labels.every((l, i) => l.startsWith(['MACRO_SHIELD_ACTIVE', 'SECTOR_CAP_REACHED', 'DAILY_LOSS_LIMIT_REACHED'][i])), labels.join(' | '));
   const el = (tag, props = {}, kids = []) => ({ tag, ...props, children: [].concat(kids) });
   const win = { SignalDesk: { ui: { el, money: (x) => `$${Number(x).toFixed(2)}` } } };
   vm.runInNewContext(fs.readFileSync(C + 'components/shield-banner.js', 'utf8'), { window: win, document: { querySelectorAll: () => [] }, Date });
   const SB = win.SignalDesk.shieldBanner;
-  const killText = SB.content({ at: NOW, kill: { active: true, limit: 150, pnl: -310.5, trippedPnl: -289.15 }, macro: { enabled: true } });
+  const killText = SB.content({ at: NOW, kill: { paper: { book: 'paper', active: true, limit: 150, pnl: -310.5, trippedPnl: -289.15 }, live: { book: 'live', active: false } }, macro: { enabled: true } });
   const macroText = SB.content({ at: NOW, kill: null, macro: { enabled: true, active: true, event: 'CPI', releaseClock: '8:30 AM ET', resumesClock: '8:45 AM ET', upcoming: [] } });
-  check('banners: "DAILY KILL SWITCH ACTIVE: -$150.00 loss limit reached" and "PAUSED FOR MACRO EVENT: CPI · Resumes at 8:45 AM ET"', killText[1] === 'DAILY KILL SWITCH ACTIVE: -$150.00 loss limit reached'
+  check('banners: "DAILY KILL SWITCH ACTIVE (Paper): -$150.00 loss limit reached" and "PAUSED FOR MACRO EVENT: CPI · Resumes at 8:45 AM ET"', killText[1] === 'DAILY KILL SWITCH ACTIVE (Paper): -$150.00 loss limit reached'
     && macroText[1] === 'PAUSED FOR MACRO EVENT: CPI · Resumes at 8:45 AM ET' && SB.content({ at: NOW, macro: { enabled: true, upcoming: [] } }) === null, `${killText[1]} | ${macroText[1]}`);
 
   console.log(fails ? `${fails} FAILED` : 'ALL PASS');

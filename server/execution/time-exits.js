@@ -48,7 +48,8 @@ async function run(ledger, { isBusy = () => false } = {}, now = Date.now()) {
   const ap = require('./alpaca-paper');
   for (const p of ledger.getActivePositions()) {
     const d = due(p, now);
-    if (!d || isBusy(p.id) || ap.isClosing(p.id) || p.paperExitOrderId) continue;
+    const exiting = p.paperExitOrderId && !(p.exitWork && p.exitWork.kind === 'target'); // a resting target is canceled by the close (Phase 83)
+    if (!d || isBusy(p.id) || ap.isClosing(p.id) || exiting) continue;
     if (p.execution === 'LIVE') {
       if (!warned.has(`${p.id}:${d.reason}`)) console.warn(`[time-exit] ${p.id}: ${d.why}; LIVE positions are not sold automatically: close it at ${p.broker || 'the broker'}`);
       warned.add(`${p.id}:${d.reason}`);

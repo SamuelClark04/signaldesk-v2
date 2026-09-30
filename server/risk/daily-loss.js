@@ -1,17 +1,22 @@
-// Daily loss kill switch (Phase 81). Today's P&L across the whole book (paper + live, every strategy): realized
+// Daily loss kill switches (Phase 81; Phase 83: one PER BOOK). Two independent switches, never mixed:
+//   paper  paper trades only (settings.dailyLossLimitPaper, $; default 150) -> pauses PAPER entries only
+//   live   real-money trades only (settings.dailyLossLimitLive, $; default 25) -> pauses LIVE entries only
+// A bad paper day can never lock out live crypto, and the reverse. Each book's P&L today (New York day): realized
 // (journal closes since midnight ET) + unrealized for TODAY (a position opened today: all of its net P/L; one opened
-// earlier: its move since the first mark of the day, scaled if part of it was sold since). When it reaches
-// -settings.dailyLossLimit ($; 0 = off) the switch TRIPS and stays tripped until the next New York day: new setups are
-// not staged or approved (entry-shields.js). Open trades, their stops / targets and every close keep working.
-// Once tripped it stays tripped for the day even if prices recover; only raising the limit past the loss (or 0 = off)
-// in Settings releases it. In memory: a restart re-measures (today's realized losses alone re-trip it).
+// earlier: its move since the first mark of the day, scaled if part of it was sold since). At -limit the book TRIPS and
+// stays tripped until the next New York day; only raising that limit past the loss (or 0 = off) in Settings releases it.
+// Open trades, stops, targets and every close keep working. In memory: a restart re-measures (realized alone re-trips).
 const et = require('../services/et-time');
 
-const DEFAULT_LIMIT = 150;
+const DEFAULTS = { paper: 150, live: 25 };
+const KEYS = { paper: 'dailyLossLimitPaper', live: 'dailyLossLimitLive' };
+const BOOKS = ['paper', 'live'];
+const liveRecord = (x) => x.execution === 'LIVE' || x.execution === 'EXTERNAL' || x.execution === 'BROKER'; // adopted exchange holdings are real money
+const bookOf = (x) => (liveRecord(x) ? 'live' : 'paper');
 let day = null;
-let baseline = new Map(); // position id -> { v: net P/L at the day's first mark, size }
-let tripped = null; // { at, pnl }
+let state = null; // book -> { baseline: Map(id -> { v, size }), tripped: { at, pnl } | null }
 let last = null;
+const fresh = () => Object.fromEntries(BOOKS.map((b) => [b, { baseline: new Map(), tripped: null }]));
 
 // Net P/L if the position were sold now (exit-quote: the same numbers the position shows), null: no price / working.
 function markNet(p, now) {
@@ -23,20 +28,21 @@ function markNet(p, now) {
   return q && Number.isFinite(q.net) ? q.net : null;
 }
 
-// -> { realized, unrealized, pnl, dayStart }. markOf: tests.
-function measure({ journal = [], positions = [], now = Date.now(), markOf = markNet } = {}) {
+// One book's P&L today. -> { realized, unrealized, pnl, dayStart }. markOf: tests.
+function measure({ journal = [], positions = [], now = Date.now(), markOf = markNet, book = 'paper' } = {}) {
   const start = et.dayStart(now);
   const d = et.ymd(now);
-  if (d !== day) { day = d; baseline = new Map(); tripped = null; }
-  const realized = journal.filter((t) => t.closedAt >= start && Number.isFinite(t.netPnl)).reduce((s, t) => s + t.netPnl, 0);
+  if (d !== day || !state) { day = d; state = fresh(); }
+  const s = state[book];
+  const realized = journal.filter((t) => bookOf(t) === book && t.closedAt >= start && Number.isFinite(t.netPnl)).reduce((sum, t) => sum + t.netPnl, 0);
   let unrealized = 0;
-  for (const p of positions) {
+  for (const p of positions.filter((x) => bookOf(x) === book)) {
     const v = markOf(p, now);
     if (v === null || v === undefined || !Number.isFinite(v)) continue;
     let base = 0;
     if (!((p.openedAt || 0) >= start)) {
-      if (!baseline.has(p.id)) baseline.set(p.id, { v, size: p.positionSize });
-      const b = baseline.get(p.id);
+      if (!s.baseline.has(p.id)) s.baseline.set(p.id, { v, size: p.positionSize });
+      const b = s.baseline.get(p.id);
       base = b.size > 0 ? (b.v * p.positionSize) / b.size : b.v;
     }
     unrealized += v - base;
@@ -44,23 +50,29 @@ function measure({ journal = [], positions = [], now = Date.now(), markOf = mark
   return { realized, unrealized, pnl: realized + unrealized, dayStart: start };
 }
 
-const limitOf = (settings = {}) => (Number.isFinite(settings.dailyLossLimit) && settings.dailyLossLimit >= 0 ? settings.dailyLossLimit : DEFAULT_LIMIT);
+const limitOf = (settings = {}, book) => { const v = settings[KEYS[book]]; return Number.isFinite(v) && v >= 0 ? v : DEFAULTS[book]; };
 
-// Measure + trip. -> { enabled, active, pnl, realized, unrealized, limit, trippedAt, day }
+// Measure + trip both books. -> { paper: {...}, live: {...} }, each { book, enabled, active, pnl, realized, unrealized, limit, trippedAt, trippedPnl, day }
 function refresh({ settings, ...rest } = {}) {
-  const m = measure(rest);
-  const limit = limitOf(settings);
   const now = rest.now || Date.now();
-  if (tripped && tripped.pnl > -limit) tripped = null; // the user raised the limit past the loss (Settings): released
-  if (limit > 0 && !tripped && m.pnl <= -limit) {
-    tripped = { at: now, pnl: m.pnl };
-    console.warn(`[risk] DAILY KILL SWITCH: today's P/L $${m.pnl.toFixed(2)} reached the -$${limit} limit; no new entries until tomorrow (open trades, stops and closes keep working)`);
+  const out = {};
+  for (const book of BOOKS) {
+    const m = measure({ ...rest, book });
+    const s = state[book];
+    const limit = limitOf(settings, book);
+    if (s.tripped && s.tripped.pnl > -limit) s.tripped = null; // the user raised this book's limit past the loss: released
+    if (limit > 0 && !s.tripped && m.pnl <= -limit) {
+      s.tripped = { at: now, pnl: m.pnl };
+      console.warn(`[risk] DAILY KILL SWITCH (${book}): today's ${book} P/L $${m.pnl.toFixed(2)} reached the -$${limit} limit; no new ${book} entries until tomorrow (open trades, stops and closes keep working)`);
+    }
+    out[book] = { book, enabled: limit > 0, active: limit > 0 && !!s.tripped, pnl: m.pnl, realized: m.realized, unrealized: m.unrealized, limit,
+      trippedAt: s.tripped ? s.tripped.at : null, trippedPnl: s.tripped ? s.tripped.pnl : null, day };
   }
-  last = { enabled: limit > 0, active: limit > 0 && !!tripped, pnl: m.pnl, realized: m.realized, unrealized: m.unrealized, limit, trippedAt: tripped ? tripped.at : null, trippedPnl: tripped ? tripped.pnl : null, day };
-  return last;
+  last = out;
+  return out;
 }
 
 const current = () => last;
-const reset = () => { day = null; baseline = new Map(); tripped = null; last = null; }; // tests
+const reset = () => { day = null; state = null; last = null; }; // tests
 
-module.exports = { refresh, current, measure, markNet, reset, DEFAULT_LIMIT };
+module.exports = { refresh, current, measure, markNet, reset, bookOf, DEFAULTS, KEYS };

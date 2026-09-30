@@ -93,8 +93,9 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
 - **Entry shields (Phase 81)**: risk/entry-shields.js, on NEW entries only: pipeline staging (after portfolio-risk) and order-router
   approval (a shielded setup STAYS pending); never exits (stops / targets / closes: exit paths must not require it). Manual, Pilot and
   adopted / external are exempt. (1) DAILY_LOSS_LIMIT_REACHED: risk/daily-loss.js, today (New York day) realized + unrealized
-  moves across ALL books (paper + live) <= -settings.dailyLossLimit ($150; 0 = off); latched for the day (only raising the limit
-  releases it); in memory. (2) MACRO_SHIELD_ACTIVE: services/macro-calendar.js, 30 min before -> 15 min after a high-impact USD
+  moves, ONE SWITCH PER BOOK since Phase 83: paper (settings.dailyLossLimitPaper, $150) pauses paper entries only, live
+  (dailyLossLimitLive, $25) live only (Phase 81's dailyLossLimit migrates to the paper one); latched for the day (only raising
+  that limit releases it); in memory. (2) MACRO_SHIELD_ACTIVE: services/macro-calendar.js, 30 min before -> 15 min after a high-impact USD
   release (CPI / PCE / payrolls / unemployment / FOMC / Fed rate): feed MACRO_CALENDAR_URL (Forex Factory weekly JSON; boot + 06:00
   ET, 5 s abort) merged with the built-in official schedule (macro-events FOMC / CPI + BLS / BEA dates: extend yearly); fail-open;
   stocks / options when settings.macroShield, crypto only with macroShieldCrypto. (3) SECTOR_CAP_REACHED: risk/sectors.js groups (mega-cap
@@ -107,6 +108,17 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   [Close] is never gated. Entry shield OPTIONS_SPREAD_TOO_WIDE: net natural bid / ask from the legs (buy at ask / bid, sell at bid /
   ask) > 25% of its mid. time-exits AUTO_CLOSE_2_DTE: every option position from 10:00 AM ET (before 3:45 PM) once within 2 calendar
   OR 2 trading days of expiry (a Monday expiry closes Thursday), profit or loss. Test: tests/ph82unit.js (controlled clock + marks).
+- **Options sizing + limit exits (Phase 83)**: risk-engine sizeOptions: 1R per contract at the EXPECTED EXIT FILL (risk/option-spread-width
+  expectedExitRisk: debit - (stop value - half the net bid / ask)); ONE contract over the budget only within OPTIONS_CAP (1.25x the
+  risk budget; whole debit <= 6% of the bankroll), else OPTIONS_RISK_EXCEEDS_CAP (the 5.5% / 12% small-account override is gone; the
+  spread builder's caps match and take settings.riskPct). resizeOrder: an amount ABOVE the engine's size never passes OVERRIDE_CEILING
+  (3% risk / 8% capital; options 1.25x / 6%), confirmed or not (AMOUNT_ABOVE_HARD_CAP). portfolio-risk counts an option position's
+  WHOLE debit. Alpaca Paper option exits: NEVER a market order (connectors/alpaca-options.closeSpread needs a limit; an mleg credit is a
+  NEGATIVE limit_price); execution/spread-exit.js: stop / 2 DTE / manual exits start at the NBBO mid and step 25% of the bid / ask width
+  lower every 15 s (4 steps = 60 s), floor 10% under the natural bid, then rest; take-profits REST at the target value (placed in the
+  9:35-3:45 window, canceled + confirmed before any other exit; a target that filled first is booked). exit-pass fast loop (5 s)
+  runs Alpaca option exits too (alpaca-paper.exits) and re-quotes held legs every 12 s in market hours. Test: tests/ph83unit.js
+  (fake Alpaca). Ad-hoc load checks: node -r <scratchpad>/safe-env.js (never the real ledger).
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

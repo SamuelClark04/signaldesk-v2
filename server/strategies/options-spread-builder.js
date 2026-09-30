@@ -52,7 +52,7 @@ const CONFIG = {
   longDelta: [0.55, 0.68, 0.60], shortDelta: [0.22, 0.35, 0.28], levelDelta: [0.12, 0.48], netDelta: { min: 0.20, minPricey: 0.16, priceyAt: 200, ideal: [0.22, 0.42] },
   debitShare: [0.30, 0.53], idealShare: 0.42, stopShare: [0.45, 0.50], t1Share: [0.65, 0.85], t2Share: [1.00, 1.30, 1.15], t1MaxWidth: 0.90, t2MaxWidth: 0.95,
   netRR: 1.30, maxCostR: 0.34, leg: { maxSpreadPct: 0.12, maxAbsSpread: 0.35, absBelowDebit: 2.5, maxAgeMs: 20 * 60 * 1000, afterHoursAgeMs: 20 * 3600 * 1000 },
-  level: { minAtr: 0.5, maxAtr: 2.5, minEm: 0.8 }, maxExpirations: 4, narrowSteps: 3, single: { minBankroll: 10000 }, smallCap: { debitPct: 0.12, riskPct: 0.055 },
+  level: { minAtr: 0.5, maxAtr: 2.5, minEm: 0.8 }, maxExpirations: 4, narrowSteps: 3, single: { minBankroll: 10000 }, smallCap: { debitPct: 0.06, riskMultiple: 1.25, defaultRiskPct: 0.01 }, // Phase 83: = risk-engine OPTIONS_CAP
 };
 const MULT = 100;
 const LEVEL_STEPS = 32;
@@ -167,8 +167,10 @@ async function build(a) { // Phase 75: async, yields (pace) per expiration and p
   const dist = level ? Math.abs(level - a.spot) : null;
   const anchorable = level && dist >= CONFIG.level.minAtr * a.ctx.atr && dist <= CONFIG.level.maxAtr * a.ctx.atr;
   const tooClose = level && dist < CONFIG.level.minAtr * a.ctx.atr;
-  const caps = a.bankroll > 0 && a.bankroll < CONFIG.single.minBankroll
-    ? { debit: (a.bankroll * CONFIG.smallCap.debitPct) / MULT, risk: (a.bankroll * CONFIG.smallCap.riskPct) / MULT } : null;
+  // Phase 83: every plan must fit ONE contract under the risk engine's caps (cost <= 6% of the bankroll, risk to the stop's
+  // expected fill <= 1.25x the per-trade budget); small accounts also try narrower widths to find one that does.
+  const caps = a.bankroll > 0 ? { debit: (a.bankroll * CONFIG.smallCap.debitPct) / MULT,
+    risk: (a.bankroll * (a.riskPct > 0 ? a.riskPct : CONFIG.smallCap.defaultRiskPct) * CONFIG.smallCap.riskMultiple) / MULT, small: a.bankroll < CONFIG.single.minBankroll } : null;
   // A swing tries 21-45 DTE first, then the 10-18 DTE weeklies (sharper net delta on narrow widths).
   // ... and finally the 6-12 DTE weeklies, never across an earnings date (a.earnings: 'YYYY-MM-DD' or null).
   const shortOk = (e) => !a.earnings || e < a.earnings;
@@ -195,14 +197,14 @@ async function build(a) { // Phase 75: async, yields (pace) per expiration and p
       const atLevel = anchorable ? beyond.filter((c) => sign * (level - c.strike) >= 0 && Math.abs(c.delta) >= CONFIG.levelDelta[0] && Math.abs(c.delta) <= CONFIG.levelDelta[1]) : [];
       const anchor = atLevel.length ? atLevel.reduce((b, c) => (Math.abs(level - c.strike) < Math.abs(level - b.strike) ? c : b)) : null;
       const inBand = beyond.filter((c) => Math.abs(c.delta) >= CONFIG.shortDelta[0] && Math.abs(c.delta) <= CONFIG.shortDelta[1]);
-      const narrow = caps ? [...beyond].sort((x, y) => sign * (x.strike - y.strike)).slice(0, CONFIG.narrowSteps).filter((c) => !inBand.includes(c)) : [];
-      const shorts = a.single ? [null] : anchor ? [anchor, ...(caps ? narrow.filter((c) => sign * (anchor.strike - c.strike) > 0) : [])] : [...inBand, ...narrow];
+      const narrow = caps && caps.small ? [...beyond].sort((x, y) => sign * (x.strike - y.strike)).slice(0, CONFIG.narrowSteps).filter((c) => !inBand.includes(c)) : [];
+      const shorts = a.single ? [null] : anchor ? [anchor, ...(caps && caps.small ? narrow.filter((c) => sign * (anchor.strike - c.strike) > 0) : [])] : [...inBand, ...narrow];
       for (const short of shorts) {
         tried += 1;
         const p = planFrom({ long, short, type: a.type, spot: a.spot, structuralStop: a.structuralStop, now: a.now, minNetDelta });
         if (!p.ok) { whys.push(`${exp} ${p.error}`); continue; }
         if (tooClose && sign * (level - p.breakeven) <= 0) { whys.push(`${exp} ${long.strike}: breakeven ${p.breakeven} is past the ${sign > 0 ? 'resistance' : 'support'} ${cents(level)} (< 0.5 ATR away)`); continue; }
-        if (caps && (p.debit > caps.debit || p.riskPerShare > caps.risk)) { whys.push(`${exp} ${long.strike}${short ? `/${short.strike}` : ''}: $${Math.round(p.debit * MULT)} debit over the small-account 1-contract cap`); continue; }
+        if (caps && (p.debit > caps.debit || Math.min(p.debit, p.riskPerShare + (p.combined || 0) / 2) > caps.risk)) { whys.push(`${exp} ${long.strike}${short ? `/${short.strike}` : ''}: $${Math.round(p.debit * MULT)} debit / its risk over the 1-contract caps (6% cost, 1.25x risk budget)`); continue; }
         // The exit-spread cap last: WIDE_EXIT_SPREAD only when it is the sole reason.
         if (a.maxExitSpread > 0 && p.exitSpread > a.maxExitSpread + 1e-9) { wide.push(p.exitSpread); whys.push(`${exp} ${wideWhy(`${long.strike}${short ? `/${short.strike}` : ''}`, p.exitSpread, a.maxExitSpread)}`); continue; }
         plans.push({ ...p, anchored: !!anchor && short === anchor });

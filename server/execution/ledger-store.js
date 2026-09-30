@@ -40,7 +40,9 @@ const SETTINGS_RULES = {
   macroShield: { type: 'choice', values: [true, false], default: true },
   macroShieldCrypto: { type: 'choice', values: [true, false], default: false },
   maxTradesPerSector: { type: 'number', default: 1, min: 1, max: 20, integer: true },
-  dailyLossLimit: { type: 'number', default: 150, min: 0, max: 1000000 },
+  // Phase 83: one kill switch per book ($, 0 = off): paper losses never pause live entries, and the reverse.
+  dailyLossLimitPaper: { type: 'number', default: 150, min: 0, max: 1000000 },
+  dailyLossLimitLive: { type: 'number', default: 25, min: 0, max: 1000000 },
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
@@ -118,7 +120,10 @@ function save() {
 // default instead of discarding the whole ledger.
 function restoreSettings(saved) {
   if (!saved) return;
-  for (const [key, value] of Object.entries(saved)) {
+  // Phase 83: Phase 81's single dailyLossLimit becomes the PAPER book's limit (it was set against the paper losses).
+  if (saved.dailyLossLimit !== undefined && saved.dailyLossLimitPaper === undefined) saved = { ...saved, dailyLossLimitPaper: saved.dailyLossLimit };
+  const { dailyLossLimit, ...rest } = saved; // eslint-disable-line no-unused-vars
+  for (const [key, value] of Object.entries(rest)) {
     try {
       Object.assign(settings, cleanSettings({ [key]: value }));
     } catch (err) {

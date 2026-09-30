@@ -12,6 +12,8 @@
 const alpaca = require('../connectors/alpaca-api').paper;
 const spreads = require('../connectors/alpaca-options');
 const spreadEntry = require('./spread-entry'); // Phase 74: marketable limits (paper fills only at the NBBO), re-price, give up
+const spreadExit = require('./spread-exit'); // Phase 83: mid-pegged limit exits + resting targets (never a market order)
+const optionsData = require('../connectors/options-data');
 const prices = require('../market/latest-prices');
 
 const BROKER = 'Alpaca Paper';
@@ -63,6 +65,10 @@ function book(ledger, pos, o, reason, leg) {
 // Positions whose Alpaca orders the generic reconciler cannot read: options (a spread's legs are not
 // exits; the fill price is a net debit, not the underlying) and any closing order in flight.
 async function reconcileOwn(pos, ledger) {
+  if (pos.paperExitOrderId && pos.market === 'options') { // Phase 83: a limit exit / resting target (spread-exit.js)
+    const m = await spreadExit.manage(ledger, pos, exitDeps());
+    return m && m.trade ? { id: pos.id, action: 'closed', trade: m.trade } : { id: pos.id, action: 'waiting', detail: m && m.cleared ? 'closing order ended unfilled' : 'closing order working' };
+  }
   if (pos.paperExitOrderId) {
     const o = await alpaca.getOrder(pos.paperExitOrderId);
     if (!o.ok) return { id: pos.id, action: 'error', detail: o.error };
@@ -122,8 +128,13 @@ async function sendCloseNow(ledger, pos0, reason, leg) {
     if (!pos) return { alreadyClosed: true };
   }
   let r;
-  if (pos.market === 'options') r = await spreads.closeSpread(pos, `${pos.id}:close:${Date.now()}`);
-  else {
+  if (pos.market === 'options') { // Phase 83: never a market order
+    const x = await spreadExit.startExit(ledger, pos, reason, leg, exitDeps());
+    if (x.trade || x.alreadyClosed) return x;
+    if (x.error) throw new Error(`PAPER_CLOSE_FAILED: ${x.error}`);
+    if (x.pending && !x.limit) return { pending: true, brokerExitId: x.brokerExitId }; // the old order's cancel is not confirmed yet
+    r = { ok: true, brokerId: x.brokerExitId, placed: true };
+  } else {
     const s = await alpaca.getOrderStatus(pos.brokerId);
     if (s.ok && s.exit && s.exit.filledQty > 0) return { alreadyClosed: true }; // its bracket filled first: the reconciler books it
     for (const leg1 of (s.ok && s.legIds) || []) await alpaca.cancelOrder(leg1);
@@ -134,7 +145,7 @@ async function sendCloseNow(ledger, pos0, reason, leg) {
       : await alpaca.sellMarket(pos.asset, pos.positionSize, `${pos.id}:close:${Date.now()}`);
   }
   if (!r.ok) throw new Error(`PAPER_CLOSE_FAILED: ${r.error}`);
-  patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: leg });
+  if (!r.placed) patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: leg });
   const until = Date.now() + FILL_WAIT_MS;
   while (Date.now() < until) {
     const o = await alpaca.getOrder(r.brokerId);
@@ -146,15 +157,33 @@ async function sendCloseNow(ledger, pos0, reason, leg) {
   return { pending: true, brokerExitId: r.brokerId };
 }
 
-// Options at Alpaca: SignalDesk's premium stop / target (exit-monitor.premiumExit) -> a closing order.
-async function exits(ledger) {
+// Options at Alpaca (Phase 83, every 5 s from exit-pass.fastOptions + the reconcile pass):
+//   a working close   stepped / booked / cleared (spread-exit.manage)
+//   stop (premiumExit, inside the 9:35-3:45 window)  -> a mid-pegged limit exit (the resting target is canceled first)
+//   no working order, window open  -> the take-profit rests at the broker as a limit at the target value
+const exitDeps = () => ({ api: alpaca, place: (pos, limit, id) => spreads.closeSpread(pos, id, limit), refresh: optionsData.refreshQuotes, fresh: optionsData.freshQuote, book });
+async function exits(ledger, now = Date.now()) {
   const out = [];
   const { premiumExit } = require('./exit-monitor');
-  for (const pos of ledger.getActivePositions().filter((p) => isAtAlpaca(p) && p.market === 'options' && !p.fillEstimated && !p.paperExitOrderId && p.optionsData && p.optionsData.exitRule)) {
-    const px = prices.getLatestPrice(pos.asset);
-    const reason = px > 0 ? premiumExit(pos, px) : null;
-    if (!reason) continue;
-    try { out.push({ id: pos.id, reason, ...(await sendClose(ledger, pos, reason, reason === 'STOP_LOSS' ? 'stop_loss' : 'take_profit')) }); } catch (err) { console.error(`[paper] ${pos.id}: ${reason} at ${BROKER} failed: ${err.message}`); }
+  const win = require('./options-exit-window');
+  const mine = () => ledger.getActivePositions().filter((p) => isAtAlpaca(p) && p.market === 'options' && !p.fillEstimated && p.optionsData && p.optionsData.exitRule && !closing.has(p.id));
+  for (const pos0 of mine()) {
+    try {
+      let pos = pos0;
+      if (pos.paperExitOrderId) {
+        const m = await spreadExit.manage(ledger, pos, exitDeps(), now);
+        if (m && m.trade) { out.push({ id: pos.id, reason: pos.paperExitReason, trade: m.trade }); continue; }
+        pos = ledger.getActivePositions().find((p) => p.id === pos0.id);
+        if (!pos || (pos.paperExitOrderId && !(pos.exitWork && pos.exitWork.kind === 'target'))) continue; // an exit is working
+      }
+      const px = prices.getLatestPrice(pos.asset);
+      const reason = px > 0 ? premiumExit(pos, px, now) : null;
+      if (reason === 'STOP_LOSS') { out.push({ id: pos.id, reason, ...(await sendClose(ledger, pos, reason, 'stop_loss')) }); continue; }
+      if (!pos.paperExitOrderId && win.inWindow(now)) {
+        const t = await spreadExit.placeTarget(ledger, pos, exitDeps(), now);
+        if (t && t.error) console.error(`[paper] ${pos.id}: resting target at ${BROKER} refused: ${t.error}`);
+      }
+    } catch (err) { console.error(`[paper] ${pos0.id}: option exit at ${BROKER} failed: ${err.message}`); }
   }
   return out;
 }
@@ -172,4 +201,4 @@ function handleClose(ws, id, { send, broadcast, ledger, inFlight, publish }) {
     .finally(() => { inFlight.delete(id); broadcast('POSITIONS_UPDATED', ledger.getActivePositions()); broadcast('JOURNAL_UPDATED', ledger.getTradeJournal()); if (publish) publish(); });
 }
 
-module.exports = { isClosing: (id) => closing.has(id), BROKER, enabled, isAtAlpaca, whyInternal, open, reconcileOwn, exits, sendClose, handleClose, book };
+module.exports = { isClosing: (id) => closing.has(id), BROKER, enabled, isAtAlpaca, whyInternal, open, reconcileOwn, exits, exitDeps, sendClose, handleClose, book };

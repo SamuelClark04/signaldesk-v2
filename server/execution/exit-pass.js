@@ -12,6 +12,7 @@
 const ledger = require('./paper-ledger');
 const prices = require('../market/latest-prices');
 const optionsData = require('../connectors/options-data');
+const session = require('../market/market-session');
 const { legSymbols } = require('./option-marks');
 const { reconcileLivePositions } = require('./reconciler');
 const recovery = require('./order-recovery'); // Phase 68 (P1-5): orders Coinbase took that the ledger never recorded
@@ -94,20 +95,40 @@ async function runOnce(broadcast) {
 }
 
 // Phase 73: PAPER stops / targets checked every FAST_EXIT_MS from the live prices, independent of the
-// 60 s pass (a slow scan never delays an exit). Local only: no network, same exit-monitor rules.
+// 60 s pass (a slow scan never delays an exit). Phase 83 (loop parity): options at Alpaca Paper are checked in
+// the same 5 s loop (alpaca-paper.exits: limit exits stepped, targets resting), and the held option legs are
+// re-quoted every QUOTE_REFRESH_MS during market hours so a stop never runs on a minute-old quote.
 const FAST_EXIT_MS = 5000;
+const QUOTE_REFRESH_MS = 12 * 1000;
 let fastTimer = null;
+let fastOptionsRun = null;
+let quotesAt = 0;
+async function fastOptions(broadcast = () => {}, now = Date.now()) {
+  const held = ledger.getActivePositions().filter((p) => p.market === 'options' && p.optionsData);
+  if (!held.length) return { quoted: false, exits: 0 };
+  let quoted = false;
+  if (session.isEquityMarketOpen(now) && now - quotesAt >= QUOTE_REFRESH_MS) {
+    quotesAt = now;
+    quoted = true;
+    try { await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), now, (u) => prices.getLatestPrice(u)); } catch (err) { console.error('[exits] option quotes failed:', err.message); }
+  }
+  const sent = await require('./alpaca-paper').exits(ledger, now);
+  if (sent.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
+  return { quoted, exits: sent.length };
+}
+function fastTick(broadcast = () => {}) {
+  try {
+    const closed = ledger.monitorPositions(prices.getLatestPrices());
+    closed.forEach(logClose);
+    if (closed.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
+  } catch (err) { console.error('[exits] fast paper exit check failed:', err.message); }
+  if (!fastOptionsRun) fastOptionsRun = fastOptions(broadcast).catch((err) => console.error('[exits] fast option exits failed:', err.message)).finally(() => { fastOptionsRun = null; });
+}
 function startFast(broadcast = () => {}) {
   if (fastTimer) return;
-  fastTimer = setInterval(() => {
-    try {
-      const closed = ledger.monitorPositions(prices.getLatestPrices());
-      closed.forEach(logClose);
-      if (closed.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
-    } catch (err) { console.error('[exits] fast paper exit check failed:', err.message); }
-  }, FAST_EXIT_MS);
+  fastTimer = setInterval(() => fastTick(broadcast), FAST_EXIT_MS);
   fastTimer.unref();
 }
 const stopFast = () => { clearInterval(fastTimer); fastTimer = null; };
 
-module.exports = { reconcile, run, logClose, startFast, stopFast, FAST_EXIT_MS };
+module.exports = { reconcile, run, logClose, startFast, stopFast, fastTick, fastOptions, FAST_EXIT_MS, QUOTE_REFRESH_MS };

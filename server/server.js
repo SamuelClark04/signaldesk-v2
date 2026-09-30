@@ -25,14 +25,13 @@ const prices = require('./market/latest-prices');
 const referencePrices = require('./market/reference-prices');
 const universe = require('./market/universe');
 const { STOCKS, CRYPTO, STREAMED_STOCKS } = universe;
-const { getHistory } = require('./connectors/history-bars');
 const brokerSync = require('./connectors/broker-sync');
 const { buildIntelligence } = require('./intelligence/dashboard-intel');
 
 // Zero trust: every request needs the access token (sign-in cookie), even from
 // 127.0.0.1 (a tunnel arrives from localhost). Local-only listener by default;
 // LAN_ACCESS=true opens it to the Wi-Fi. See security/access-policy.js.
-const { HOST, LAN_ACCESS, checkUpgrade, checkHttp, lanUrls, generatedToken } = require('./security/access-policy');
+const { HOST, LAN_ACCESS, checkUpgrade, lanUrls, generatedToken } = require('./security/access-policy');
 const authGate = require('./security/auth-gate');
 const tunnel = require('./security/tunnel-manager'); // Cloudflare quick tunnel (TUNNEL=off disables)
 const mobileLink = require('./security/mobile-link'); // Settings: live tunnel link + email re-send
@@ -51,21 +50,7 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), clients: wss.clients.size });
 });
 
-// Chart history: last 100 bars (?tf=1m default; 15m, 1h, 4h, 1d) from Alpaca (stocks) or
-// Coinbase (crypto, symbols with "-"). Read-only, but it spends broker API quota,
-// so it is guarded like the socket (origin + LAN token).
-app.get('/api/history/:symbol', async (req, res) => {
-  const verdict = checkHttp(req, PORT);
-  if (!verdict.ok) {
-    console.warn(`[security] rejected /api/history: ${verdict.reason}`);
-    return res.status(403).json({ error: 'forbidden' });
-  }
-  require('./connectors/coinbase-discovery').stream([String(req.params.symbol).toUpperCase()]); // a charted Coinbase gem joins the live stream
-  const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'), Date.now(), { chart: true }); // Phase 73: cached at once, refreshed behind
-  res.set('Cache-Control', 'no-store');
-  if (result.ok) return res.json(result.bars);
-  return res.status(result.status || 502).json({ error: result.error });
-});
+require('./http-routes').install(app, PORT); // /api/history (chart bars): origin + token guarded
 
 const server = http.createServer(app);
 

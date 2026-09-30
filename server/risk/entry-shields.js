@@ -1,6 +1,6 @@
 // Entry shields (Phase 81): three checks on NEW entries only, at staging (pipeline) and again at approval (order-router,
 // where a shielded setup stays pending). Never on exits: stops, targets, time exits and every close are untouched.
-//   DAILY_LOSS_LIMIT_REACHED  risk/daily-loss.js tripped today (the whole book, paper + live)
+//   DAILY_LOSS_LIMIT_REACHED  risk/daily-loss.js tripped today FOR THE SETUP'S BOOK (Phase 83: paper and live are separate)
 //   MACRO_SHIELD_ACTIVE       services/macro-calendar.js blackout (30 min before .. 15 min after a high-impact USD
 //                             release): stocks and options when settings.macroShield (default on); crypto too only with
 //                             settings.macroShieldCrypto (default off)
@@ -16,6 +16,7 @@ const dailyLoss = require('./daily-loss');
 const et = require('../services/et-time');
 const { sectorOf } = require('./sectors');
 const { holding, sameBook, manualOrder } = require('./portfolio-risk');
+const { spreadWidth } = require('./option-spread-width');
 
 const EQUITY = new Set(['stocks', 'options']);
 const DEFAULT_SECTOR_MAX = 1;
@@ -25,11 +26,16 @@ const usd = (x) => `${x < 0 ? '-' : ''}$${Math.abs(x).toFixed(2)}`;
 const sectorMax = (settings = {}) => (settings.maxTradesPerSector >= 1 ? Math.floor(settings.maxTradesPerSector) : DEFAULT_SECTOR_MAX);
 const macroScope = (order, settings = {}) => settings.macroShield !== false && (EQUITY.has(order.market) || (order.market === 'crypto' && settings.macroShieldCrypto === true));
 
-function killReason() {
-  const k = dailyLoss.current();
+// The book a setup would trade in: live when it executes / was sized for a live account (portfolio-risk's rule).
+const bookOfOrder = (o) => (o.execution === 'LIVE' || (!!o.sizingBasis && o.sizingBasis !== 'paper' && o.execution !== 'PAPER') ? 'live' : 'paper');
+
+function killReason(order = {}) {
+  const all = dailyLoss.current();
+  const book = bookOfOrder(order);
+  const k = all && all[book];
   if (!k || !k.active) return null;
-  return `DAILY_LOSS_LIMIT_REACHED: today's P/L ${usd(k.trippedPnl)} hit the -$${k.limit} daily loss limit at ${et.clock(k.trippedAt)}; `
-    + 'no new entries until tomorrow (open trades, stops, targets and closes keep working)';
+  return `DAILY_LOSS_LIMIT_REACHED: today's ${book} P/L ${usd(k.trippedPnl)} hit the -$${k.limit} ${book} daily loss limit at ${et.clock(k.trippedAt)}; `
+    + `no new ${book} entries until tomorrow (open trades, stops, targets and closes keep working)`;
 }
 
 function macroReason(order, settings, now) {
@@ -52,19 +58,6 @@ function sectorReason(order, positions = [], pending = [], settings = {}) {
   return `SECTOR_CAP_REACHED: Max ${max} open trade${max === 1 ? '' : 's'} for ${sector} (${names}); a new ${sector} setup waits until one closes`;
 }
 
-// An option position's net bid / ask from its legs' quotes -> { bid, ask, mid, width, pct } | null (no quotes).
-function spreadWidth(od) {
-  const legs = (od && od.legs) || [];
-  if (legs.length && legs.every((l) => l.bid >= 0 && l.ask > 0 && l.ask >= l.bid)) {
-    let ask = 0; let bid = 0;
-    for (const l of legs) { const r = l.ratio || 1; if (l.side === 'sell') { ask -= l.bid * r; bid -= l.ask * r; } else { ask += l.ask * r; bid += l.bid * r; } }
-    const mid = (ask + bid) / 2;
-    return mid > 0 ? { bid, ask, mid, width: ask - bid, pct: (ask - bid) / mid } : null;
-  }
-  if (od && od.netMid > 0 && od.combinedLegSpread >= 0) return { bid: od.netMid - od.combinedLegSpread / 2, ask: od.netMid + od.combinedLegSpread / 2, mid: od.netMid, width: od.combinedLegSpread, pct: od.combinedLegSpread / od.netMid };
-  return null;
-}
-
 function optionsSpreadReason(order) {
   if (order.market !== 'options') return null;
   const w = spreadWidth(order.optionsData);
@@ -77,7 +70,7 @@ function optionsSpreadReason(order) {
 // A setup (sized or not) -> null (allowed) or the rejection reason. ctx: { positions, pending (staging), settings, now }
 function check(order, { positions = [], pending = [], settings = {}, now = Date.now() } = {}) {
   if (exempt(order)) return null;
-  return killReason() || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings);
+  return killReason(order) || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings);
 }
 
 // Once per pass (and before an approval): re-measure today's P/L (may trip the kill switch). Never throws.
