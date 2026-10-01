@@ -5,7 +5,7 @@
 (() => {
   const SD = window.SignalDesk;
   const { $, el } = SD.ui;
-  const CHOICES = [['auto', 'Auto (first key connected)'], ['openai', 'OpenAI (gpt-4o-mini)'], ['gemini', 'Google Gemini (gemini-2.5-flash)']];
+  const CHOICES = [['auto', 'Auto (first key connected)'], ['openai', 'OpenAI (gpt-4o-mini)'], ['gemini', 'Google Gemini (gemini-flash-latest)']];
   let saved = null;
 
   function render(settings) {

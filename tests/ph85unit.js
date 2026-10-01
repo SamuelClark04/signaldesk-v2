@@ -143,6 +143,34 @@ hb.getHistory = async (symbol, tf) => {
   const cl = fs.readFileSync(path.join(__dirname, '..', 'client', 'components', 'ai-analyst.js'), 'utf8');
   check('the AI modal explains a tunnel 5xx page (not JSON) as "SignalDesk did not answer in time"', /SignalDesk did not answer in time \(HTTP \$\{res\.status\} from the tunnel\)/.test(cl));
 
+  // ---------- 6. Phase 85b: the Gemini generateContent body ("HTTP 400: Request contains an invalid argument") ----------
+  const AIa = require(S + 'services/ai-analyst');
+  const g = AIa.request({ provider: 'gemini', key: 'gm-test', model: AIa.GEMINI_DEFAULT }, 'SYS', 'USER').body;
+  check('Gemini body: systemInstruction { parts: [{ text }] }, contents [{ role: "user", parts: [{ text }] }], generationConfig { maxOutputTokens } and nothing else',
+    JSON.stringify(g) === JSON.stringify({ systemInstruction: { parts: [{ text: 'SYS' }] }, contents: [{ role: 'user', parts: [{ text: 'USER' }] }], generationConfig: { maxOutputTokens: 2048 } }), JSON.stringify(g));
+  check('default model gemini-flash-latest (2.5 Flash is closed to new keys); native generateContent, never the OpenAI-compatible endpoint',
+    AIa.GEMINI_DEFAULT === 'gemini-flash-latest' && /\/models\/gemini-flash-latest:generateContent$/.test(AIa.request({ provider: 'gemini', key: 'k', model: AIa.GEMINI_DEFAULT }, 's', 'u').url));
+  const th = (m) => AIa.geminiBody(m, 's', 'u').generationConfig.thinkingConfig;
+  check('thinkingConfig only where documented: 2.5 Flash / Flash-Lite get thinkingBudget 0; 2.0 Flash, Gemini 3.x and the alias get none (no temperature either)',
+    th('gemini-2.5-flash').thinkingBudget === 0 && th('gemini-2.5-flash-lite').thinkingBudget === 0 && !th('gemini-2.0-flash') && !th('gemini-3.8-flash') && !th('gemini-flash-latest')
+    && !('temperature' in AIa.geminiBody('gemini-2.5-flash', 's', 'u').generationConfig));
+  const sent = [];
+  const bad = { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT', details: [{ fieldViolations: [{ field: 'generation_config.thinking_config', description: 'not supported' }] }] } };
+  const gfetch = (seq) => async (url, init) => { sent.push(JSON.parse(init.body)); const r = seq.shift(); return { ok: r.status === 200, status: r.status, json: async () => r.body }; };
+  const wq = []; console.warn = (m) => wq.push(String(m));
+  const ok1 = await AIa.callProvider({ provider: 'gemini', key: 'k', model: 'gemini-2.5-flash' }, 's', 'u',
+    { fetchImpl: gfetch([{ status: 400, body: bad }, { status: 200, body: { candidates: [{ content: { parts: [{ text: 'ok' }] } }] } }]) });
+  console.warn = ow;
+  check('a 400 to a body with thinkingConfig is retried ONCE without it (logged with the field Google named), and answers',
+    ok1.ok && ok1.text === 'ok' && sent.length === 2 && sent[0].generationConfig.thinkingConfig && !sent[1].generationConfig.thinkingConfig && /generation_config\.thinking_config: not supported/.test(wq[0] || ''), wq[0]);
+  sent.length = 0;
+  const e1 = await AIa.callProvider({ provider: 'gemini', key: 'k', model: 'gemini-flash-latest' }, 's', 'u', { fetchImpl: gfetch([{ status: 400, body: bad }]) });
+  const e2 = await AIa.callProvider({ provider: 'gemini', key: 'k', model: 'gemini-2.5-flash' }, 's', 'u', { fetchImpl: gfetch([{ status: 404, body: { error: { message: 'not found' } } }]) });
+  const e3 = await AIa.callProvider({ provider: 'gemini', key: 'k', model: 'gemini-flash-latest' }, 's', 'u', { fetchImpl: gfetch([{ status: 200, body: { candidates: [{ finishReason: 'MAX_TOKENS', content: {} }] } }]) });
+  check('a bare body is not retried; the error names the field; a 404 says the model is closed to the key; an empty reply says why (MAX_TOKENS)',
+    sent.length === 3 && /HTTP 400: Request contains an invalid argument\. \[generation_config/.test(e1.error) && /not available to this key: unset GEMINI_MODEL/.test(e2.error) && /no text \(MAX_TOKENS\)/.test(e3.error),
+    `${e1.error} | ${e2.error} | ${e3.error}`);
+
   check('no request left the process (only the stubbed option snapshots)', fetched.every((u) => u.includes('/v1beta1/options/snapshots?') && u.startsWith(DEAD)));
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   fs.rmSync(DIR, { recursive: true, force: true });

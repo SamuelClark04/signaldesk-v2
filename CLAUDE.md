@@ -126,7 +126,7 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   position, risk vs budget, option net bid / ask + DTE, crypto spread, unrealized + R now, events, cached headlines, the equity / crypto
   tape; no keys / account ids); fixed risk-manager system prompt (facts only, no price / timing predictions, never widen a stop, 4 fixed
   headings + a "Recommendation:" / "Action:" verdict line); OpenAI (OPENAI_MODEL, gpt-4o-mini) or Gemini (GEMINI_MODEL,
-  gemini-2.5-flash) per settings.aiProvider (auto | openai | gemini); keys = encrypted vault providers `openai` / `gemini` (Settings >
+  default gemini-flash-latest since Phase 85b) per settings.aiProvider (auto | openai | gemini); keys = encrypted vault providers `openai` / `gemini` (Settings >
   Accounts & Connections, masked, Test & Save = a free model list) or .env, in request headers only; 15 s abort; clean errors (NO_KEY,
   PROVIDER, RATE_LIMIT, NOT_FOUND); 60 s cache per mode + id, 30 calls / hour; a timing claim in the reply is flagged. Client:
   components/ai-analyst.js modal ([AI Breakdown] on Approvals cards, [AI Briefing] under Close Now on the position panel),
@@ -138,7 +138,11 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   pipeline and the reconciler share one run: no duplicate resting targets) and handles positions side by side; the pipeline waits for it
   at most exit-pass EXITS_WAIT_MS (20 s). options-data.refreshQuotes(symbols, now, spotOf, maxAgeMs): the fast loop re-quotes at 12 s,
   an exit step at 10 s. Upstream failures answer 424, never a 5xx (through the Cloudflare tunnel a 502 / 503 reads as "server down"):
-  /api/history and /api/ai/analyze. Scratch runall.sh marks a suite that exits non-zero without FAIL lines as CRASH. Test: tests/ph85unit.js.
+  /api/history and /api/ai/analyze. Phase 85b (Gemini "HTTP 400: Request contains an invalid argument"): the
+  generateContent body is systemInstruction { parts: [{ text }] } + contents [{ role: 'user', parts: [{ text }] }] + generationConfig
+  { maxOutputTokens 2048 } only (no temperature; thinkingConfig { thinkingBudget: 0 } only for gemini-2.5-flash / -lite, the old code sent
+  it to every "flash" model); a 400 to a body with thinkingConfig is retried once bare; errors carry Google's fieldViolations; default
+  model = Google's alias gemini-flash-latest (2.5 Flash is closed to new keys); Test & Save also reads that model (404 = warning). Scratch runall.sh marks a suite that exits non-zero without FAIL lines as CRASH. Test: tests/ph85unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

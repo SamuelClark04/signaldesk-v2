@@ -86,8 +86,8 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x 
   const md2 = '## 1. Current State vs Original Thesis\nIntact.\n## 2. Market Noise vs Structural Invalidation\nNoise.\n## 3. Time Horizon & Greeks\nOK.\n## 4. Action Plan\nHold to stop / target.\nAction: HOLD';
   const g1 = await AI.analyze({ mode: 'IN_TRADE', payload: { id: eth.id } }, { settings: { aiProvider: 'gemini' }, fetchImpl: reply('gemini', md2), now: NOW });
   const r2 = seen[1];
-  check('Gemini (chosen in Settings): POST models/gemini-2.5-flash:generateContent, systemInstruction + contents, key in x-goog-api-key (never the URL); verdict HOLD',
-    g1.ok && g1.provider === 'gemini' && /\/models\/gemini-2\.5-flash:generateContent$/.test(r2.url) && r2.init.headers['x-goog-api-key'] === 'gm-test-gemini-0000' && !r2.url.includes('gm-test')
+  check('Gemini (chosen in Settings): POST models/gemini-flash-latest:generateContent, systemInstruction + contents, key in x-goog-api-key (never the URL); verdict HOLD',
+    g1.ok && g1.provider === 'gemini' && /\/models\/gemini-flash-latest:generateContent$/.test(r2.url) && r2.init.headers['x-goog-api-key'] === 'gm-test-gemini-0000' && !r2.url.includes('gm-test')
     && /Trading Desk Coach/.test(r2.body.systemInstruction.parts[0].text) && /"mode": "IN_TRADE"/.test(r2.body.contents[0].parts[0].text) && g1.verdict === 'HOLD', g1.error);
 
   // ---------- 5. timeout / errors / guardrail / rate limit ----------

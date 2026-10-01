@@ -62,7 +62,11 @@ const TESTS = {
     const base = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
     const res = await fetch(`${base}/models?pageSize=1`, { headers: { 'x-goog-api-key': f.apiKey }, signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status === 400 || res.status === 403 ? 'Google refused this key' : `Gemini HTTP ${res.status}`);
-    return { detail: `Gemini: key works; the AI Analyst uses ${process.env.GEMINI_MODEL || 'gemini-2.5-flash'}` };
+    // Phase 85b: the analyst's model itself (free metadata read): older models are closed to new keys.
+    const model = process.env.GEMINI_MODEL || require('../services/ai-analyst').GEMINI_DEFAULT;
+    const m = await fetch(`${base}/models/${encodeURIComponent(model)}`, { headers: { 'x-goog-api-key': f.apiKey }, signal: AbortSignal.timeout(10000) }).catch(() => null);
+    if (m && m.status === 404) return { detail: `Gemini: key works, but model ${model} is not available to it: set GEMINI_MODEL to a current model (e.g. unset it for gemini-flash-latest)` };
+    return { detail: `Gemini: key works; the AI Analyst uses ${model}` };
   },
   async gmail(f) {
     const port = Number(process.env.GMAIL_SMTP_PORT || 465);
