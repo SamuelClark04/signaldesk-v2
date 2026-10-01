@@ -20,4 +20,21 @@ function install(app, PORT) {
   });
 }
 
-module.exports = { install };
+// Phase 84: POST /api/ai/analyze { mode: 'PRE_TRADE' | 'IN_TRADE', payload: { id } } -> the AI Trade Analyst's reply
+// (services/ai-analyst.js). Same guard as the chart history (signed-in session + allowed origin). Never throws.
+function installAi(app, PORT) {
+  app.post('/api/ai/analyze', async (req, res) => {
+    const verdict = checkHttp(req, PORT);
+    if (!verdict.ok) return res.status(403).json({ ok: false, error: 'forbidden' });
+    res.set('Cache-Control', 'no-store');
+    try {
+      const r = await require('./services/ai-analyst').analyze(req.body || {});
+      return res.status(r.ok ? 200 : { BAD_REQUEST: 400, NOT_FOUND: 404, NO_KEY: 503, RATE_LIMIT: 429 }[r.code] || 502).json(r);
+    } catch (err) {
+      console.error(`[ai] analyze failed: ${err.message}`);
+      return res.status(500).json({ ok: false, error: 'AI Analyst failed unexpectedly; see the server log' });
+    }
+  });
+}
+
+module.exports = { install, installAi };

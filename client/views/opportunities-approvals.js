@@ -102,7 +102,7 @@
       ...[SD.tradeContext.block(o, { why: false })].filter(Boolean), // Phase 79: expected hold + setup vs live score (Moonshots)
       el('p', { className: 'apv-thesis', textContent: o.thesis ? o.thesis.split(/(?<=\.)\s/).slice(0, 2).join(' ') : '' }),
       SD.tradeAmount.control(staged, amount, ctx.rerender),
-      el('div', { className: 'apv-actions' }, [approve, review, dismiss]),
+      el('div', { className: 'apv-actions' }, [approve, SD.aiAnalyst.button('PRE_TRADE', o.id, `${o.asset} ${o.setupType || ''}`.trim(), { disabled: !ctx.online }), review, dismiss]), // Phase 84
     ]);
   }
 

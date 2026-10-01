@@ -43,6 +43,7 @@ const SETTINGS_RULES = {
   // Phase 83: one kill switch per book ($, 0 = off): paper losses never pause live entries, and the reverse.
   dailyLossLimitPaper: { type: 'number', default: 150, min: 0, max: 1000000 },
   dailyLossLimitLive: { type: 'number', default: 25, min: 0, max: 1000000 },
+  aiProvider: { type: 'choice', default: 'auto', values: ['auto', 'openai', 'gemini'] }, // Phase 84: AI Trade Analyst (keys in the vault / .env)
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 

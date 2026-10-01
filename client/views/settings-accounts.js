@@ -12,8 +12,8 @@
   const busy = new Set(); // providers with a Test & Save in flight
   const notes = new Map(); // provider -> { ok, text }
   const drafts = new Map(); // provider -> { field: value } typed, not yet saved (never persisted)
-  const LABEL = { key: 'API key', secret: 'Secret key', keyName: 'API key name', privateKey: 'Private key (EC, PEM)', passphrase: 'Passphrase', email: 'Gmail address', appPassword: 'App Password', alertTo: 'Send links to (optional)' };
-  const SECRET = new Set(['secret', 'privateKey', 'passphrase', 'appPassword']);
+  const LABEL = { key: 'API key', secret: 'Secret key', keyName: 'API key name', privateKey: 'Private key (EC, PEM)', passphrase: 'Passphrase', email: 'Gmail address', appPassword: 'App Password', alertTo: 'Send links to (optional)', apiKey: 'API key' };
+  const SECRET = new Set(['secret', 'privateKey', 'passphrase', 'appPassword', 'apiKey']); // apiKey: the AI Analyst keys (Phase 84)
   const $ = (id) => document.getElementById(id);
 
   function card(id, p) {

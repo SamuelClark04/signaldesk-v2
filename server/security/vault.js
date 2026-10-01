@@ -22,6 +22,8 @@ const PROVIDERS = {
   coinbase: { label: 'Coinbase Advanced', hint: 'CDP API key name (organizations/.../apiKeys/...) + its EC private key', fields: { keyName: 'COINBASE_API_KEY', privateKey: 'COINBASE_API_SECRET' }, preview: 'keyName' },
   kraken: { label: 'Kraken Pro', hint: 'API key + private key (Query Funds, Orders & Trades permissions)', fields: { key: 'KRAKEN_API_KEY', secret: 'KRAKEN_API_SECRET' }, preview: 'key' },
   okx: { label: 'OKX US', hint: 'API key, secret key and passphrase (Read + Trade)', fields: { key: 'OKX_API_KEY', secret: 'OKX_API_SECRET', passphrase: 'OKX_API_PASSPHRASE' }, preview: 'key' },
+  openai: { label: 'OpenAI (AI Analyst)', hint: 'API key from platform.openai.com (used only for the AI Breakdown / Briefing buttons)', fields: { apiKey: 'OPENAI_API_KEY' }, preview: 'apiKey' }, // Phase 84
+  gemini: { label: 'Google Gemini (AI Analyst)', hint: 'API key from aistudio.google.com (used only for the AI Breakdown / Briefing buttons)', fields: { apiKey: 'GEMINI_API_KEY' }, preview: 'apiKey' },
   gmail: { label: 'Gmail link emailer', hint: 'Gmail address + a 16-character App Password (Google Account > Security > App passwords)', fields: { email: 'SMTP_USER', appPassword: 'SMTP_PASS', alertTo: 'ALERT_EMAIL_TO' },
     optional: ['alertTo'], extra: (f) => ({ SMTP_HOST: process.env.GMAIL_SMTP_HOST || 'smtp.gmail.com', SMTP_PORT: process.env.GMAIL_SMTP_PORT || '465', SMTP_FROM: f.email, ALERT_EMAIL_TO: f.alertTo || f.email }), preview: 'email' },
 };

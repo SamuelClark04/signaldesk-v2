@@ -51,6 +51,19 @@ const TESTS = {
     if (!r.ok) throw new Error(r.error);
     return { detail: 'OKX US: trading account readable' };
   },
+  // Phase 84: AI Analyst keys: a read-only model list (no tokens spent). Keys in headers only.
+  async openai(f) {
+    const base = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const res = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${f.apiKey}` }, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(res.status === 401 ? 'OpenAI refused this key' : `OpenAI HTTP ${res.status}`);
+    return { detail: `OpenAI: key works; the AI Analyst uses ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}` };
+  },
+  async gemini(f) {
+    const base = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
+    const res = await fetch(`${base}/models?pageSize=1`, { headers: { 'x-goog-api-key': f.apiKey }, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(res.status === 400 || res.status === 403 ? 'Google refused this key' : `Gemini HTTP ${res.status}`);
+    return { detail: `Gemini: key works; the AI Analyst uses ${process.env.GEMINI_MODEL || 'gemini-2.5-flash'}` };
+  },
   async gmail(f) {
     const port = Number(process.env.GMAIL_SMTP_PORT || 465);
     const t = require('nodemailer').createTransport({ host: process.env.GMAIL_SMTP_HOST || 'smtp.gmail.com', port, secure: port === 465, auth: { user: f.email, pass: f.appPassword.replace(/\s+/g, '') },

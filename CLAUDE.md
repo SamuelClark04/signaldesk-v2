@@ -23,6 +23,8 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   data is proxied) and SMTP at a local sink (`SMTP_HOST=127.0.0.1`, `SMTP_PORT=2525`). The
   user's `.env` has real keys and `cryptoMode: live`: never APPROVE / close LIVE positions
   against real Coinbase. Unit tests stub `connectors/coinbase-api` and `coinbase-orders`.
+  AI keys (Phase 84): every test / harness sets `OPENAI_API_KEY` / `GEMINI_API_KEY` blank and `OPENAI_BASE_URL` /
+  `GEMINI_BASE_URL` dead (a provider call costs money); tests inject a fake fetch into ai-analyst.
 - **Secrets:** never print or commit `.env` values; API keys travel in headers only.
 - **Credentials vault (Phase 73)**: `security/vault.js` (server/data/credentials.enc.json, AES-256-GCM keyed from
   LAN_ACCESS_TOKEN) is applied OVER .env at server boot (`server/boot.js`). A vault on this PC could override a
@@ -119,6 +121,16 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   9:35-3:45 window, canceled + confirmed before any other exit; a target that filled first is booked). exit-pass fast loop (5 s)
   runs Alpaca option exits too (alpaca-paper.exits) and re-quotes held legs every 12 s in market hours. Test: tests/ph83unit.js
   (fake Alpaca). Ad-hoc load checks: node -r <scratchpad>/safe-env.js (never the real ledger).
+- **AI Trade Analyst (Phase 84)**: on demand only. POST /api/ai/analyze { mode PRE_TRADE | IN_TRADE, payload: { id } } (http-routes.installAi,
+  checkHttp guard) -> services/ai-analyst.js: the facts are REBUILT ON THE SERVER from the ledger by id (services/ai-payload.js: setup /
+  position, risk vs budget, option net bid / ask + DTE, crypto spread, unrealized + R now, events, cached headlines, the equity / crypto
+  tape; no keys / account ids); fixed risk-manager system prompt (facts only, no price / timing predictions, never widen a stop, 4 fixed
+  headings + a "Recommendation:" / "Action:" verdict line); OpenAI (OPENAI_MODEL, gpt-4o-mini) or Gemini (GEMINI_MODEL,
+  gemini-2.5-flash) per settings.aiProvider (auto | openai | gemini); keys = encrypted vault providers `openai` / `gemini` (Settings >
+  Accounts & Connections, masked, Test & Save = a free model list) or .env, in request headers only; 15 s abort; clean errors (NO_KEY,
+  PROVIDER, RATE_LIMIT, NOT_FOUND); 60 s cache per mode + id, 30 calls / hour; a timing claim in the reply is flagged. Client:
+  components/ai-analyst.js modal ([AI Breakdown] on Approvals cards, [AI Briefing] under Close Now on the position panel),
+  lib/mini-markdown.js renders text nodes only (never HTML). Test: tests/ph84unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

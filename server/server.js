@@ -51,6 +51,7 @@ app.get('/api/health', (req, res) => {
 });
 
 require('./http-routes').install(app, PORT); // /api/history (chart bars): origin + token guarded
+require('./http-routes').installAi(app, PORT); // Phase 84: POST /api/ai/analyze (AI Trade Analyst)
 
 const server = http.createServer(app);
 
