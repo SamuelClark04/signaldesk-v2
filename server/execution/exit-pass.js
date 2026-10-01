@@ -54,6 +54,12 @@ function reconcile(broadcast = () => {}) {
 
 // Phase 73: one run at a time (a pass the watchdog released may still be inside it).
 let runningExits = null;
+const EXITS_WAIT_MS = 20 * 1000;
+const LATE = Symbol('late');
+async function within(p, ms) {
+  let timer;
+  try { return await Promise.race([p, new Promise((r) => { timer = setTimeout(() => r(LATE), ms); })]); } finally { clearTimeout(timer); }
+}
 function run(broadcast = () => {}) {
   if (!runningExits) runningExits = runOnce(broadcast).finally(() => { runningExits = null; });
   return runningExits;
@@ -72,10 +78,12 @@ async function runOnce(broadcast) {
     }
     out.positionsChanged = true;
   }
-  // Options held at Alpaca Paper (Phase 71): a premium stop / target sends the closing order there.
+  // Options held at Alpaca Paper (Phase 71): a premium stop / target sends the closing order there. Phase 85: the pass waits
+  // at most EXITS_WAIT_MS (the run is shared with the 5 s loop and finishes there; Alpaca calls time out at 8 s each).
   try {
-    const sent = await require('./alpaca-paper').exits(ledger);
-    if (sent.length) { out.positionsChanged = true; out.journalChanged = true; }
+    const sent = await within(require('./alpaca-paper').exits(ledger), EXITS_WAIT_MS);
+    if (sent === LATE) console.warn(`[pipeline] Alpaca Paper option exits still running after ${EXITS_WAIT_MS / 1000} s; the pass moves on (the 5 s exit loop keeps them going)`);
+    else if (sent.length) { out.positionsChanged = true; out.journalChanged = true; }
   } catch (err) { console.error('[pipeline] Alpaca Paper exits failed:', err.message); }
   // Phase 82: every option spread closed at 2 DTE from 10:00 AM ET (time-exits.js); nothing else closes on time.
   try {
@@ -110,7 +118,7 @@ async function fastOptions(broadcast = () => {}, now = Date.now()) {
   if (session.isEquityMarketOpen(now) && now - quotesAt >= QUOTE_REFRESH_MS) {
     quotesAt = now;
     quoted = true;
-    try { await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), now, (u) => prices.getLatestPrice(u)); } catch (err) { console.error('[exits] option quotes failed:', err.message); }
+    try { await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), now, (u) => prices.getLatestPrice(u), QUOTE_REFRESH_MS); } catch (err) { console.error('[exits] option quotes failed:', err.message); }
   }
   const sent = await require('./alpaca-paper').exits(ledger, now);
   if (sent.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
@@ -131,4 +139,4 @@ function startFast(broadcast = () => {}) {
 }
 const stopFast = () => { clearInterval(fastTimer); fastTimer = null; };
 
-module.exports = { reconcile, run, logClose, startFast, stopFast, fastTick, fastOptions, FAST_EXIT_MS, QUOTE_REFRESH_MS };
+module.exports = { reconcile, run, logClose, startFast, stopFast, fastTick, fastOptions, within, LATE, FAST_EXIT_MS, QUOTE_REFRESH_MS, EXITS_WAIT_MS };

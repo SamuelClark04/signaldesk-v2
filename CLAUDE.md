@@ -131,6 +131,14 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   PROVIDER, RATE_LIMIT, NOT_FOUND); 60 s cache per mode + id, 30 calls / hour; a timing claim in the reply is flagged. Client:
   components/ai-analyst.js modal ([AI Breakdown] on Approvals cards, [AI Briefing] under Close Now on the position panel),
   lib/mini-markdown.js renders text nodes only (never HTML). Test: tests/ph84unit.js.
+- **No serial network waits in a pass (Phase 85)**: intelligence/watch-triggers.js requests every watched symbol's daily (+ crypto 1h)
+  history AT ONCE (Promise.allSettled), waits at most FETCH_BUDGET_MS (8 s), then computes from the cache (peekDailyBars); a slow host
+  fills it for the next pass (one warning per 5 min). The watchdog warning lists the stalled pass's stage times (loop-pace timeline:
+  "stage times: exit-pass 1.2 s, ..., watch-triggers 31.0 s (still running)"). alpaca-paper.exits is single-flight (the 5 s loop, the
+  pipeline and the reconciler share one run: no duplicate resting targets) and handles positions side by side; the pipeline waits for it
+  at most exit-pass EXITS_WAIT_MS (20 s). options-data.refreshQuotes(symbols, now, spotOf, maxAgeMs): the fast loop re-quotes at 12 s,
+  an exit step at 10 s. Upstream failures answer 424, never a 5xx (through the Cloudflare tunnel a 502 / 503 reads as "server down"):
+  /api/history and /api/ai/analyze. Scratch runall.sh marks a suite that exits non-zero without FAIL lines as CRASH. Test: tests/ph85unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

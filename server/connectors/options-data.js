@@ -191,8 +191,9 @@ function selectContract(contracts, c, now = Date.now(), spot = null) {
 // Used to mark open option positions and to book paper exits at the real bid.
 // spotOf(underlying) -> the underlying's price at quote time (kept as `spot`: option
 // marks move by net delta x the underlying's change until the next quote, Phase 59).
-async function refreshQuotes(symbols, now = Date.now(), spotOf = null) {
-  const stale = [...new Set(symbols)].filter((s) => parseOcc(s) && !(quotes.has(s) && now - quotes.get(s).at < QUOTE_TTL_MS));
+// maxAgeMs (Phase 85): a quote younger than this is kept (default QUOTE_TTL_MS; the 5 s exit loop re-quotes every 12 s).
+async function refreshQuotes(symbols, now = Date.now(), spotOf = null, maxAgeMs = QUOTE_TTL_MS) {
+  const stale = [...new Set(symbols)].filter((s) => parseOcc(s) && !(quotes.has(s) && now - quotes.get(s).at < maxAgeMs));
   if (!stale.length || !hasKeys()) return;
   try {
     const body = await getJson(`${dataBase()}/v1beta1/options/snapshots?symbols=${stale.map(encodeURIComponent).join(',')}&feed=${feed()}`);

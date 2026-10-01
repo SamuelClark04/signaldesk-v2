@@ -52,7 +52,10 @@
     try {
       const res = await fetch('/api/ai/analyze', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, payload: { id } }) });
-      r = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+      // Not JSON: the tunnel / proxy answered, not SignalDesk (a 502 / 504 while the server restarts or is busy).
+      r = await res.json().catch(() => ({ ok: false, error: res.status >= 500
+        ? `SignalDesk did not answer in time (HTTP ${res.status} from the tunnel): the server may be restarting or busy. Try again in a minute.`
+        : `HTTP ${res.status}` }));
     } catch (err) {
       r = { ok: false, error: `Could not reach SignalDesk (${err.message})` };
     }

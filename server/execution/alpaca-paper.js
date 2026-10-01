@@ -161,30 +161,41 @@ async function sendCloseNow(ledger, pos0, reason, leg) {
 //   a working close   stepped / booked / cleared (spread-exit.manage)
 //   stop (premiumExit, inside the 9:35-3:45 window)  -> a mid-pegged limit exit (the resting target is canceled first)
 //   no working order, window open  -> the take-profit rests at the broker as a limit at the target value
-const exitDeps = () => ({ api: alpaca, place: (pos, limit, id) => spreads.closeSpread(pos, id, limit), refresh: optionsData.refreshQuotes, fresh: optionsData.freshQuote, book });
-async function exits(ledger, now = Date.now()) {
+// Phase 85: ONE run at a time (the fast loop, the pipeline's exit pass and the reconciler share it: two runs could each
+// rest a take-profit, the second orphaning the first), positions handled side by side (Promise.allSettled: one slow
+// Alpaca reply never holds the others); every Alpaca call has its own 8 s timeout (alpaca-api TIMEOUT_MS).
+// An exit step re-quotes its legs when their quotes are older than EXIT_QUOTE_MAX_AGE_MS.
+const EXIT_QUOTE_MAX_AGE_MS = 10 * 1000;
+const exitDeps = () => ({ api: alpaca, place: (pos, limit, id) => spreads.closeSpread(pos, id, limit), book, fresh: optionsData.freshQuote,
+  refresh: (symbols, now) => optionsData.refreshQuotes(symbols, now, (u) => prices.getLatestPrice(u), EXIT_QUOTE_MAX_AGE_MS) });
+let exitsRun = null;
+function exits(ledger, now = Date.now()) {
+  if (!exitsRun) exitsRun = exitsOnce(ledger, now).finally(() => { exitsRun = null; });
+  return exitsRun;
+}
+async function exitsOnce(ledger, now) {
   const out = [];
   const { premiumExit } = require('./exit-monitor');
   const win = require('./options-exit-window');
   const mine = () => ledger.getActivePositions().filter((p) => isAtAlpaca(p) && p.market === 'options' && !p.fillEstimated && p.optionsData && p.optionsData.exitRule && !closing.has(p.id));
-  for (const pos0 of mine()) {
+  await Promise.allSettled(mine().map(async (pos0) => {
     try {
       let pos = pos0;
       if (pos.paperExitOrderId) {
         const m = await spreadExit.manage(ledger, pos, exitDeps(), now);
-        if (m && m.trade) { out.push({ id: pos.id, reason: pos.paperExitReason, trade: m.trade }); continue; }
+        if (m && m.trade) { out.push({ id: pos.id, reason: pos.paperExitReason, trade: m.trade }); return; }
         pos = ledger.getActivePositions().find((p) => p.id === pos0.id);
-        if (!pos || (pos.paperExitOrderId && !(pos.exitWork && pos.exitWork.kind === 'target'))) continue; // an exit is working
+        if (!pos || (pos.paperExitOrderId && !(pos.exitWork && pos.exitWork.kind === 'target'))) return; // an exit is working
       }
       const px = prices.getLatestPrice(pos.asset);
       const reason = px > 0 ? premiumExit(pos, px, now) : null;
-      if (reason === 'STOP_LOSS') { out.push({ id: pos.id, reason, ...(await sendClose(ledger, pos, reason, 'stop_loss')) }); continue; }
-      if (!pos.paperExitOrderId && win.inWindow(now)) {
+      if (reason === 'STOP_LOSS') { out.push({ id: pos.id, reason, ...(await sendClose(ledger, pos, reason, 'stop_loss')) }); return; }
+      if (!pos.paperExitOrderId && win.inWindow(now) && !closing.has(pos.id)) { // never next to a [Close] being sent
         const t = await spreadExit.placeTarget(ledger, pos, exitDeps(), now);
         if (t && t.error) console.error(`[paper] ${pos.id}: resting target at ${BROKER} refused: ${t.error}`);
       }
     } catch (err) { console.error(`[paper] ${pos0.id}: option exit at ${BROKER} failed: ${err.message}`); }
-  }
+  }));
   return out;
 }
 

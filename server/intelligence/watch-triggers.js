@@ -13,7 +13,11 @@
 // Output per symbol: { level, label, distancePct (level vs price, signed), source, price, at }.
 // Read-only: daily bars are cached for hours (daily-bars.js), 1h candles here
 // for HOUR_TTL_MS, so a 60 s pass never turns into a poll loop.
-const { getDailyBars } = require('../connectors/daily-bars');
+// Phase 85: never waits on the network symbol by symbol. Every missing / stale history is requested AT ONCE
+// (Promise.allSettled) and awaited at most FETCH_BUDGET_MS; the levels come from the cache, and a history still
+// loading (a slow Coinbase / Alpaca host, the shared Coinbase pace queue) fills it for the next pass. The VM log:
+// "[pipeline] pass exceeded 45 s (during watch-triggers)".
+const { getDailyBars, peekDailyBars } = require('../connectors/daily-bars');
 const { getHistory } = require('../connectors/history-bars');
 const equityDay = require('../strategies/1-equity-day');
 const cryptoSwing = require('../strategies/2-crypto-swing');
@@ -22,7 +26,10 @@ const { pace } = require('../execution/loop-pace'); // Phase 72
 
 const HOUR_TTL_MS = 15 * 60 * 1000;
 const FLUSH_PCT = 0.02;
+const FETCH_BUDGET_MS = 8000;
+const SLOW_LOG_MS = 5 * 60 * 1000;
 const hourly = new Map(); // symbol -> { at, bars }
+let slowLoggedAt = 0;
 
 const decimals = (x) => (x >= 100 ? 2 : x >= 1 ? 4 : Math.min(10, 3 - Math.floor(Math.log10(x))));
 const round = (x) => { const f = 10 ** decimals(x); return Math.round(x * f) / f; };
@@ -62,6 +69,18 @@ async function hourlyBars(symbol, now) {
   return bars;
 }
 
+// Request every symbol's daily (+ crypto 1h) history at once; wait at most budgetMs. -> { pending: [labels] }
+async function warm(items, now, budgetMs = FETCH_BUDGET_MS) {
+  const pending = new Set();
+  const job = (label, p) => { pending.add(label); return p.finally(() => pending.delete(label)); };
+  const all = Promise.allSettled(items.flatMap((it) => [job(`${it.symbol} 1d`, getDailyBars(it.symbol, now)),
+    ...(it.market === 'crypto' ? [job(`${it.symbol} 1h`, hourlyBars(it.symbol, now))] : [])]));
+  let timer;
+  await Promise.race([all, new Promise((r) => { timer = setTimeout(r, budgetMs); })]);
+  clearTimeout(timer);
+  return { pending: [...pending] };
+}
+
 function flushLevel(bars, price) {
   if (bars.length < 21) return null;
   const mean = sma(bars, 20);
@@ -73,7 +92,12 @@ function flushLevel(bars, price) {
 
 // items: watchlist items ({ symbol, market, lastPrice }); latestPrices: fresh prices;
 // stockBars: today's 1m bars per stock. -> { SYMBOL: trigger }.
-async function computeTriggers(items, latestPrices, stockBars, now = Date.now()) {
+async function computeTriggers(items, latestPrices, stockBars, now = Date.now(), { budgetMs = FETCH_BUDGET_MS } = {}) {
+  const { pending } = await warm(items.filter((it) => it && it.symbol), now, budgetMs);
+  if (pending.length && Date.now() - slowLoggedAt >= SLOW_LOG_MS) {
+    slowLoggedAt = Date.now();
+    console.warn(`[watch-triggers] ${pending.length} histories still loading after ${budgetMs / 1000} s (${pending.slice(0, 6).join(', ')}${pending.length > 6 ? ', ...' : ''}); levels from cached bars, the rest next pass`);
+  }
   let set = {};
   try { set = require('../execution/ledger-store').getSettings(); } catch { /* defaults */ }
   const strategy = [...equityDay.proximity(stockBars), ...cryptoSwing.proximity(latestPrices), ...optionsSystem.proximity(latestPrices)]
@@ -86,8 +110,8 @@ async function computeTriggers(items, latestPrices, stockBars, now = Date.now())
     const price = live > 0 ? live : item.lastPrice;
     if (!(price > 0)) continue;
     try {
-      const cands = [...dailyLevels(await getDailyBars(symbol, now), price)];
-      if (item.market === 'crypto') { const f = flushLevel(await hourlyBars(symbol, now), price); if (f) cands.push(f); }
+      const cands = [...dailyLevels(peekDailyBars(symbol, now), price)];
+      if (item.market === 'crypto') { const f = flushLevel((hourly.get(symbol) || { bars: [] }).bars, price); if (f) cands.push(f); }
       else { const v = sessionVwap(lookup(stockBars, symbol)); if (v && price < v) cands.push({ level: v, label: `Reclaim of session VWAP ${round(v)}`, source: 'VWAP' }); }
       for (const p of strategy.filter((x) => x.symbol === symbol)) cands.push({ level: p.trigger, label: p.label, source: p.strategyId });
       const valid = cands.filter((c) => c.level > 0);
@@ -101,4 +125,4 @@ async function computeTriggers(items, latestPrices, stockBars, now = Date.now())
   return out;
 }
 
-module.exports = { computeTriggers, dailyLevels, sessionVwap, flushLevel };
+module.exports = { computeTriggers, dailyLevels, sessionVwap, flushLevel, warm, FETCH_BUDGET_MS };

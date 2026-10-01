@@ -42,7 +42,10 @@ async function during(name, fn) {
   const prev = current;
   current = name;
   seen.add(name);
-  try { return await fn(); } finally { current = prev; }
+  const s = passCtx.getStore(); // Phase 85: the pass's stage timeline (named in the watchdog warning)
+  const rec = s && s.stages.length < 40 ? { name, start: Date.now(), end: null } : null;
+  if (rec) s.stages.push(rec);
+  try { return await fn(); } finally { current = prev; if (rec) rec.end = Date.now(); }
 }
 
 function watch() {
@@ -72,7 +75,14 @@ const { AsyncLocalStorage } = require('async_hooks');
 const PASS_WATCHDOG_MS = num(process.env.PASS_WATCHDOG_MS, 45000);
 const passCtx = new AsyncLocalStorage();
 let currentPass = 0;
-const inPass = (fn) => { const gen = ++currentPass; return passCtx.run({ gen }, fn); };
+let lastPass = null; // the newest pass's store { gen, start, stages }
+const inPass = (fn) => { const gen = ++currentPass; lastPass = { gen, start: Date.now(), stages: [] }; return passCtx.run(lastPass, fn); };
+// "broker-reconcile 0.3 s, exit-pass 2.1 s, crypto-intraday 15.0 s, watch-triggers 31.2 s (still running)"
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+function timeline(pass, now = Date.now()) {
+  if (!pass || !pass.stages.length) return '';
+  return pass.stages.map((x) => `${x.name} ${secs((x.end || now) - x.start)}${x.end ? '' : ' (still running)'}`).join(', ');
+}
 // Only a pass the watchdog RELEASED is abandoned (Phase 75): a strategy still finishing a finished pass's work in the
 // background (strategy-runner's budget) keeps running when the next pass starts.
 const dead = new Set();
@@ -87,10 +97,11 @@ async function watchdog(pass, ms = PASS_WATCHDOG_MS) {
     if (r !== TIMED_OUT) return r;
     dead.add(currentPass); // the stalled pass stops at its next pace()
     if (dead.size > 100) dead.delete(dead.values().next().value);
-    console.warn(`[pipeline] pass exceeded ${ms >= 10000 ? Math.round(ms / 1000) : (ms / 1000).toFixed(1)} s (during ${[...seen].join(', ') || current}); lock released, the stalled pass is abandoned at its next step`);
+    const steps = lastPass && lastPass.gen === currentPass ? timeline(lastPass) : '';
+    console.warn(`[pipeline] pass exceeded ${ms >= 10000 ? Math.round(ms / 1000) : (ms / 1000).toFixed(1)} s (during ${[...seen].join(', ') || current}); lock released, the stalled pass is abandoned at its next step${steps ? `; stage times: ${steps}` : ''}`);
     return { timedOut: true };
   } finally { clearTimeout(timer); }
 }
 const TIMED_OUT = Symbol('timed out');
 
-module.exports = { pace, during, watch, stats, inPass, watchdog, checkAlive, abandoned, SLICE_MS, PAUSE_MS, PASS_WATCHDOG_MS };
+module.exports = { pace, during, watch, stats, inPass, watchdog, checkAlive, abandoned, timeline, SLICE_MS, PAUSE_MS, PASS_WATCHDOG_MS };

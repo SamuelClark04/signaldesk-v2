@@ -16,7 +16,9 @@ function install(app, PORT) {
     const result = await getHistory(req.params.symbol, String(req.query.tf || '1m'), Date.now(), { chart: true }); // Phase 73: cached at once, refreshed behind
     res.set('Cache-Control', 'no-store');
     if (result.ok) return res.json(result.bars);
-    return res.status(result.status || 502).json({ error: result.error });
+    // Phase 85: a market-data host failing (timeout, open circuit) is 424, never 502 / 503: through the Cloudflare tunnel a 5xx
+    // reads as "SignalDesk is down" (and may be swapped for Cloudflare's own error page).
+    return res.status(result.status >= 500 || !result.status ? 424 : result.status).json({ error: result.error });
   });
 }
 
@@ -29,7 +31,9 @@ function installAi(app, PORT) {
     res.set('Cache-Control', 'no-store');
     try {
       const r = await require('./services/ai-analyst').analyze(req.body || {});
-      return res.status(r.ok ? 200 : { BAD_REQUEST: 400, NOT_FOUND: 404, NO_KEY: 503, RATE_LIMIT: 429 }[r.code] || 502).json(r);
+      // Phase 85: never a 5xx for an answer we gave (no key, the AI provider failed): through the Cloudflare tunnel a 502 / 503
+      // reads as "SignalDesk is down". 424 = the AI provider (a dependency) failed; the JSON says why.
+      return res.status(r.ok ? 200 : { BAD_REQUEST: 400, NOT_FOUND: 404, NO_KEY: 424, RATE_LIMIT: 429 }[r.code] || 424).json(r);
     } catch (err) {
       console.error(`[ai] analyze failed: ${err.message}`);
       return res.status(500).json({ ok: false, error: 'AI Analyst failed unexpectedly; see the server log' });
