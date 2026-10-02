@@ -9,6 +9,9 @@
 //   OPTIONS_SPREAD_TOO_WIDE   (Phase 82) an option position whose NET natural bid/ask (buy legs at ask / bid, sell legs at
 //                             bid / ask, from the legs' quotes) is wider than 25% of its mid: it would lose that much
 //                             getting in and out
+//   OPTIONS_DAILY_ENTRY_CAP / OPTIONS_SAME_DIRECTION_GAP (Phase 87, risk/option-pacing.js) automated option entries: at most
+//                             settings.maxOptionEntriesPerDay a New York day (default 2; 0 = off), none within 60 min of a
+//                             same-direction one
 // Manual Trade Ticket orders, Portfolio Pilot and adopted / external holdings are never blocked (the user's own call, and
 // long-term allocations); open manual trades still occupy their sector.
 const macro = require('../services/macro-calendar');
@@ -17,6 +20,7 @@ const et = require('../services/et-time');
 const { sectorOf } = require('./sectors');
 const { holding, sameBook, manualOrder } = require('./portfolio-risk');
 const { spreadWidth } = require('./option-spread-width');
+const { pacingReason } = require('./option-pacing');
 
 const EQUITY = new Set(['stocks', 'options']);
 const DEFAULT_SECTOR_MAX = 1;
@@ -67,10 +71,11 @@ function optionsSpreadReason(order) {
     + `(max ${Math.round(MAX_OPTION_SPREAD_PCT * 100)}%): getting in and out would cost that much`;
 }
 
-// A setup (sized or not) -> null (allowed) or the rejection reason. ctx: { positions, pending (staging), settings, now }
-function check(order, { positions = [], pending = [], settings = {}, now = Date.now() } = {}) {
+// A setup (sized or not) -> null (allowed) or the rejection reason. ctx: { positions, pending (staging), journal, settings, now }
+function check(order, { positions = [], pending = [], journal = [], settings = {}, now = Date.now() } = {}) {
   if (exempt(order)) return null;
-  return killReason(order) || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings);
+  return killReason(order) || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings)
+    || pacingReason(order, { positions, pending, journal, settings, now });
 }
 
 // Once per pass (and before an approval): re-measure today's P/L (may trip the kill switch). Never throws.

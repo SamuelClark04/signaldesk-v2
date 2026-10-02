@@ -152,7 +152,7 @@ async function pipelinePass() {
     if (stack) { recordRejection(result.id, stack, candidate); continue; }
     const bookRisk = portfolioRisk.check(result, { positions: ledger.getActivePositions(), pending: ledger.getPendingOrders(), bankroll: capital.bankroll, settings });
     if (bookRisk) { recordRejection(result.id, bookRisk, candidate); continue; }
-    const shield = entryShields.check(result, { positions: ledger.getActivePositions(), pending: ledger.getPendingOrders(), settings });
+    const shield = entryShields.check(result, { positions: ledger.getActivePositions(), pending: ledger.getPendingOrders(), journal: ledger.getTradeJournal(), settings });
     if (shield) { recordRejection(result.id, shield, candidate); continue; }
     counts.approved += 1;
     try {

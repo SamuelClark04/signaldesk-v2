@@ -1,6 +1,9 @@
 // Backtest history (Phase 77): PAGED historical bars for a date window (the live history-bars.js only
 // keeps the latest ~150). Same free sources as the app, market data only (no broker call):
-//   stocks  Alpaca data, IEX feed, MULTI-symbol requests (/v2/stocks/bars, 10,000 bars a page)
+//   stocks  Alpaca data, IEX feed, ONE SYMBOL AT A TIME (Phase 87): a multi-symbol 1h / 5m request comes back ~190 bars a page, so 25
+//           symbols x 2 years of 1h needed ~520 pages, the old 200-page cap ended it silently and every symbol after the first ~11
+//           (alphabetically) had NO bars (the in-app equity-day backtest on 5m lost symbols the same way). A series that still hits
+//           MAX_PAGES is reported missing ("truncated"), never returned partial; a 429 is retried after a pause.
 //   crypto  Coinbase public candles, 350 a request, paged back from now (4h = 1h candles regrouped)
 // Every request goes through net-guard (a dead host fails fast). Loaded series are cached CACHE_MS, so
 // re-running a backtest (another rule on the same bars) costs no second download.
@@ -11,6 +14,8 @@ const CACHE_MS = 30 * 60 * 1000;
 const TIMEOUT_MS = 15000;
 const COINBASE_MAX = 350;
 const COINBASE_GAP_MS = 150; // ~6 requests / s: well inside Coinbase's public limit
+const MAX_PAGES = 1000; // per symbol
+const RETRY_429_MS = [2000, 6000, 15000];
 const STOCK_TF = { '1d': '1Day', '1h': '1Hour', '5m': '5Min' };
 const CRYPTO_TF = { '1d': ['ONE_DAY', 86400], '4h': ['ONE_HOUR', 3600, 4], '1h': ['ONE_HOUR', 3600], '15m': ['FIFTEEN_MINUTE', 900], '5m': ['FIVE_MINUTE', 300] };
 const cache = new Map(); // `${symbol}|${tf}|${days}` -> { at, bars }
@@ -39,26 +44,32 @@ function regroup(bars, sec) {
 }
 const tidy = (bars) => [...new Map(bars.filter((b) => [b.time, b.open, b.high, b.low, b.close].every(Number.isFinite) && b.close > 0).map((b) => [b.time, b])).values()].sort((a, b) => a.time - b.time);
 
+// -> { ok, series: { SYM: bars }, truncated: [SYM] } | { ok: false, error }
 async function stocks(symbols, tf, days, now) {
   const k = require('../connectors/alpaca-api').dataKeys();
   if (!k) return { ok: false, error: 'No Alpaca keys (market data): add them in Settings > Accounts & Connections' };
   const base = (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/+$/, '');
   const headers = { 'APCA-API-KEY-ID': k.key, 'APCA-API-SECRET-KEY': k.secret };
-  const out = Object.fromEntries(symbols.map((s) => [s, []]));
   const start = new Date(now - days * 864e5).toISOString();
-  let token = null;
-  for (let page = 0; page < 200; page += 1) {
-    const q = `symbols=${symbols.map(encodeURIComponent).join(',')}&timeframe=${STOCK_TF[tf]}&start=${encodeURIComponent(start)}&limit=10000&feed=iex&adjustment=split&sort=asc${token ? `&page_token=${encodeURIComponent(token)}` : ''}`;
-    const r = await getJson(`${base}/v2/stocks/bars?${q}`, headers);
-    if (!r.ok) return r;
-    for (const [s, list] of Object.entries((r.json && r.json.bars) || {})) {
-      if (out[s]) for (const b of list) out[s].push({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v });
+  const series = {};
+  const truncated = [];
+  for (const sym of symbols) {
+    const bars = [];
+    let token = null;
+    let page = 0;
+    for (; page < MAX_PAGES; page += 1) {
+      const q = `symbols=${encodeURIComponent(sym)}&timeframe=${STOCK_TF[tf]}&start=${encodeURIComponent(start)}&limit=10000&feed=iex&adjustment=split&sort=asc${token ? `&page_token=${encodeURIComponent(token)}` : ''}`;
+      let r = await getJson(`${base}/v2/stocks/bars?${q}`, headers);
+      for (let i = 0; !r.ok && /^HTTP 429/.test(r.error) && i < RETRY_429_MS.length; i += 1) { await sleep(RETRY_429_MS[i]); r = await getJson(`${base}/v2/stocks/bars?${q}`, headers); }
+      if (!r.ok) return r;
+      for (const b of ((r.json && r.json.bars) || {})[sym] || []) bars.push({ time: Math.floor(Date.parse(b.t) / 1000), open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v });
+      token = r.json && r.json.next_page_token;
+      if (!token) break;
+      await pace();
     }
-    token = r.json && r.json.next_page_token;
-    if (!token) break;
-    await pace();
+    if (token) truncated.push(sym); else series[sym] = tidy(bars);
   }
-  return { ok: true, series: Object.fromEntries(Object.entries(out).map(([s, b]) => [s, tidy(b)])) };
+  return { ok: true, series, truncated };
 }
 
 async function coin(symbol, tf, days, now) {
@@ -93,7 +104,10 @@ async function load(symbols, tf, market, days, now = Date.now(), onProgress = ()
   if (market === 'stocks' && want.length) {
     const r = await stocks(want, tf, days, now);
     if (!r.ok) return { ok: false, error: r.error };
-    for (const s of want) if (r.series[s].length) done(s, r.series[s]); else missing.push({ symbol: s, error: 'no bars' });
+    for (const s of want) {
+      if (r.truncated.includes(s)) missing.push({ symbol: s, error: `truncated: more than ${MAX_PAGES} pages of ${tf} bars (shorten the window)` });
+      else if (r.series[s] && r.series[s].length) done(s, r.series[s]); else missing.push({ symbol: s, error: 'no bars' });
+    }
   }
   if (market === 'crypto') {
     for (const [i, s] of want.entries()) {
@@ -105,4 +119,4 @@ async function load(symbols, tf, market, days, now = Date.now(), onProgress = ()
   return { ok: true, series, missing };
 }
 
-module.exports = { load, regroup, tidy, reset: () => cache.clear(), CACHE_MS };
+module.exports = { load, regroup, tidy, reset: () => cache.clear(), CACHE_MS, MAX_PAGES };

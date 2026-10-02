@@ -38,10 +38,14 @@
     renderFilter();
     const sc = SD.scorecard.build(journal, filter);
     $('scorecard-body').replaceChildren(...sc.rows.map((r) => row(r)), ...(sc.rows.length > 1 ? [row(sc.total, true)] : []));
+    // Phase 87: the same trades split by who closed them (the strategy's own exits vs your manual closes).
+    const exits = $('scorecard-exits');
+    if (exits) exits.replaceChildren(...(sc.exits.length ? [el('tr', { className: 'sc-exits-head' }, [el('td', { colSpan: 6, textContent: 'Who closed it' })]), ...sc.exits.map((r) => row(r))] : []));
     $('scorecard-empty').hidden = sc.rows.length > 0;
     $('scorecard-empty').textContent = filter === 'all' ? 'No closed trades yet.' : `No closed ${filter === 'LIVE' ? 'live' : 'paper'} trades yet.`;
     const few = sc.rows.filter((r) => r.trades > 0 && r.trades < 30).map((r) => r.label);
-    $('scorecard-note').textContent = `One row per strategy; a T1 partial and its runner count as one trade. Net of fees.${few.length ? ` Under 30 trades (${few.join(', ')}): too few to judge an edge yet.` : ''}`;
+    $('scorecard-note').textContent = `One row per strategy; a T1 partial and its runner count as one trade. Net of fees. "Who closed it": the system's own exits vs your manual closes, `
+      + `so a strategy is judged on its rules and your closes on your judgment.${few.length ? ` Under 30 trades (${few.join(', ')}): too few to judge an edge yet.` : ''}`;
   }
 
   // PORTFOLIO_RISK: one line per book.

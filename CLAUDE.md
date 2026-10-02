@@ -149,6 +149,18 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   then Flash-Lite; no previews / TTS / aliases; fixed list if unreadable; <= 5), then the other provider when its key is set; all within
   TOTAL_MS (30 s; 15 s per call). The reply names the model that answered (+ a note on the busy ones); all busy -> code BUSY (HTTP 424),
   a clear "try again in a few minutes / add an OpenAI key" message and a [Try again] button. Test: tests/ph86unit.js.
+- **Options replay + pacing (Phase 87)**: the options signals (options-signals.js, unchanged) replayed on 2 years of real Alpaca IEX 1h /
+  daily bars, 25 symbols, judged on the underlying (no archived chains; scratchpad ph87exp.js, declared up front: entry at the signal
+  hour's close, signal stop, 1.5R target, 15 / 5 session time exit, 0.15R cost): EVERY variant lost in both halves: live PF 0.75 (0.79 /
+  0.70), 200-day history fixed 0.75, + SPY 20-day filter 0.79, + retest entries 0.76; controls: -0.03 ATR move in the signal's direction
+  over 1-5 days (48-49% right) and the reversed trades lose as much = no information. So Options Spreads is OFF by default (strategy-toggles;
+  a saved map keeps the user's choice: on only to test mechanics on paper); the filters were NOT adopted. Fixed: 5-options-system reads
+  getLongDailyBars (260 sessions): the '1d' history keeps 100, so the 200-day SMA was always empty live (no TREND call ever fired: a
+  bearish book). risk/option-pacing.js (entry shield): <= settings.maxOptionEntriesPerDay (2; 0 = off) automated option entries a NY
+  day per book (opened today + staged), none within 60 min of a same-direction one (replay: worst day -22.8R -> -11.9R). backtest/
+  history.js loads stocks ONE SYMBOL per request (a multi-symbol 1h / 5m request pages ~190 bars: the old 200-page cap silently left
+  later symbols empty, the equity-day 5m backtest too); > MAX_PAGES = reported "truncated", 429 retried. Scorecard: "Who closed it"
+  (lib/scorecard.js exitBy: system / manual / external). Test: tests/ph87unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

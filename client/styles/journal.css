@@ -16,6 +16,7 @@
 .sc-note { padding: 10px 16px 14px; }
 .bt-body { display: grid; gap: 8px; padding: 12px 16px 16px; }
 .sc-total td { border-top: 1px solid var(--border-strong); font-weight: 600; }
+.sc-exits-head td { padding-top: 14px; border-top: 1px solid var(--border-strong); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .bt-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .bt-controls .field { min-width: 220px; }
 .bt-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 12px 0 6px; }

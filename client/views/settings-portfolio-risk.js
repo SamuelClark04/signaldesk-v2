@@ -51,6 +51,11 @@
       field('settings-sector-cap', 'Max trades per sector', saved.maxTradesPerSector || 1, { min: 1, max: 20, step: 1, suffix: 'each',
         hint: 'Stock / options trades open or staged at once in one sector group (e.g. AMZN, GOOGL and NVDA are all Technology).',
         onCommit: (v) => SD.settings.request({ maxTradesPerSector: Math.round(v) }) }),
+      // Phase 87: options entry pacing (risk/option-pacing.js).
+      field('settings-option-pacing', 'Max automated option entries per day', Number.isFinite(saved.maxOptionEntriesPerDay) ? saved.maxOptionEntriesPerDay : 2, { min: 0, max: 50, step: 1, suffix: 'a day',
+        hint: 'Option signals fire in clusters on one market move: at most this many new automated option trades a day, and none within 60 min of one in the '
+          + 'same direction. 0 = off (both rules; e.g. to stress-test on paper).',
+        onCommit: (v) => SD.settings.request({ maxOptionEntriesPerDay: Math.round(v) }) }),
       // Phase 83: one kill switch per book: a bad paper day never pauses live entries, and the reverse.
       ...[['Paper', 'dailyLossLimitPaper', 150, 'paper'], ['Live', 'dailyLossLimitLive', 25, 'real-money']].map(([name, key, def, what]) => {
         const v = Number.isFinite(saved[key]) ? saved[key] : def;

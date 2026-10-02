@@ -21,7 +21,7 @@
 // it only stages on live quotes. In the session a symbol with no fresh price yet is
 // skipped until it has one (Phase 59B), never planned as "market closed".
 // Shields: earnings unknown = blocked (fail closed). One idea per symbol per day.
-const { getDailyBars } = require('../connectors/daily-bars');
+const { getDailyBars, getLongDailyBars } = require('../connectors/daily-bars');
 const { getHistory } = require('../connectors/history-bars');
 const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const { getEarningsStatus } = require('../connectors/corporate-calendar');
@@ -162,7 +162,9 @@ async function propose(symbol, px, sig, ctx, bars, env) {
 }
 
 async function evaluate(symbol, px, env, bench) {
-  const bars = await getDailyBars(symbol, env.now);
+  // Phase 87: the signals' 200-day SMA (TREND calls, the 200-day breakdown) needs 200+ sessions: the '1d' history keeps 100,
+  // so live it was ALWAYS empty (no TREND call ever fired; the book leaned bearish). The Pilot's 260-session history (batched, cached).
+  const bars = await getLongDailyBars(symbol, env.now);
   const sq = signals.dailySqueeze(bars);
   if (sq) coils.set(symbol, sq); else coils.delete(symbol);
   if (bars.length < 60) return tally.skip(symbol, 'Not enough daily history');

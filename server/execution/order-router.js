@@ -136,7 +136,7 @@ async function approveWithGuard(id, { amount, confirmed } = {}) {
   // Phase 81: + the entry shields (kill switch, macro blackout, sector cap); like the book limits, a shielded setup stays pending.
   entryShields.refresh(ledger, ledger.getSettings());
   const book = (o) => portfolioRisk.check(o, { positions: ledger.getActivePositions(), bankroll: o.sizingBankroll, settings: ledger.getSettings() })
-    || entryShields.check(o, { positions: ledger.getActivePositions(), settings: ledger.getSettings() });
+    || entryShields.check(o, { positions: ledger.getActivePositions(), journal: ledger.getTradeJournal(), settings: ledger.getSettings() }); // entries only: no waiting setups
   const heat = stack ? null : book(order);
   const check = stack || heat ? { valid: false, reason: stack || heat } : validateApproval(order, livePrice);
   if (check.valid && amount !== undefined && amount !== null) {

@@ -40,6 +40,7 @@ const SETTINGS_RULES = {
   macroShield: { type: 'choice', values: [true, false], default: true },
   macroShieldCrypto: { type: 'choice', values: [true, false], default: false },
   maxTradesPerSector: { type: 'number', default: 1, min: 1, max: 20, integer: true },
+  maxOptionEntriesPerDay: { type: 'number', default: 2, min: 0, max: 50, integer: true }, // Phase 87: options entry pacing (0 = off)
   // Phase 83: one kill switch per book ($, 0 = off): paper losses never pause live entries, and the reverse.
   dailyLossLimitPaper: { type: 'number', default: 150, min: 0, max: 1000000 },
   dailyLossLimitLive: { type: 'number', default: 25, min: 0, max: 1000000 },
