@@ -143,6 +143,12 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   { maxOutputTokens 2048 } only (no temperature; thinkingConfig { thinkingBudget: 0 } only for gemini-2.5-flash / -lite, the old code sent
   it to every "flash" model); a 400 to a body with thinkingConfig is retried once bare; errors carry Google's fieldViolations; default
   model = Google's alias gemini-flash-latest (2.5 Flash is closed to new keys); Test & Save also reads that model (404 = warning). Scratch runall.sh marks a suite that exits non-zero without FAIL lines as CRASH. Test: tests/ph85unit.js.
+- **AI Analyst model fallback (Phase 86)**: Google sheds load per MODEL ("HTTP 503: This model is currently experiencing high demand",
+  free tier first). ai-analyst.answer(): the chosen model, then on 404 / 429 / 5xx / timeout / network (never 400 / 401 / 403) the key's
+  other stable Flash models from its OWN model list (services/gemini-models.js: GET /models, free, cached 6 h; full Flash newest first,
+  then Flash-Lite; no previews / TTS / aliases; fixed list if unreadable; <= 5), then the other provider when its key is set; all within
+  TOTAL_MS (30 s; 15 s per call). The reply names the model that answered (+ a note on the busy ones); all busy -> code BUSY (HTTP 424),
+  a clear "try again in a few minutes / add an OpenAI key" message and a [Try again] button. Test: tests/ph86unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

@@ -33,7 +33,7 @@ function installAi(app, PORT) {
       const r = await require('./services/ai-analyst').analyze(req.body || {});
       // Phase 85: never a 5xx for an answer we gave (no key, the AI provider failed): through the Cloudflare tunnel a 502 / 503
       // reads as "SignalDesk is down". 424 = the AI provider (a dependency) failed; the JSON says why.
-      return res.status(r.ok ? 200 : { BAD_REQUEST: 400, NOT_FOUND: 404, NO_KEY: 424, RATE_LIMIT: 429 }[r.code] || 424).json(r);
+      return res.status(r.ok ? 200 : { BAD_REQUEST: 400, NOT_FOUND: 404, NO_KEY: 424, RATE_LIMIT: 429, BUSY: 424 }[r.code] || 424).json(r);
     } catch (err) {
       console.error(`[ai] analyze failed: ${err.message}`);
       return res.status(500).json({ ok: false, error: 'AI Analyst failed unexpectedly; see the server log' });

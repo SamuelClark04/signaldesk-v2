@@ -18,7 +18,7 @@
 
   function shell(mode, title) {
     close();
-    const body = el('div', { className: 'ai-body', textContent: 'Asking the analyst… (up to 15 s)' });
+    const body = el('div', { className: 'ai-body', textContent: 'Asking the analyst… (up to 30 s; a busy model hands over to another)' });
     const x = el('button', { type: 'button', className: 'btn ai-close', textContent: 'Close', title: 'Close (Esc)' });
     x.onclick = close;
     const box = el('div', { className: 'ai-modal', role: 'dialog' }, [
@@ -62,6 +62,7 @@
     if (mine !== seq || !overlay) return; // closed or replaced while waiting
     if (r.ok) result(body, r);
     else body.replaceChildren(el('p', { className: 'ai-error', textContent: r.error || 'AI Analyst unavailable' }),
+      ...(r.code === 'BUSY' ? [(() => { const again = el('button', { type: 'button', className: 'btn', textContent: 'Try again' }); again.onclick = () => open(mode, id, title); return again; })()] : []),
       ...(r.code === 'NO_KEY' ? [el('p', { className: 'ai-foot', textContent: 'Settings > Accounts & Connections: paste an OpenAI or Gemini key and press Test & Save.' })] : []));
   }
 

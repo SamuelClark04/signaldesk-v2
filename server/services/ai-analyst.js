@@ -1,15 +1,21 @@
 // AI Trade Analyst (Phase 84): on-demand PRE_TRADE breakdowns (a staged setup) and IN_TRADE briefings (an open position).
 //   POST /api/ai/analyze { mode, payload: { id } } (http-routes.js) -> analyze(): the facts are rebuilt on the SERVER from the
 //   ledger (ai-payload.js), sent with a fixed risk-manager system prompt to OpenAI (OPENAI_API_KEY, model OPENAI_MODEL or
-//   gpt-4o-mini) or Gemini (GEMINI_API_KEY, GEMINI_MODEL or gemini-2.5-flash): settings.aiProvider 'auto' (the first key
+//   gpt-4o-mini) or Gemini (GEMINI_API_KEY, GEMINI_MODEL or gemini-flash-latest): settings.aiProvider 'auto' (the first key
 //   configured) | 'openai' | 'gemini'. Keys come from the encrypted vault (Settings > Accounts & Connections) or .env and
-//   travel in request headers only. 15 s abort; any failure is a clean { ok: false, error } (never a crash).
+//   travel in request headers only. 15 s abort per call; any failure is a clean { ok: false, error } (never a crash).
+//   Phase 86 (answer()): a Gemini model that is overloaded (503 "high demand"), rate-limited (429), gone (404), failing (500) or
+//   silent hands over to the key's other Flash models (gemini-models.js), then to the other provider when its key is set, all
+//   within TOTAL_MS; the reply says which model answered.
 //   Cost guard: the same mode + id is answered from a 60 s cache; at most MAX_PER_HOUR calls an hour.
 //   Guardrails: the prompt forbids price / timing predictions and stop widening; the reply is also scanned for a timing claim
 //   ("will hit ... in 3 hours") and flagged. The verdict line (Recommendation / Action) is parsed for the UI badge.
 const facts = require('./ai-payload');
 
 const TIMEOUT_MS = 15000;
+const TOTAL_MS = 30000; // every attempt of one analysis (fallback models + the other provider)
+const MIN_TRY_MS = 2000; // never start an attempt with less left than this
+const HANDOVER = new Set([404, 429, 500, 502, 503, 504, 'timeout', 'network']); // the next model may answer; 400 / 401 / 403 never
 const CACHE_MS = 60 * 1000;
 const MAX_PER_HOUR = 30;
 // Phase 85b: Google's hot-swapped alias for its current Flash model (gemini-2.5-flash is closed to new API users; 1.5 / 2.0 shut down).
@@ -101,12 +107,40 @@ async function callProvider(p, system, user, { fetchImpl = globalThis.fetch, tim
       clearTimeout(kill);
       return callProvider(p, system, user, { fetchImpl, timeoutMs: Math.max(1000, until - Date.now()), bare: true });
     }
-    if (!res.ok) return { ok: false, error: providerError(p, res.status, j) };
+    if (!res.ok) return { ok: false, status: res.status, error: providerError(p, res.status, j) };
     const text = textOf(p.provider, j);
     return text && text.trim() ? { ok: true, text: text.trim() } : { ok: false, error: `${p.provider} returned no text${finishOf(j) ? ` (${finishOf(j)})` : ''}` };
   } catch (err) {
-    return { ok: false, error: ac.signal.aborted ? `${p.provider} did not answer within ${timeoutMs >= 1000 ? Math.round(timeoutMs / 1000) : timeoutMs / 1000} s` : `${p.provider} unreachable (${err.message})` };
+    return { ok: false, status: ac.signal.aborted ? 'timeout' : 'network', error: ac.signal.aborted ? `${p.provider} did not answer within ${timeoutMs >= 1000 ? Math.round(timeoutMs / 1000) : timeoutMs / 1000} s` : `${p.provider} unreachable (${err.message})` };
   } finally { clearTimeout(kill); }
+}
+
+// One analysis: the chosen model, then (Gemini, on a HANDOVER failure) the key's other Flash models, then the other provider if
+// its key is set. -> { ok, text, provider, model, tried } | { ok: false, error, tried }
+async function answer(p, system, user, { fetchImpl = globalThis.fetch, timeoutMs = TIMEOUT_MS, totalMs = TOTAL_MS } = {}) {
+  const until = Date.now() + totalMs;
+  const left = () => until - Date.now();
+  const tried = [];
+  const attempt = async (q) => {
+    const r = await callProvider(q, system, user, { fetchImpl, timeoutMs: Math.min(timeoutMs, left()) });
+    if (r.ok) return { ...r, provider: q.provider, model: q.model, tried };
+    tried.push({ provider: q.provider, model: q.model, status: r.status, error: r.error });
+    return null;
+  };
+  const models = [p.model];
+  for (let i = 0; i < models.length && left() >= MIN_TRY_MS; i += 1) {
+    const ok = await attempt({ ...p, model: models[i] });
+    if (ok) return ok;
+    if (p.provider !== 'gemini' || !HANDOVER.has(tried[tried.length - 1].status)) break;
+    if (i === 0) for (const m of await require('./gemini-models').fallbacks(p.key, p.model, { fetchImpl })) if (!models.includes(m)) models.push(m);
+  }
+  const o = p.provider === 'gemini' ? 'openai' : 'gemini';
+  if (process.env[KEYS[o]] && left() >= MIN_TRY_MS) { const ok = await attempt({ provider: o, key: process.env[KEYS[o]], model: MODELS[o]() }); if (ok) return ok; }
+  const busy = tried.length && tried.every((t) => t.status === 503 || t.status === 429);
+  const list = tried.map((t) => `${t.model}: ${t.error.replace(/^(gemini|openai) /, '')}`).join(' | ');
+  return { ok: false, tried, busy, error: busy
+    ? `${tried.length > 1 ? `all ${tried.length} models tried are` : `${tried[0].model} is`} overloaded or rate-limited right now (${list.slice(0, 400)}). Google sheds free-tier traffic first under high demand: try again in a few minutes${process.env[KEYS.openai] ? '' : ', or add an OpenAI key as a backup (Settings > Accounts & Connections)'}.`
+    : list.slice(0, 600) };
 }
 
 function verdictOf(mode, text) {
@@ -134,10 +168,11 @@ async function analyze(input = {}, { settings = null, fetchImpl, timeoutMs, now 
     const f = await facts.build(mode, id, now);
     if (!f.ok) return { ok: false, code: 'NOT_FOUND', error: f.error };
     calls.push(now);
-    const r = await callProvider(p, systemPrompt(mode), userPrompt(mode, f.facts), { fetchImpl, timeoutMs });
-    if (!r.ok) return { ok: false, code: 'PROVIDER', error: `AI Analyst provider unreachable or refused: ${r.error}`, provider: p.provider, model: p.model };
+    const r = await answer(p, systemPrompt(mode), userPrompt(mode, f.facts), { fetchImpl, timeoutMs });
+    if (!r.ok) return { ok: false, code: r.busy ? 'BUSY' : 'PROVIDER', error: r.busy ? `AI Analyst: ${r.error}` : `AI Analyst provider unreachable or refused: ${r.error}`, provider: p.provider, model: p.model };
     const warnings = timingClaim(r.text) ? ['The reply contains a timing prediction; SignalDesk cannot verify it: ignore it.'] : [];
-    const result = { ok: true, mode, id, provider: p.provider, model: p.model, markdown: r.text, verdict: verdictOf(mode, r.text), warnings, at: now, facts: f.facts };
+    if (r.tried.length) warnings.push(`${r.tried.map((t) => t.model).join(', ')} ${r.tried.length > 1 ? 'were' : 'was'} unavailable (${[...new Set(r.tried.map((t) => t.status))].join(' / ')}); answered by ${r.model}.`);
+    const result = { ok: true, mode, id, provider: r.provider, model: r.model, markdown: r.text, verdict: verdictOf(mode, r.text), warnings, at: now, facts: f.facts };
     cache.set(key, { at: now, result });
     return result;
   })().finally(() => inFlight.delete(key));
@@ -147,4 +182,4 @@ async function analyze(input = {}, { settings = null, fetchImpl, timeoutMs, now 
 
 const reset = () => { cache.clear(); calls.length = 0; inFlight.clear(); };
 
-module.exports = { analyze, systemPrompt, userPrompt, pickProvider, request, geminiBody, providerError, GEMINI_DEFAULT, callProvider, verdictOf, timingClaim, reset, SECTIONS, VERDICT, TIMEOUT_MS, MAX_PER_HOUR, CACHE_MS };
+module.exports = { analyze, answer, TOTAL_MS, systemPrompt, userPrompt, pickProvider, request, geminiBody, providerError, GEMINI_DEFAULT, callProvider, verdictOf, timingClaim, reset, SECTIONS, VERDICT, TIMEOUT_MS, MAX_PER_HOUR, CACHE_MS };
