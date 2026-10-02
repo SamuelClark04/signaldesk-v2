@@ -41,4 +41,43 @@ function installAi(app, PORT) {
   });
 }
 
-module.exports = { install, installAi };
+// Phase 88: paper trading runs (execution/paper-runs.js), same guard as above.
+//   GET  /api/paper/runs            the current run (+ its summary) and the archived runs (without their journals)
+//   GET  /api/paper/runs/:runId     one archived run with its whole trade journal
+//   POST /api/paper/reset-run { confirm: true, name? }  archive the current paper run and start the next one
+function installPaperRuns(app, PORT, { broadcast }) {
+  const runs = require('./execution/paper-runs');
+  const ledger = require('./execution/paper-ledger');
+  const guard = (req, res) => { if (checkHttp(req, PORT).ok) return true; res.status(403).json({ ok: false, error: 'forbidden' }); return false; };
+  app.get('/api/paper/runs', (req, res) => { if (!guard(req, res)) return; res.set('Cache-Control', 'no-store').json({ ok: true, ...runs.list(ledger) }); });
+  app.get('/api/paper/runs/:runId', (req, res) => {
+    if (!guard(req, res)) return;
+    const r = runs.get(String(req.params.runId));
+    res.set('Cache-Control', 'no-store').status(r ? 200 : 404).json(r ? { ok: true, run: r } : { ok: false, error: 'no archived run with that id' });
+  });
+  app.post('/api/paper/reset-run', (req, res) => {
+    if (!guard(req, res)) return;
+    res.set('Cache-Control', 'no-store');
+    const body = req.body || {};
+    if (body.confirm !== true) return res.status(400).json({ ok: false, error: 'confirm: true is required (this archives and clears the paper book)' });
+    let r;
+    try { r = runs.resetRun(ledger, { name: typeof body.name === 'string' ? body.name : '' }); } catch (err) {
+      console.error(`[runs] reset failed: ${err.message}`);
+      return res.status(500).json({ ok: false, error: `Reset failed: ${err.message}` });
+    }
+    if (!r.ok) return res.status(409).json(r);
+    const settings = ledger.getSettings();
+    broadcast('QUEUE_UPDATED', ledger.getPendingOrders());
+    broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
+    broadcast('JOURNAL_UPDATED', ledger.getTradeJournal());
+    broadcast('PILOT_ACTIONS', ledger.getPilotActions());
+    broadcast('ENTRY_SHIELDS', require('./risk/entry-shields').status(settings)); // the paper kill switch is released
+    try { broadcast('PORTFOLIO_RISK', require('./risk/portfolio-risk').summary(ledger.getActivePositions(), settings, { stocks: settings.bankroll, crypto: settings.cryptoBankroll })); } catch { /* next pass */ }
+    try { require('./intelligence/dashboard-intel').publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); }
+    require('./execution/broker-state').publishBrokerState(broadcast, { force: true }).catch(() => {});
+    broadcast('PAPER_RUNS', runs.list(ledger));
+    return res.json({ ...r, runs: runs.list(ledger) });
+  });
+}
+
+module.exports = { install, installAi, installPaperRuns };

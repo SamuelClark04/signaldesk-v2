@@ -161,6 +161,17 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   history.js loads stocks ONE SYMBOL per request (a multi-symbol 1h / 5m request pages ~190 bars: the old 200-page cap silently left
   later symbols empty, the equity-day 5m backtest too); > MAX_PAGES = reported "truncated", 429 retried. Scorecard: "Who closed it"
   (lib/scorecard.js exitBy: system / manual / external). Test: tests/ph87unit.js.
+- **Paper runs (Phase 88)**: execution/paper-runs.js + http-routes.installPaperRuns: POST /api/paper/reset-run { confirm: true, name? }
+  archives the PAPER run and starts the next; GET /api/paper/runs (current + archived, no journals), /api/paper/runs/:runId (one run's
+  journal). Archive = paper-runs.json NEXT TO the ledger file (PAPER_RUNS_PATH; not in ledger-state.json: the ledger is rewritten
+  constantly). Reset: refused while a paper position is open / working at ALPACA PAPER (real broker orders; the old Danger-zone
+  resetPaper is refused the same way now) or an internal one has no price; internal paper positions closed at their mark as RUN_RESET;
+  archive written FIRST (every paper journal record deep-copied + summary via lib/scorecard), then ledger-extras.resetPaper('all',
+  { keepLiveSetups }) (paper journal / positions / staged setups / Pilot proposals; LIVE records, LIVE / adopted positions and LIVE
+  setups kept: the Taxes hub reads the LIVE journal), then daily-loss.resetBook('paper'); paper cash is derived, so it is back at the
+  bankrolls; synchronous from the first close to the reset. UI: Settings > Paper trading run (views/settings-paper-run.js, modal) and
+  the Journal run selector (views/journal-runs.js: an archived run swaps the table + scorecard, cumulative P/L line; Taxes stay on the
+  current journal). Test: tests/ph88unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

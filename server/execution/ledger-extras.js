@@ -99,20 +99,26 @@ const findPilotAction = (id) => {
 // copied first (backup path returned), so a reset can be undone by hand.
 // Phase 70: scope 'stocks' (stocks + options) or 'crypto' resets that paper pool only (its
 // positions, trades, staged and discarded setups, Pilot proposals); 'all' (default) both.
+// Phase 88: refused while a paper position in the scope is held / working at ALPACA PAPER (real broker orders: dropping them from
+// the ledger orphaned them at Alpaca); opts.keepLiveSetups keeps LIVE setups waiting in Approvals (the run reset uses it).
 const isLive = (x) => x.execution === 'LIVE' || x.execution === 'BROKER' || x.execution === 'EXTERNAL' || x.adopted;
 const SCOPES = ['all', 'stocks', 'crypto'];
 
-function resetPaper(scope = 'all') {
+const liveSetup = (o) => o.execution === 'LIVE' || (!!o.sizingBasis && o.sizingBasis !== 'paper' && o.execution !== 'PAPER');
+
+function resetPaper(scope = 'all', opts = {}) {
   if (!SCOPES.includes(scope)) throw new Error(`reset scope must be one of: ${SCOPES.join(', ')}`);
   const { pendingOrders, activePositions, tradeJournal, discardedOrders, pilotActions, save, backup } = need();
   const { poolOf } = require('./paper-pools');
   const other = (x) => scope !== 'all' && poolOf(x.market || (x.asset && /-USDC?$/.test(x.asset) ? 'crypto' : 'stocks')) !== scope; // outside the pool reset
+  const atAlpaca = activePositions.filter((x) => !isLive(x) && !other(x) && x.paperBroker === 'alpaca');
+  if (atAlpaca.length) throw new Error(`${atAlpaca.length} paper position(s) open or working at Alpaca Paper (${atAlpaca.map((x) => x.asset).join(', ')}): close them first ([Close] in Portfolio), so nothing is left at the broker`);
   const backupPath = backup(`pre-reset-${scope}`);
   const keep = (list, pred) => { const kept = list.filter(pred); const removed = list.length - kept.length; list.splice(0, list.length, ...kept); return removed; };
   const removed = {
     positions: keep(activePositions, (x) => isLive(x) || other(x)),
     trades: keep(tradeJournal, (x) => isLive(x) || other(x)),
-    pending: keep(pendingOrders, other),
+    pending: keep(pendingOrders, (x) => other(x) || (!!opts.keepLiveSetups && liveSetup(x))),
     discarded: keep(discardedOrders, other),
     pilotActions: keep(pilotActions, (a) => !!a.external || other(a)), // external holdings are real: their proposals stay
   };

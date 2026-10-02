@@ -74,5 +74,11 @@ function refresh({ settings, ...rest } = {}) {
 
 const current = () => last;
 const reset = () => { day = null; state = null; last = null; }; // tests
+// Phase 88: a new paper run releases that book's switch (its trades were archived, so today's paper P/L restarts at zero).
+function resetBook(book) {
+  if (!BOOKS.includes(book)) throw new Error(`daily-loss: unknown book ${book}`);
+  if (state) state[book] = { baseline: new Map(), tripped: null };
+  if (last && last[book]) last = { ...last, [book]: { ...last[book], active: false, pnl: 0, realized: 0, unrealized: 0, trippedAt: null, trippedPnl: null } };
+}
 
-module.exports = { refresh, current, measure, markNet, reset, bookOf, DEFAULTS, KEYS };
+module.exports = { refresh, current, measure, markNet, reset, resetBook, bookOf, DEFAULTS, KEYS };

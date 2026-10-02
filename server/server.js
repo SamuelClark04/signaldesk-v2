@@ -83,6 +83,7 @@ function broadcast(type, payload) {
 
 const handleMessage = createMessageHandler({ send, broadcast });
 externalApi.install(app, { broadcast }); // /api/portfolio/external (behind the sign-in gate)
+require('./http-routes').installPaperRuns(app, PORT, { broadcast }); // Phase 88: /api/paper/runs, POST /api/paper/reset-run
 rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
 scanLog.onChange((log) => broadcast('SCAN_LOG', log)); // live scanner log, once per pass
 watchlist.onChange((items) => broadcast('WATCHLIST_UPDATED', items)); // "Watching"

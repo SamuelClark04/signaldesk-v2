@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="styles/portfolio.css">
   <link rel="stylesheet" href="styles/journal.css">
   <link rel="stylesheet" href="styles/ai-analyst.css">
+  <link rel="stylesheet" href="styles/paper-runs.css">
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/today.css">
   <link rel="stylesheet" href="styles/moonshots.css">
@@ -69,6 +70,8 @@
       </section>
 
       <section class="tab" id="tab-journal" data-title="Journal" hidden>
+        <!-- Phase 88: which paper run the Journal shows (views/journal-runs.js). -->
+        <div class="panel jr-runs" id="journal-runs"></div>
         <!-- Phase 77: Strategy Scorecard (lib/scorecard.js) + the book's risk now (PORTFOLIO_RISK). -->
         <div class="panel">
           <div class="panel-header">
@@ -253,6 +256,15 @@
           <span class="settings-status" id="settings-link-status" role="status"></span>
         </div>
 
+        <!-- Phase 88: archive the paper run and start the next one (views/settings-paper-run.js). -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Paper trading run</h2>
+            <span class="panel-hint">Archive this test run to the Journal and start fresh; LIVE trades and positions are never touched</span>
+          </div>
+          <div class="settings-paper-run" id="settings-paper-run"></div>
+        </div>
+
         <div class="panel settings-danger">
           <div class="panel-header">
             <h2 class="panel-title">Danger zone</h2>
@@ -334,6 +346,8 @@
   <script src="views/portfolio.js"></script>
   <script src="views/journal.js"></script>
   <script src="views/journal-scorecard.js"></script>
+  <script src="views/journal-runs.js"></script>
+  <script src="views/settings-paper-run.js"></script>
   <script src="views/journal-backtest.js"></script>
   <script src="views/journal-tax-guide.js"></script>
   <script src="views/journal-taxes.js"></script>

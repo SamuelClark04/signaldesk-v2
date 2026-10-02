@@ -134,7 +134,8 @@
   SD.backtest.init(transport); // Phase 77: Journal > Backtest
 
   const HANDLERS = {
-    JOURNAL_UPDATED: (trades) => { SD.journal.render(trades || []); SD.journalScorecard.render(trades || []); SD.journalTaxes.render(trades || []); }, // + Scorecard (77), Taxes (80)
+    JOURNAL_UPDATED: (trades) => SD.journalRuns.onJournal(trades || []), // table + Scorecard (77) for the run shown, Taxes (80) on the current journal (88)
+    PAPER_RUNS: (r) => SD.journalRuns.onRuns(r), // Phase 88: archived paper runs (Journal selector + Settings)
     PORTFOLIO_RISK: (r) => SD.journalScorecard.renderRisk(r), // Phase 77: open risk vs the ceiling, equity direction counts
     ENTRY_SHIELDS: (s) => SD.shieldBanner.render(s), // Phase 81: kill switch / macro blackout banners
     BACKTEST_CATALOG: (c) => SD.backtest.received(c),
@@ -196,9 +197,8 @@
   }
 
   showTab(location.hash.slice(1));
-  SD.journal.render([]);
-  SD.journalScorecard.render([]);
-  SD.journalTaxes.render([]); SD.taxGuide.mount(); // Phase 80
+  SD.journalRuns.onJournal([]); SD.journalRuns.refresh(); // Phase 88: the paper run list
+  SD.taxGuide.mount(); // Phase 80
   SD.portfolioRiskSettings.render(null);
   SD.strategySettings.render(null);
   connect();
