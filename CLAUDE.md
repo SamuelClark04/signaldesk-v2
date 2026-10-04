@@ -232,6 +232,12 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   real-market slippage" (report + protocol 2A; thresholds unchanged). Runbook + gate + testing rules: docs/deploy/phase85b-to-89c.md.
   trade-audit reads archived paper runs from paper-runs.json "archived" (it read "runs": the VM showed 0 runs, 29 of 79 records); vm-audit.sh
   refuses tools without that fix. VM (2026-10-04): deployed b24e750 -> 6381a58, verified; findings in docs/research/phase89-results.md section 19.
+- **Phase 90 (research only; no app code)**: protocol frozen in da77f3c (docs/research/phase90-protocol.md), results in phase90-results.md.
+  A: Equity Swing / ORB live rules on UNSEEN 2022-10..2024-10 (Phase 88's window was 2024-10..2026-10): both FAIL (Swing PF 0.86; ORB PF
+  1.11, stress 0.94, H2 below its control). B: new Quick Flips signals N1 (noise-area momentum) / N2 (5-minute ORB) x 2 exits, stage 1 on
+  SPY / QQQ 2019-2023 with a Black-Scholes model (calibrated on S1-V1 real prints: corr 0.97, slightly optimistic): all 4 FAIL (best N1-A
+  PF 1.15, stress 0.92); stages 2-3 NOT run: the 2025-06-02..2026-10-01 option window stays UNSEEN (never downloaded) for one future
+  pre-registered test. No automated strategy has passed on unseen data; all stay off. Scripts / caches: session scratchpad ph90/.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
