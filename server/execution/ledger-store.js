@@ -45,6 +45,13 @@ const SETTINGS_RULES = {
   dailyLossLimitPaper: { type: 'number', default: 150, min: 0, max: 1000000 },
   dailyLossLimitLive: { type: 'number', default: 25, min: 0, max: 1000000 },
   aiProvider: { type: 'choice', default: 'auto', values: ['auto', 'openai', 'gemini'] }, // Phase 84: AI Trade Analyst (keys in the vault / .env)
+  // Phase 89: optional daily PROFIT target per book ($): reached (realized today) -> no new automated entries that day. Off by default.
+  dailyProfitTargetOn: { type: 'choice', values: [true, false], default: false },
+  dailyProfitTarget: { type: 'number', default: 200, min: 1, max: 1000000 },
+  // Phase 89: max automated positions open + staged per book (paper / live, every market; 0 = off). Combined options + crypto
+  // open risk uses maxOpenRiskPct of the combined paper bankrolls (risk/exposure-limits.js).
+  maxOpenPositions: { type: 'number', default: 0, min: 0, max: 100, integer: true },
+  strategyPauseVersion: { type: 'number', default: toggles.PAUSE.version, min: 0, max: 1000, integer: true }, // the research pause applied
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
@@ -134,6 +141,13 @@ function restoreSettings(saved) {
   }
   // Phase 70: a ledger from before the crypto paper bankroll existed starts it at the (then shared) bankroll.
   if (saved.cryptoBankroll === undefined) settings.cryptoBankroll = settings.bankroll;
+  // Phase 89: the one-time research pause (strategy-toggles.PAUSE); the user may switch them back on afterwards.
+  const paused = toggles.applyPause(saved.strategyPauseVersion, settings.strategiesEnabled);
+  if (paused) {
+    settings.strategiesEnabled = paused;
+    console.warn(`[ledger] Phase 89 research pause: ${toggles.PAUSE.ids.join(', ')} switched off (open trades and exits unaffected)`);
+  }
+  settings.strategyPauseVersion = toggles.PAUSE.version;
 }
 
 // An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.

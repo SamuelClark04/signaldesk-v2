@@ -1,6 +1,7 @@
 // Entry-shield banners (Phase 81, server risk/entry-shields.js ENTRY_SHIELDS): one line at the top of Today and
 // Opportunities ([data-shield] boxes).
 //   DAILY KILL SWITCH ACTIVE (Paper): -$150 loss limit reached (that book only; Phase 83)
+//   DAILY PROFIT TARGET REACHED (Paper): $200                 (Phase 89, optional; that book only)
 //   PAUSED FOR MACRO EVENT: CPI · Resumes at 8:45 AM ET      (stocks / options; crypto only if opted in)
 //   otherwise a quiet "next blackout" note when one is due within 18 hours, else nothing.
 // Open trades, stops, targets and closes are never paused. Exposes window.SignalDesk.shieldBanner.
@@ -20,6 +21,14 @@
       return ['is-stop', `DAILY KILL SWITCH ACTIVE (${hit.map(name).join(' + ')}): ${hit.map((k) => `-${money(k.limit)}`).join(' / ')} loss limit reached`,
         `${hit.map((k) => `${name(k)} P/L today ${k.pnl < 0 ? '-' : '+'}${money(Math.abs(k.pnl))}`).join('; ')}. No new ${hit.map((k) => k.book).join(' or ')} entries until tomorrow; `
         + `open trades, stops, targets and closes keep working.${other} Settings > Risk Management changes the limits.`];
+    }
+    // Phase 89: the optional daily profit target (per book) reached: no new automated entries in that book today.
+    const goal = s && s.kill ? ['live', 'paper'].map((b) => s.kill[b]).filter((k) => k && k.target && k.target.reached) : [];
+    if (goal.length) {
+      const name = (k) => (k.book === 'live' ? 'Live' : 'Paper');
+      return ['is-info', `DAILY PROFIT TARGET REACHED (${goal.map(name).join(' + ')}): ${goal.map((k) => money(k.target.amount)).join(' / ')}`,
+        `Realized today ${goal.map((k) => `${name(k)} +${money(k.target.realizedAt || 0)}`).join('; ')}. No new automated ${goal.map((k) => k.book).join(' or ')} entries until tomorrow; `
+        + 'open trades, stops, targets and closes keep working. Settings > Risk Management turns it off.'];
     }
     const m = s && s.macro;
     if (m && m.enabled && m.active) {

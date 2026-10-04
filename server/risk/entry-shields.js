@@ -12,6 +12,12 @@
 //   OPTIONS_DAILY_ENTRY_CAP / OPTIONS_SAME_DIRECTION_GAP (Phase 87, risk/option-pacing.js) automated option entries: at most
 //                             settings.maxOptionEntriesPerDay a New York day (default 2; 0 = off), none within 60 min of a
 //                             same-direction one
+//   DAILY_PROFIT_TARGET_REACHED (Phase 89, optional) the book's realized P/L today reached settings.dailyProfitTarget: no new
+//                             automated entries in that book today (never forces, resizes or closes anything)
+//   COMBINED_RISK_CAP / MAX_OPEN_POSITIONS (Phase 89, risk/exposure-limits.js) options + crypto open risk together, and the most
+//                             automated positions open + staged per book
+//   QUICKFLIPS_*              (Phase 89, risk/quickflip-rules.js) Options Quick Flips: paper only, entry window, one per symbol,
+//                             2 open, 3 a symbol a day, 15-min cooldown, no same direction after a stop, -2R daily stop
 // Manual Trade Ticket orders, Portfolio Pilot and adopted / external holdings are never blocked (the user's own call, and
 // long-term allocations); open manual trades still occupy their sector.
 const macro = require('../services/macro-calendar');
@@ -21,6 +27,8 @@ const { sectorOf } = require('./sectors');
 const { holding, sameBook, manualOrder } = require('./portfolio-risk');
 const { spreadWidth } = require('./option-spread-width');
 const { pacingReason } = require('./option-pacing');
+const exposure = require('./exposure-limits');
+const quickflips = require('./quickflip-rules');
 
 const EQUITY = new Set(['stocks', 'options']);
 const DEFAULT_SECTOR_MAX = 1;
@@ -40,6 +48,15 @@ function killReason(order = {}) {
   if (!k || !k.active) return null;
   return `DAILY_LOSS_LIMIT_REACHED: today's ${book} P/L ${usd(k.trippedPnl)} hit the -$${k.limit} ${book} daily loss limit at ${et.clock(k.trippedAt)}; `
     + `no new ${book} entries until tomorrow (open trades, stops, targets and closes keep working)`;
+}
+
+function targetReason(order = {}) {
+  const all = dailyLoss.current();
+  const book = bookOfOrder(order);
+  const t = all && all[book] && all[book].target;
+  if (!t || !t.reached) return null;
+  return `DAILY_PROFIT_TARGET_REACHED: today's realized ${book} P/L ${usd(t.realizedAt)} reached the $${t.amount} daily target at ${et.clock(t.reachedAt)}; `
+    + `no new automated ${book} entries until tomorrow (open trades, stops, targets and closes keep working)`;
 }
 
 function macroReason(order, settings, now) {
@@ -74,7 +91,8 @@ function optionsSpreadReason(order) {
 // A setup (sized or not) -> null (allowed) or the rejection reason. ctx: { positions, pending (staging), journal, settings, now }
 function check(order, { positions = [], pending = [], journal = [], settings = {}, now = Date.now() } = {}) {
   if (exempt(order)) return null;
-  return killReason(order) || macroReason(order, settings, now) || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings)
+  return killReason(order) || targetReason(order) || quickflips.reason(order, { positions, pending, journal, now }) || macroReason(order, settings, now)
+    || optionsSpreadReason(order) || sectorReason(order, positions, pending, settings) || exposure.check(order, { positions, pending, settings })
     || pacingReason(order, { positions, pending, journal, settings, now });
 }
 
@@ -97,4 +115,4 @@ function status(settings = {}, now = Date.now()) {
   };
 }
 
-module.exports = { check, refresh, status, killReason, macroReason, sectorReason, optionsSpreadReason, spreadWidth, DEFAULT_SECTOR_MAX, MAX_OPTION_SPREAD_PCT };
+module.exports = { check, refresh, status, killReason, targetReason, macroReason, sectorReason, optionsSpreadReason, spreadWidth, DEFAULT_SECTOR_MAX, MAX_OPTION_SPREAD_PCT };

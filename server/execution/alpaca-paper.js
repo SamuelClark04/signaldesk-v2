@@ -35,7 +35,7 @@ async function open(ledger, order, livePrice, resized = null) {
   const why = whyInternal(o, livePrice);
   if (why) {
     console.log(`[paper] ${o.id}: filled in the internal paper ledger (${why})`);
-    return ledger.executeOrder(order.id, livePrice, { paperBrokerNote: `simulated: ${why}` }, resized);
+    return require('./paper-fills').fill(ledger, order, livePrice, resized, { paperBrokerNote: `simulated: ${why}` }); // Phase 89: natural prices
   }
   const px = o.market === 'options' ? await spreadEntry.limitFor(o.optionsData) : null;
   const r = px ? await spreads.openSpread(o, o.positionSize, px.limit) : await alpaca.submitOrder(o, o.positionSize, livePrice);
@@ -79,7 +79,8 @@ async function reconcileOwn(pos, ledger) {
   const s = await alpaca.getOrderStatus(pos.brokerId);
   if (!s.ok) return { id: pos.id, action: 'error', detail: s.error };
   if (s.terminal && !(s.filledQty > 0)) { ledger.voidLivePosition(pos.id, `ENTRY_${String(s.status).toUpperCase()}`); return { id: pos.id, action: 'voided' }; }
-  if (!(s.filledQty > 0) && pos.fillEstimated) { // Phase 74: still working: re-price toward the natural price, or give up
+  // Phase 74: still working (Phase 89: a PARTIAL fill too, while the order works): re-price toward the natural price, or give up
+  if (pos.fillEstimated && !s.terminal && s.filledQty < pos.positionSize) {
     const w = await spreadEntry.work(pos, s, { api: alpaca, place: (limit, n) => spreads.openSpread(pos, pos.positionSize, limit, `:r${n}`) });
     if (!w) return { id: pos.id, action: 'unchanged' };
     if (w.patch) patch(ledger, pos.id, w.patch);
@@ -87,8 +88,13 @@ async function reconcileOwn(pos, ledger) {
     return { id: pos.id, action: w.action, detail: w.detail };
   }
   if (s.filledQty > 0 && pos.fillEstimated) {
-    patch(ledger, pos.id, { fillEstimated: false, brokerFillSyncedAt: Date.now(), optionsData: { ...pos.optionsData, debit: Math.abs(s.avgFillPrice) || pos.optionsData.debit, plannedDebit: pos.optionsData.debit } });
-    return { id: pos.id, action: 'synced' };
+    // Phase 89: the position is what Alpaca FILLED (an entry canceled after a partial fill holds fewer contracts than ordered):
+    // size, 1R and notional follow the filled quantity, so the app never shows contracts the broker does not hold.
+    const qty = Math.min(pos.positionSize, s.filledQty);
+    const k = pos.positionSize > 0 ? qty / pos.positionSize : 1;
+    patch(ledger, pos.id, { fillEstimated: false, brokerFillSyncedAt: Date.now(), positionSize: qty, ...(k < 1 ? { orderedSize: pos.positionSize, dollarRisk: pos.dollarRisk * k, notional: (pos.notional || 0) * k } : {}),
+      optionsData: { ...pos.optionsData, debit: Math.abs(s.avgFillPrice) || pos.optionsData.debit, plannedDebit: pos.optionsData.debit } });
+    return { id: pos.id, action: 'synced', ...(k < 1 ? { partial: `${qty} of ${pos.positionSize}` } : {}) };
   }
   return { id: pos.id, action: 'unchanged' };
 }
@@ -108,8 +114,8 @@ async function cancelEntry(ledger, pos) {
   const until = Date.now() + FILL_WAIT_MS;
   for (;;) {
     const s = await alpaca.getOrderStatus(pos.brokerId);
-    if (s.ok && s.filledQty > 0) return { filled: true };
-    if (s.ok && s.terminal) { ledger.voidLivePosition(pos.id, 'ENTRY_CANCELED'); console.log(`[paper] ${pos.id}: working order ${pos.brokerId} canceled at ${BROKER} (nothing filled)`); return { canceled: true }; }
+    if (s.ok && s.filledQty > 0 && (s.terminal || s.filledQty >= pos.positionSize)) return { filled: true }; // Phase 89: a partial fill waits for the cancel to settle
+    if (s.ok && s.terminal && !(s.filledQty > 0)) { ledger.voidLivePosition(pos.id, 'ENTRY_CANCELED'); console.log(`[paper] ${pos.id}: working order ${pos.brokerId} canceled at ${BROKER} (nothing filled)`); return { canceled: true }; }
     if (Date.now() >= until) return { pending: true, brokerExitId: pos.brokerId, cancelPending: true };
     await sleep(700);
   }
@@ -120,7 +126,7 @@ async function sendCloseNow(ledger, pos0, reason, leg) {
   if (pos.fillEstimated) {
     const e = await alpaca.getOrderStatus(pos.brokerId);
     if (!e.ok) throw new Error(`PAPER_CLOSE_FAILED: could not read the entry order (${e.error})`);
-    if (!(e.filledQty > 0)) { const x = await cancelEntry(ledger, pos); if (!x.filled) return x; }
+    if (!(e.filledQty > 0) || (!e.terminal && e.filledQty < pos.positionSize)) { const x = await cancelEntry(ledger, pos); if (!x.filled) return x; } // Phase 89: the unfilled rest first
     const f = e.filledQty > 0 ? e : await alpaca.getOrderStatus(pos.brokerId); // record the real fill first
     if (pos.market === 'options') await reconcileOwn(pos, ledger);
     else if (f.ok && f.avgFillPrice > 0) ledger.syncLiveFill(pos.id, { fillPrice: f.avgFillPrice, filledQty: Math.min(f.filledQty, pos.positionSize) });

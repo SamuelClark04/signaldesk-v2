@@ -20,6 +20,7 @@ const S = {
   equitySwing: require('../strategies/3-equity-swing'),
   optionsSystem: require('../strategies/5-options-system'),
   speculativeCrypto: require('../strategies/6-speculative-crypto'),
+  quickFlips: require('../strategies/7-options-quickflips'), // Phase 89: intraday, paper only, off by default
 };
 const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
 const BUDGET_MS = num(process.env.STRATEGY_BUDGET_MS, 15000);
@@ -34,6 +35,7 @@ const STRATEGIES = [
   ['equity-swing', () => S.equitySwing.generateCandidates(prices.getMarkPrices())],
   // Options plan on marks too (after hours: last close + the chain's last quotes); they stage only on live prices.
   ['options-system', () => S.optionsSystem.generateCandidates(prices.getMarkPrices(), { live: prices.getLatestPrices() })],
+  ['options-quickflips', () => S.quickFlips.generateCandidates()],
 ];
 
 const running = new Map(); // name -> the job still running past its budget
@@ -67,8 +69,8 @@ async function collect() {
 }
 
 // Rejection blocks and scan tallies of every strategy (read and cleared after each pass).
-const takeBlocks = () => [S.equitySwing, S.cryptoSwing, S.cryptoIntraday, S.optionsSystem, S.speculativeCrypto].flatMap((m) => m.takeBlocks());
+const takeBlocks = () => [S.equitySwing, S.cryptoSwing, S.cryptoIntraday, S.optionsSystem, S.speculativeCrypto, S.quickFlips].flatMap((m) => m.takeBlocks());
 const scans = () => { const set = settingsNow(); return [['equity-day', S.equityDay], ['crypto-swing', S.cryptoSwing], ['crypto-intraday', S.cryptoIntraday], ['equity-swing', S.equitySwing],
-  ['options-system', S.optionsSystem], ['speculative-crypto', S.speculativeCrypto]].map(([id, m]) => [id, toggles.isEnabled(id, set) ? m.takeScan() : { checked: 0, setups: 0, reasons: {}, disabled: true }]); };
+  ['options-system', S.optionsSystem], ['speculative-crypto', S.speculativeCrypto], ['options-quickflips', S.quickFlips]].map(([id, m]) => [id, toggles.isEnabled(id, set) ? m.takeScan() : { checked: 0, setups: 0, reasons: {}, disabled: true }]); };
 
 module.exports = { collect, takeBlocks, scans, STRATEGIES, BUDGET_MS, _state: { running, carried } };

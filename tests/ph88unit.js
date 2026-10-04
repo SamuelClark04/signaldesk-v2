@@ -12,9 +12,12 @@ const ENV = { LEDGER_STATE_PATH: path.join(DIR, 'ledger.json'), WATCHLIST_PATH: 
 Object.assign(process.env, ENV);
 global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
 const NOW = Date.now(); const H = 3600e3;
+// Phase 89: New York calendar stamps (NOW - 20 h was 'yesterday' only before 8 PM ET, NOW - 2 h 'today' only after 2 AM ET).
+const ET = require(path.join(__dirname, '..', 'server', 'services', 'et-time'));
+const TODAY = Math.max(ET.dayStart(NOW) + 60e3, NOW - 2 * H); const YESTERDAY = ET.dayStart(NOW) - 4 * H;
 const paperT = (id, net, x = {}) => ({ id, asset: 'SPY', market: 'options', strategyId: 'options-system', direction: 'short', execution: 'PAPER', sizingBasis: 'paper', positionSize: 1, fillPrice: 500,
-  dollarRisk: 100, netPnl: net, grossPnl: net + 1, fees: 1, rMultiple: net / 100, exitReason: 'MANUAL_CLOSE', openedAt: NOW - 30 * H, closedAt: NOW - 2 * H, optionsData: { debit: 1.2, multiplier: 100, legs: [] }, ...x });
-const JOURNAL = [paperT('p1', 40), paperT('p2', -150, { exitReason: 'STOP_LOSS' }), paperT('p3', 25, { closedAt: NOW - 20 * H }), { ...paperT('p3:trim:1', 10), parentId: 'p3' },
+  dollarRisk: 100, netPnl: net, grossPnl: net + 1, fees: 1, rMultiple: net / 100, exitReason: 'MANUAL_CLOSE', openedAt: NOW - 30 * H, closedAt: TODAY, optionsData: { debit: 1.2, multiplier: 100, legs: [] }, ...x });
+const JOURNAL = [paperT('p1', 40), paperT('p2', -150, { exitReason: 'STOP_LOSS' }), paperT('p3', 25, { closedAt: YESTERDAY }), { ...paperT('p3:trim:1', 10), parentId: 'p3' },
   paperT('c1', -3, { asset: 'ETH-USD', market: 'crypto', strategyId: 'speculative-crypto', direction: 'long' }),
   paperT('L1', 2.5, { asset: 'ETH-USD', market: 'crypto', execution: 'LIVE', sizingBasis: 'live', strategyId: 'speculative-crypto', broker: 'Coinbase', direction: 'long' })];
 const internal = { id: 'equity-swing:KO:1', asset: 'KO', market: 'stocks', strategyId: 'equity-swing', setupType: 'Pullback', direction: 'long', execution: 'PAPER', sizingBasis: 'paper',

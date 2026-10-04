@@ -1,6 +1,7 @@
 // Settings > Risk Management > Portfolio limits (Phase 77, risk/portfolio-risk.js): the open-risk ceiling (% of
 // the bankroll a book may have at risk across its open trades) and the most bullish / bearish equity trades at
-// once. Phase 81 entry shields: Macro News Shield (+ crypto), max trades per sector, daily loss kill switch ($).
+// once. Phase 81 entry shields: Macro News Shield (+ crypto), max trades per sector, daily loss kill switch ($). Phase 89: the optional
+// daily profit target and the max automated positions per book.
 // Each saves the moment it changes (UPDATE_SETTINGS through settings.js). Exposes window.SignalDesk.portfolioRiskSettings.
 (() => {
   const SD = window.SignalDesk;
@@ -62,7 +63,17 @@
         return field(`settings-daily-loss-${name.toLowerCase()}`, `Daily loss kill switch: ${name} ($)`, v, { min: 0, max: 1000000, step: 5, suffix: '$',
           hint: `When today's ${what} P/L (realized + unrealized) reaches -${money(v)}, no new ${name.toLowerCase()} entries until tomorrow. 0 = off.`,
           onCommit: (x) => SD.settings.request({ [key]: Math.round(x * 100) / 100 }) });
-      }));
+      }),
+      // Phase 89: optional daily profit target (stops new automated entries for the day; never forces or resizes a trade).
+      toggle('Daily profit target', saved.dailyProfitTargetOn === true, `Off by default. On: once a book's REALIZED P/L today reaches ${money(saved.dailyProfitTarget || 200)}, `
+        + 'no new automated entries in that book until tomorrow. It only stops entries: it never forces a trade, loosens a filter, increases a size or closes a trade. '
+        + 'Zero-trade days are normal; a daily target is not a promise of daily profit.', (v) => SD.settings.request({ dailyProfitTargetOn: v })),
+      field('settings-daily-target', 'Daily profit target ($)', saved.dailyProfitTarget || 200, { min: 1, max: 1000000, step: 10, suffix: '$',
+        hint: 'Per book (paper and live separately), realized net P/L of the New York day.', onCommit: (x) => SD.settings.request({ dailyProfitTarget: Math.round(x * 100) / 100 }) }),
+      // Phase 89: cross-market limits (risk/exposure-limits.js).
+      field('settings-max-positions', 'Max automated positions open at once', Number.isInteger(saved.maxOpenPositions) ? saved.maxOpenPositions : 0, { min: 0, max: 100, step: 1, suffix: 'each',
+        hint: `Per book, every market, open + waiting in Approvals. 0 = off. Options + crypto paper risk together is also capped at the ${pct}% ceiling of the combined `
+          + `${money((saved.bankroll || 0) + (saved.cryptoBankroll || 0))} paper bankrolls.`, onCommit: (v) => SD.settings.request({ maxOpenPositions: Math.round(v) }) }));
   }
 
   SD.portfolioRiskSettings = { render };

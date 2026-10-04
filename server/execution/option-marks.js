@@ -12,8 +12,10 @@
 //   optionMark: { value, basis: 'bid'|'mid'|'model', bid, ask, underlying, at, delta, iv, fill, mid, stats }
 //   (bid/ask/delta/iv: a single contract's live quote; null for spreads or the model)
 // Phase 58: a PACKAGE spread is marked at its NET MID (value, basis 'mid': what the
-// spread is worth, the "Premium now"); `fill` is what closing it would fetch (mid -
-// 0.15 x combined bid/ask), and the ledger books exits at the fill. `stats`: live net
+// spread is worth, the "Premium now"); `fill` is what closing it would fetch, and the
+// ledger books exits at the fill. Phase 89: the fill is the NATURAL bid (mid - half the
+// combined bid/ask: long legs at their bids, short legs at their asks), not mid - 0.15 x
+// combined, which no real order was shown to get (the audit: +$354 booked, ~-$198 natural). `stats`: live net
 // Greeks, expiry breakeven, POP, max value / profit (risk/spread-stats.js), at the live
 // underlying (or the last close while the market is closed).
 const { freshQuote } = require('../connectors/options-data');
@@ -52,7 +54,8 @@ function saleValue(p, S, at = Date.now()) {
       const interpolated = shift !== 0;
       if (isPackage(od)) {
         const q = packageQuote(od.legs.map((leg, i) => ({ side: leg.side, ratio: leg.ratio, bid: quotes[i].bid, ask: quotes[i].ask })));
-        return { value: Math.max(0, q.exit + shift), mid: Math.max(0, q.mid + shift), basis: 'bid', quotes, interpolated };
+        const natural = q.mid - q.combined / 2; // Phase 89: what selling the package really fetches now (was mid - 0.15 x combined)
+        return { value: Math.max(0, natural + shift), mid: Math.max(0, q.mid + shift), basis: 'bid', quotes, interpolated };
       }
       const value = od.legs.reduce((v, leg, i) => v + (leg.side === 'sell' ? -quotes[i].ask : quotes[i].bid) * (leg.ratio || 1), 0);
       return { value: Math.max(0, value + shift), basis: 'bid', quotes, interpolated };

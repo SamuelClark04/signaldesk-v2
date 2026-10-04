@@ -8,6 +8,7 @@
 //                         Concurrent calls share one run; changes are broadcast at once.
 //   run(broadcast)        held option quotes (real bids for marks and paper exits), Alpaca Paper option exits,
 //                         time exits (Phase 76: options 3 days before expiry), then the
+//                         Quick Flips' same-day exits (Phase 89, also in the 5 s loop), then the
 //                         PAPER exits (exit-monitor.js), then POSITIONS_UPDATED / JOURNAL_UPDATED.
 const ledger = require('./paper-ledger');
 const prices = require('../market/latest-prices');
@@ -90,6 +91,11 @@ async function runOnce(broadcast) {
     const t = await require('./time-exits').run(ledger, { isBusy: require('./order-router').isBusy });
     if (t.some((x) => x.trade || x.pending || x.canceled)) { out.positionsChanged = true; out.journalChanged = true; }
   } catch (err) { console.error('[pipeline] time exits failed:', err.message); }
+  // Phase 89: Options Quick Flips' same-day rules (deadline, max hold, setup failure: quickflip-exits.js).
+  try {
+    const q = await require('./quickflip-exits').run(ledger, { isBusy: require('./order-router').isBusy });
+    if (q.some((x) => x.trade || x.pending || x.canceled)) { out.positionsChanged = true; out.journalChanged = true; }
+  } catch (err) { console.error('[pipeline] Quick Flips exits failed:', err.message); }
   // PAPER exits from local prices (monitorPositions skips LIVE ones: the broker exits those).
   try {
     const closed = ledger.monitorPositions(prices.getLatestPrices());
@@ -121,8 +127,9 @@ async function fastOptions(broadcast = () => {}, now = Date.now()) {
     try { await optionsData.refreshQuotes(held.flatMap((p) => legSymbols(p.optionsData).filter(Boolean)), now, (u) => prices.getLatestPrice(u), QUOTE_REFRESH_MS); } catch (err) { console.error('[exits] option quotes failed:', err.message); }
   }
   const sent = await require('./alpaca-paper').exits(ledger, now);
-  if (sent.length) publish(broadcast, { positionsChanged: true, journalChanged: true });
-  return { quoted, exits: sent.length };
+  const qf = await require('./quickflip-exits').run(ledger, { isBusy: require('./order-router').isBusy }, now).catch((err) => { console.error('[exits] Quick Flips exits failed:', err.message); return []; });
+  if (sent.length || qf.some((x) => x.trade || x.pending || x.canceled)) publish(broadcast, { positionsChanged: true, journalChanged: true });
+  return { quoted, exits: sent.length + qf.length };
 }
 function fastTick(broadcast = () => {}) {
   try {

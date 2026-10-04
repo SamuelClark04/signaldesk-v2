@@ -14,7 +14,7 @@
 }(typeof window !== 'undefined' ? window : this, () => {
   const LABELS = [
     ['speculative-crypto', 'Moonshots'], ['equity-swing', 'Equity Swing'], ['equity-day', 'Equity Day (ORB)'], ['options-system', 'Options Spreads'],
-    ['portfolio-pilot', 'Portfolio Pilot'], ['crypto-swing', 'Crypto Swing'], ['crypto-intraday', 'Crypto Intraday'], ['manual', 'Manual trades'],
+    ['portfolio-pilot', 'Portfolio Pilot'], ['crypto-swing', 'Crypto Swing'], ['crypto-intraday', 'Crypto Intraday'], ['options-quickflips', 'Options Quick Flips'], ['manual', 'Manual trades'],
   ];
   const NAME = Object.fromEntries(LABELS);
   const ORDER = LABELS.map(([id]) => id);

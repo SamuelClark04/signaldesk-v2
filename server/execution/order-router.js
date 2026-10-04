@@ -72,10 +72,12 @@ async function routeApproved(order, livePrice) {
   if (!venue) throw new Error(`no execution venue for market "${order.market}"`);
   const settings = ledger.getSettings();
   let resized = order.amountOverride ? order : null;
-  if (settings[venue.modeKey] === 'paper' || order.forcePaper) { // forcePaper: a manual PAPER ticket (manual-trade.js)
+  const paper = settings[venue.modeKey] === 'paper' || order.forcePaper; // forcePaper: a manual PAPER ticket (manual-trade.js)
+  if (order.strategyId === 'options-quickflips' && !paper) throw new Error('QUICKFLIPS_PAPER_ONLY: Options Quick Flips trade on paper only; nothing was sent');
+  if (paper) {
     const ap = require('./alpaca-paper'); // Phase 71: paper stocks / options execute at Alpaca Paper
     if (order.market !== 'crypto' && ap.enabled(settings)) return ap.open(ledger, order, livePrice, resized);
-    return ledger.executeOrder(order.id, livePrice, {}, resized);
+    return require('./paper-fills').fill(ledger, order, livePrice, resized); // Phase 89: crypto at the ask + taker, options at natural
   }
   if (!venue.api) throw new Error('LIVE_OPTIONS_UNSUPPORTED');
   if (order.market === 'crypto') {

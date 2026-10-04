@@ -7,7 +7,8 @@
 //                  nets MIN_T1_NET_RR after fees against the stop (exitRule.stopValue), <= 53% of the
 //                  width, and at most RISK_TOLERANCE more risk per contract than the plan was sized for
 //   work(...)      a working entry: re-priced to the current natural (same cap) every REPRICE_MS;
-//                  not filled GIVE_UP_MS after it was placed -> canceled and voided (never waits all day)
+//                  not filled GIVE_UP_MS after it was placed -> canceled and voided (never waits all day); a Quick Flip
+//                  (Phase 89, optionsData.entryTimeoutMs) gives up after its own timeout and is never re-priced
 const options = require('../connectors/options-data');
 const { OPTIONS_ROUND_TRIP_PER_CONTRACT } = require('../risk/cost-authority');
 const { MIN_T1_NET_RR } = require('../risk/reality-gate');
@@ -59,13 +60,15 @@ async function limitFor(od, now = Date.now()) {
 // -> null (nothing to do) | { action, detail, patch?, void? }
 async function work(pos, status, { api, place, now = Date.now() }) {
   const w = pos.entryWork || { placedAt: now, repricedAt: 0, reprices: 0, limit: pos.limitPrice || pos.optionsData.debit }; // orders placed before Phase 74: re-priced at once
-  if (now - w.placedAt >= GIVE_UP_MS) {
+  const giveUp = pos.optionsData.entryTimeoutMs > 0 ? pos.optionsData.entryTimeoutMs : GIVE_UP_MS; // Phase 89: a Quick Flip waits 3 min, never re-priced
+  if (now - w.placedAt >= giveUp) {
     const c = await api.cancelOrder(pos.brokerId);
     const s = c.ok ? await api.getOrderStatus(pos.brokerId) : null;
     if (s && s.ok && s.filledQty > 0) return { action: 'waiting', detail: 'filled while canceling: synced next pass' };
     if (!(s && s.ok && s.terminal)) return { action: 'waiting', detail: `unfilled for ${Math.round((now - w.placedAt) / 60000)} min; cancel not confirmed yet` };
-    return { action: 'voided', void: 'ENTRY_UNFILLED', detail: `not filled in ${GIVE_UP_MS / 60000} min at up to ${w.limit} (natural ${w.natural ?? '?'}, plan max ${w.cap ?? '?'}): canceled at Alpaca Paper` };
+    return { action: 'voided', void: 'ENTRY_UNFILLED', detail: `not filled in ${giveUp / 60000} min at up to ${w.limit} (natural ${w.natural ?? '?'}, plan max ${w.cap ?? '?'}): canceled at Alpaca Paper` };
   }
+  if (pos.optionsData.entryTimeoutMs > 0) return null; // Quick Flips: no re-pricing (the entry is taken at the ask or not at all)
   if (now - (w.repricedAt || w.placedAt) < REPRICE_MS && pos.entryWork) return null;
   const px = await limitFor(pos.optionsData, now);
   if (!(px.limit > w.limit + 0.005)) return { action: 'unchanged', patch: { entryWork: { ...w, repricedAt: now, natural: px.natural, cap: px.cap } } };

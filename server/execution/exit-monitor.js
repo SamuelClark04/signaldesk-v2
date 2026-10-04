@@ -53,7 +53,7 @@ function premiumSignal(pos, price) {
   const m = saleValue(pos, price);
   if (!m) return null;
   const mark = Number.isFinite(m.mid) ? m.mid : m.value;
-  const through = pos.invalidation > 0 && (pos.direction === 'short' ? price >= pos.invalidation : price <= pos.invalidation);
+  const through = !pos.optionsData.quickFlip && pos.invalidation > 0 && (pos.direction === 'short' ? price >= pos.invalidation : price <= pos.invalidation); // Phase 89: Quick Flips fail on a 5m close (quickflip-exits)
   if (mark <= rule.stopValue || through) {
     const n = (stopHits.get(pos.id) || 0) + 1;
     stopHits.set(pos.id, n);

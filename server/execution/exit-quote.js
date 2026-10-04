@@ -3,9 +3,9 @@
 // closePosition), every open position carries its result (exitQuote, via
 // getActivePositions) and POSITION_MARKS re-sends it every MARK_MS, so the "Net if
 // closed now" on screen and the Journal entry are the same numbers.
-//   options   exitValue = what closing fetches per share (option-marks saleValue: a
-//             package spread's net mid - 0.15 x combined leg bid/ask, charged ONCE;
-//             single legs at the bid), midValue = the net mid (the mark);
+//   options   exitValue = what closing fetches per share (option-marks saleValue: the
+//             NATURAL bid since Phase 89: long legs at their bids, short legs at their
+//             asks; single legs at the bid), midValue = the net mid (the mark);
 //             gross = (exitValue - debit) x 100 x size; midGross the same at the mid
 //   stocks / crypto  exit at the live price (grossPnl)
 //   fees      estimateRoundTripFees: options $0.65 / leg / fill (entry + exit),

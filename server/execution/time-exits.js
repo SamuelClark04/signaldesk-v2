@@ -34,6 +34,7 @@ const warned = new Set();
 function due(p, now = Date.now()) {
   const od = p.optionsData;
   if (p.market !== 'options' || !od || !/^\d{4}-\d{2}-\d{2}$/.test(od.expiration || '') || !session.isEquityMarketOpen(now)) return null;
+  if (od.quickFlip) return null; // Phase 89: Quick Flips close the same day by their own rules (quickflip-exits.js)
   const clock = et.parts(now);
   const m = clock.h * 60 + clock.m;
   if (m < CHECK_MIN || m >= CUTOFF_MIN) return null;

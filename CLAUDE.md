@@ -172,6 +172,27 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   bankrolls; synchronous from the first close to the reset. UI: Settings > Paper trading run (views/settings-paper-run.js, modal) and
   the Journal run selector (views/journal-runs.js: an archived run swaps the table + scorecard, cumulative P/L line; Taxes stay on the
   current journal). Test: tests/ph88unit.js.
+- **Diagnosis + Quick Flips + research pause (Phase 89)**: protocol frozen BEFORE any replay (docs/research/phase89-protocol.md, commit
+  e76aeb5), results in docs/research/phase89-results.md (PRELIMINARY: Alpaca has option trade bars from Feb 2024 but NO historical option
+  quotes; the app's live option quotes are the free INDICATIVE feed, not OPRA). Audit tool scripts/trade-audit.js (read-only, safe on the
+  VM: never requires a server module). RESEARCH PAUSE: strategy-toggles.PAUSE (crypto-intraday, equity-day, equity-swing, options-system,
+  crypto-swing) switched off ONCE per ledger (ledger-store, settings.strategyPauseVersion 89), off by default; re-enabling sticks; only
+  Moonshots stays on. OPTIONS QUICK FLIPS (strategies/7-options-quickflips.js + quickflips-signals.js, OFF by default, PAPER ONLY: the
+  replay failed, S1-V1 closest PF 1.41 but bootstrap lower bound < 0; validation window 2025-06..2026-10 kept unseen): SPY / QQQ single
+  calls / puts, 3-7 DTE (closest to 5), S1 ORB + VWAP only, debit = the ask from a quote <= 30 s old, bid/ask <= 5% of mid; exits: premium
+  -30% / +45% (existing exitRule paths), quickflip-exits.js QF_SETUP_FAILED (5m close back through VWAP) / QF_MAX_HOLD (60 min) /
+  QF_DEADLINE (3:40 PM): the ONLY time exits besides 2 DTE (the user's exception, Quick Flips only; time-exits skips them); 3-min
+  approval TTL; entry timeout 3 min, never re-priced (spread-entry optionsData.entryTimeoutMs); risk/quickflip-rules.js shield (paper
+  only, 9:50-2:33, FOMC after 1:30, 1 per symbol, 2 open, 3 / symbol / day, 15-min cooldown, no same direction after a stop, -2R day);
+  exempt from option-pacing; order-router refuses a live route (QUICKFLIPS_PAPER_ONLY). Live signals == replay (1,748 / 1,748). DAILY
+  PROFIT TARGET (daily-loss.js, settings.dailyProfitTargetOn false / dailyProfitTarget 200): per book, REALIZED today >= target ->
+  DAILY_PROFIT_TARGET_REACHED on automated entries only; never forces, resizes or closes. risk/exposure-limits.js: COMBINED_RISK_CAP
+  (paper options + crypto open risk <= maxOpenRiskPct of bankroll + cryptoBankroll) and MAX_OPEN_POSITIONS (settings.maxOpenPositions,
+  0 = off). PAPER FILLS (execution/paper-fills.js): paper crypto buys at the best ASK with the TAKER fee; paper option spreads bought at
+  the natural ask and SOLD at the natural bid (option-marks: was mid -/+ 0.15 x combined: +$354 booked was ~-$198 natural); a Quick
+  Flip with no fresh quote is never filled. alpaca-paper: a partial fill stays working; canceled after a partial fill, the position is the
+  FILLED quantity (size / 1R / notional); a close cancels the rest first. Crypto: BTC / ETH Crypto Intraday = 2 trades a year (3.2% min
+  chart stop); its 15-coin list lost (15m PF 0.81, 1h PF 0.57, OKX fees). Scratch research: ph89/ (qf-*.js, cr-*.js). Test: tests/ph89unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

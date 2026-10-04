@@ -12,7 +12,8 @@ const DEFAULT_PER_DAY = 2;
 const SAME_DIR_GAP_MS = 60 * 60 * 1000;
 const perDay = (settings = {}) => (Number.isFinite(settings.maxOptionEntriesPerDay) && settings.maxOptionEntriesPerDay >= 0 ? Math.floor(settings.maxOptionEntriesPerDay) : DEFAULT_PER_DAY);
 const baseId = (x) => x.parentId || String(x.id).replace(/:trim:\d+$/, '');
-const auto = (x) => x && x.market === 'options' && !manualOrder(x) && !holding(x) && x.strategyId !== 'portfolio-pilot';
+// Phase 89: Options Quick Flips are paced by their own rules (risk/quickflip-rules.js) and never count against swing option entries.
+const auto = (x) => x && x.market === 'options' && !manualOrder(x) && !holding(x) && x.strategyId !== 'portfolio-pilot' && x.strategyId !== 'options-quickflips';
 
 // Automated option entries of the order's book: [{ id, at (entry time), direction }] (one per trade).
 function entries(order, { positions = [], pending = [], journal = [] }) {

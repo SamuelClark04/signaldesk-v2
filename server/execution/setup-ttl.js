@@ -2,6 +2,7 @@
 // taking while its candle is fresh:
 //   Momentum Ignition (System 6)                 8 minutes
 //   Accumulation Coil (System 6), Crypto Intraday 15 minutes
+//   Options Quick Flips (Phase 89)               3 minutes
 //   everything else                              30 minutes (the order guard's window)
 // A fast setup also leaves the queue at once when the live price has already run more
 // than CHASE_PCT (1.5%) past its entry trigger, or is through its stop. Used by the
@@ -11,8 +12,10 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const IGNITION_TTL_MS = 8 * 60 * 1000;
 const COIL_TTL_MS = 15 * 60 * 1000;
 const CHASE_PCT = 0.015;
+const QUICKFLIP_TTL_MS = 3 * 60 * 1000; // Phase 89: Options Quick Flips (the replay entered within ~1-3 min of the signal)
 
 function ttlOf(o) {
+  if (o && o.strategyId === 'options-quickflips') return QUICKFLIP_TTL_MS;
   if (o && o.gemTrigger === 'IGNITION') return IGNITION_TTL_MS;
   if (o && (o.gemTrigger === 'COIL' || o.strategyId === 'crypto-intraday')) return COIL_TTL_MS;
   return DEFAULT_TTL_MS;
@@ -34,4 +37,4 @@ function staleness(o, livePrice, now = Date.now()) {
   return null;
 }
 
-module.exports = { ttlOf, expiresAt, staleness, createdAtOf, DEFAULT_TTL_MS, IGNITION_TTL_MS, COIL_TTL_MS, CHASE_PCT };
+module.exports = { ttlOf, expiresAt, staleness, createdAtOf, DEFAULT_TTL_MS, IGNITION_TTL_MS, COIL_TTL_MS, QUICKFLIP_TTL_MS, CHASE_PCT };
