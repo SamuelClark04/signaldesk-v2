@@ -263,7 +263,7 @@ accounting reconciliation (section A) and the input sha256 before / after added 
 script that also separates the checked-out commit from the commit the running process loaded, and reads the strategy switches the way the
 loaded code does: `scripts/vm-audit.sh`, steps in `docs/deploy/phase85b-to-89c.md` section 1:
 
-    cd ~/SignalDesk-V2 && git fetch -q origin
+    cd ~/signaldesk-v2 && git fetch -q origin
     git show <C>:scripts/vm-audit.sh > /tmp/vm-audit.sh && bash /tmp/vm-audit.sh <C>    # <C> = the Phase 89d commit
 
 Download `~/sd-audit-<time>.tgz` and say so; the reconciliation of the VM's trades (section 16 for the local copy) is then redone on it.
