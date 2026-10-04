@@ -111,7 +111,7 @@
         seg([['paper', 'Paper'], ['live', `Live${d && d.ok && live && d.coinbaseCash !== null ? ` · ${money(d.coinbaseCash)} cash` : ''}`, !(d && d.liveAllowed)]], t.venue, (v) => {
           t.venue = v; if (v === 'live') t.direction = 'long'; t.preview = null; loadDefaults(); render();
         })]));
-      if (d && d.ok && !d.liveAllowed) rows.push(el('p', { className: 'mt-note', textContent: 'Live crypto is off: Settings has crypto on PAPER.' }));
+      if (d && d.ok && !d.liveAllowed) rows.push(el('p', { className: 'mt-note', textContent: d.paperOnly ? 'Live crypto is locked: SignalDesk is paper-only in every market.' : 'Live crypto is off: Settings has crypto on PAPER.' }));
       const ms = d && d.moonshot;
       if (ms) rows.push(el('p', { className: `mt-note mt-moon${ms.error ? ' is-warn' : ''}`, textContent: ms.error ? `Moonshot sizing unavailable: ${ms.error}`
         : `Moonshot Smart Investment Amount: ${money(ms.amount)} = ${Math.round(ms.scale * 100)}% of normal risk (radar ${ms.score ?? '—'}/100; risks ${money(ms.risk)} at the stop).` }));

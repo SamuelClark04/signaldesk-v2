@@ -108,6 +108,14 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('evidence: the approval email leads with the label (subject and first detail row)', /\[PF 1\.41 dev · Failed\]/.test(mail.subject) && /Test record\s+PF 1\.41 dev · Failed/.test(mail.text), mail.subject);
   L.discardOrder(sized.id);
 
+  // ---------- 5. Evidence badge (client, pure part) ----------
+  global.window = { SignalDesk: { ui: { el: (tag, props) => ({ tag, ...props }) } } };
+  require(path.join(ROOT, 'client', 'components', 'evidence-badge.js'));
+  const EB = window.SignalDesk.evidenceBadge;
+  const tb = EB.text(ev.of('equity-swing'));
+  check('badge: a FAILED record -> amber "PF 0.86 · Failed" with its detail + source as the tooltip', tb && tb.label === 'PF 0.86 · Failed' && tb.kind === 'is-failed' && /93 trades/.test(tb.title) && /Phase 90/.test(tb.title));
+  check('badge: Pilot / Untested are grey; a manual trade (null) renders nothing', EB.text(ev.of('portfolio-pilot')).kind === 'is-neutral' && EB.text(ev.of('x-new')).kind === 'is-neutral' && EB.text(null) === null && EB.badge(null) === null);
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

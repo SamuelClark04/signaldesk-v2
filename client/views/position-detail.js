@@ -128,6 +128,7 @@
     const under = m.price > 0 ? `${ulPx(m.price)}${Number.isFinite(m.underlyingMove) ? ` (${pct(m.underlyingMove)} since ${ulPx(p.fillPrice)})` : ''}` : 'No live price';
     return el('div', { className: 'opp-kv-group' }, [
       el('h3', { className: 'opp-section', textContent: `${venueOf(p)} · ${p.direction === 'short' ? 'Short' : 'Long'} ${p.setupType || ''}` }),
+      ...[SD.evidenceBadge.badge(p.evidence)].filter(Boolean), // Phase 91: opened from a strategy with this test record
       ...[SD.liveClose.armor(p)].filter(Boolean), // Phase 67: UNARMORED / SELL UNCONFIRMED
       ...[SD.tradeContext.block(p)].filter(Boolean), // Phase 79: expected hold, entry vs live score, why we entered
       ...(isRealOption(p) || !opt ? [heroRow(p, m)] : []),

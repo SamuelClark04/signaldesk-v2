@@ -25,6 +25,7 @@
     const head = el('div', { className: 'slog-head' }, [
       el('span', { className: `slog-tag is-${e.kind}`, textContent: TAG[e.kind] || e.kind }),
       el('strong', { className: 'slog-title', textContent: e.kind === 'scan' ? e.strategy : `${e.symbol}` }),
+      ...[SD.evidenceBadge.badge(e.strategyId && opts.ev ? opts.ev[e.strategyId] : null)].filter(Boolean), // Phase 91
       ...(e.kind === 'scan' ? [] : [el('span', { className: 'slog-muted', textContent: e.strategy })]),
       el('span', { className: 'slog-time', textContent: `${time(e.at)}${repeat}`, title: `${age(e.at)} ago` }),
     ]);
@@ -52,7 +53,7 @@
           + `${state.settings && state.settings.strictness ? ` · strictness: ${state.settings.strictness}` : ''}` }),
       ]),
       log.length
-        ? el('ol', { className: 'slog-list' }, log.map((e) => entry(e, opts)))
+        ? el('ol', { className: 'slog-list' }, log.map((e) => entry(e, { ...opts, ev: (state.settings && state.settings.strategyEvidence) || {} })))
         : el('p', { className: 'slog-muted', textContent: 'Nothing logged yet: the first scan runs within a minute of the server starting.' }),
     ]);
   }

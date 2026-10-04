@@ -76,6 +76,7 @@
     return el('article', { className: `apv-card${o.speculative ? ' is-moon' : ''}` }, [
       el('header', { className: 'apv-head' }, [
         SD.scannerDetail.badge(o.asset),
+        ...[SD.evidenceBadge.badge(o.evidence)].filter(Boolean), // Phase 91: the strategy's test record
         ...(o.speculative ? [el('span', { className: 'opp-moon', textContent: 'Speculative Moonshot' })] : []),
         // An options setup is always BOUGHT (a put spread is the bearish one), so it reads BUY + its contract label.
         el('div', { className: 'apv-title' }, [el('strong', { textContent: o.market === 'options' && od && od.label ? `BUY ${od.label}` : `${o.direction === 'short' ? 'SELL' : 'BUY'} ${SD.oppDetail.displaySymbol(o)}` }),

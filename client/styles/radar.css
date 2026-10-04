@@ -1,0 +1,18 @@
+/* Phase 91 radar mode: evidence badges, the Quick Flips radar card, the paper-only lock note. */
+.ev-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; border: 1px solid; }
+.ev-badge.is-failed { color: var(--warn); border-color: var(--warn); background: rgba(251, 191, 36, 0.10); }
+.ev-badge.is-neutral { color: var(--text-muted); border-color: var(--border-strong); background: var(--surface-2); }
+.paper-lock-note { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--accent); color: var(--text-muted); font-size: 12px; }
+.settings-toggle.is-locked { opacity: 0.55; cursor: not-allowed; }
+.qf-card { display: grid; gap: 8px; padding: 10px 0; }
+.qf-contract { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.qf-muted { color: var(--text-faint); font-size: 12px; font-family: var(--font-mono); }
+.qf-why, .qf-exits { margin: 0; font-size: 13px; }
+.qf-exits { color: var(--text-muted); }
+.qf-cost { display: grid; gap: 2px; font-size: 12px; }
+.qf-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--border); padding: 2px 0; }
+.qf-k { color: var(--text-muted); }
+.qf-countdown { margin: 0; font-weight: 600; color: var(--long); }
+.qf-countdown.is-soon { color: var(--warn); }
+.qf-countdown.is-expired { color: var(--short); }
+@media (max-width: 600px) { .qf-row { flex-direction: column; gap: 0; } }

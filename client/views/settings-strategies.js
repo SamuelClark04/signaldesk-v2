@@ -14,15 +14,19 @@
     const map = saved.strategiesEnabled;
     const labels = saved.strategyLabels || {};
     const notes = saved.strategyNotes || {};
+    const manual = new Set(saved.strategyManualOnly || []); // Phase 91: crypto scanners never run
+    const records = saved.strategyEvidence || {};
     box.replaceChildren(...Object.keys(labels).map((id) => {
-      const on = map[id] !== false;
-      const t = el('button', { type: 'button', className: `settings-toggle${on ? ' is-on' : ''}`, textContent: on ? 'On' : 'Off',
-        title: on ? 'Scanning: new setups can be proposed' : 'Off: not scanned, no new setups (open trades keep their stops / targets)' });
+      const locked = manual.has(id);
+      const on = !locked && map[id] !== false;
+      const t = el('button', { type: 'button', className: `settings-toggle${on ? ' is-on' : ''}${locked ? ' is-locked' : ''}`, textContent: locked ? 'Manual-only' : on ? 'On' : 'Off', disabled: locked,
+        title: locked ? 'Crypto is manual-only: charts + the Manual Trade Ticket (crypto research is a separate project)' : on ? 'Scanning: setups wait in Approvals for your click (paper only)' : 'Off: not scanned, no new setups (open trades keep their stops / targets)' });
       t.setAttribute('role', 'switch');
       t.setAttribute('aria-checked', String(on));
       t.setAttribute('aria-label', labels[id]);
-      t.onclick = () => SD.settings.request({ strategiesEnabled: { ...map, [id]: !on } });
+      if (!locked) t.onclick = () => SD.settings.request({ strategiesEnabled: { ...map, [id]: !on } });
       return el('div', { className: `settings-strategy${on ? '' : ' is-off'}` }, [t, el('div', {}, [el('strong', { textContent: labels[id] }),
+        ...[SD.evidenceBadge.badge(records[id])].filter(Boolean),
         ...(notes[id] ? [el('span', { className: 'settings-note', textContent: notes[id] })] : [])])]);
     }));
   }

@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="styles/journal.css">
   <link rel="stylesheet" href="styles/ai-analyst.css">
   <link rel="stylesheet" href="styles/paper-runs.css">
+  <link rel="stylesheet" href="styles/radar.css">
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/today.css">
   <link rel="stylesheet" href="styles/moonshots.css">
@@ -238,6 +239,7 @@
               </select>
             </label>
             <span class="live-warning" id="settings-live-warning" hidden></span>
+            <p class="paper-lock-note" id="settings-paper-lock" hidden>Paper-only lock: every new entry is paper, in every market. No live broker orders are sent. Existing live positions are still monitored, exited and can be closed.</p>
             <p class="settings-note" id="settings-mode-explain"></p>
           </div>
           <section class="settings-waterfall" id="settings-waterfall" aria-label="Crypto waterfall routing and broker status"></section>
@@ -311,6 +313,8 @@
   <script src="lib/mini-markdown.js"></script>
   <script src="components/ai-analyst.js"></script>
   <script src="components/trade-context.js"></script>
+  <script src="components/evidence-badge.js"></script>
+  <script src="components/quickflip-card.js"></script>
   <script src="components/live-close.js"></script>
   <script src="components/ratchet-button.js"></script>
   <script src="components/level-editor.js"></script>

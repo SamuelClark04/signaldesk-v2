@@ -65,7 +65,7 @@
         ]),
         el('div', { className: 'opp-head-meta' }, watch ? [el('span', { className: 'opp-watch-tag', textContent: 'Market watch' })] : [
           el('span', { className: `badge-${dir}`, textContent: dir }),
-          el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` })]),
+          el('span', { className: 'opp-meta', textContent: `${o.setupType || 'Setup'} · ${o.timeframe || '—'}` }), ...[SD.evidenceBadge.badge(o.evidence)].filter(Boolean)]),
       ]),
       // Active Trade HUD floats over the chart when this symbol has open position(s).
       el('div', { className: 'opp-chart-wrap', style: SD.liveChart.primary.barHeight() ? `--lwc-bar-h:${SD.liveChart.primary.barHeight()}px` : '' }, [SD.dualChart.wrap(chart, ctx.state, o.asset, ctx), ...[SD.tradeHud.hud(o, ctx)].filter(Boolean)]), // [⬍ Dual Chart] (Phase 61)

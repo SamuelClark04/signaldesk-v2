@@ -179,6 +179,9 @@
       $(m.id).value = saved[m.key];
       $(m.id).classList.toggle('is-live', saved[m.key] === 'live');
     }
+    // Phase 91: the paper-only lock (server/risk/paper-lock.js): Live cannot be chosen; the server refuses it anyway.
+    for (const m of MODE_SELECTS) { const opt = $(m.id).querySelector('option[value="live"]'); if (opt) { opt.disabled = !!saved.paperOnly; opt.title = saved.paperOnly ? 'Locked: paper only' : ''; } }
+    $('settings-paper-lock').hidden = !saved.paperOnly;
 
     const badge = $('mode-badge');
     badge.textContent = !live.length ? 'Paper'
