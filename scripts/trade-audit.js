@@ -1,4 +1,5 @@
-// Trade audit (Phase 89), READ-ONLY: node scripts/trade-audit.js [ledger-state.json] [--csv out.csv] [--since YYYY-MM-DD]
+// Trade audit (Phase 89), READ-ONLY: node scripts/trade-audit.js [ledger-state.json] [--csv out.csv] [--since YYYY-MM-DD] [--runs paper-runs.json]
+// Run it on a COPY (cp server/data/ledger-state.json /tmp/ledger-snapshot.json) to keep the original untouched; it never writes the ledger.
 // Reads the ledger file (and paper-runs.json beside it: archived paper runs) ONCE, sends nothing, writes only the optional CSV.
 // Safe to run on the VM next to the live server: it never requires a server module and never touches the ledger.
 // Per trade: strategy, signal / staged / fill / exit times, entry rationale, quote age at the signal, contract / spread facts,
@@ -18,7 +19,7 @@ const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1
 const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || path.join(__dirname, '..', 'server', 'data', 'ledger-state.json');
 const since = opt('--since') ? Date.parse(`${opt('--since')}T00:00:00Z`) : 0;
 const L = JSON.parse(fs.readFileSync(file, 'utf8'));
-const runsFile = path.join(path.dirname(file), 'paper-runs.json');
+const runsFile = opt('--runs') || path.join(path.dirname(file), 'paper-runs.json');
 const runs = fs.existsSync(runsFile) ? JSON.parse(fs.readFileSync(runsFile, 'utf8')) : null;
 
 const et = (ms) => (ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
@@ -73,10 +74,12 @@ function auditRow(t, source) {
   };
 }
 
-const rows = [];
-for (const t of L.tradeJournal || []) if (Number.isFinite(t.netPnl) && (t.closedAt || 0) >= since) rows.push(auditRow(t, 'current'));
-for (const run of (runs && runs.runs) || []) for (const t of run.journal || []) if (Number.isFinite(t.netPnl) && (t.closedAt || 0) >= since) rows.push(auditRow(t, `run ${run.name || run.runId}`));
-rows.sort((a, b) => (a.closedAt < b.closedAt ? -1 : 1));
+const rows = []; const records = [];
+const take = (t, src) => { if (Number.isFinite(t.netPnl) && (t.closedAt || 0) >= since) { rows.push(auditRow(t, src)); records.push(t); } };
+for (const t of L.tradeJournal || []) take(t, 'current');
+for (const run of (runs && runs.runs) || []) for (const t of run.tradeJournal || run.journal || []) take(t, `run ${run.name || run.runId}`);
+const order = rows.map((r, i) => i).sort((a, b) => (records[a].closedAt || 0) - (records[b].closedAt || 0));
+rows.splice(0, rows.length, ...order.map((i) => rows[i])); records.splice(0, records.length, ...order.map((i) => records[i]));
 
 function stats(list) {
   const w = list.filter((r) => r.net > 0); const l = list.filter((r) => r.net <= 0);
@@ -95,6 +98,8 @@ console.log('\nBY STRATEGY x WHO CLOSED IT'); for (const [k, list] of group((r) 
 console.log('\nBY EXIT REASON'); for (const [k, list] of group((r) => `${r.execution} ${r.exitReason.replace(/ @ .*/, '').slice(0, 30)}`)) console.log(line(k, stats(list)));
 const nat = rows.filter((r) => r.netAtNatural !== null);
 if (nat.length) console.log(`\nPAPER OPTION SPREADS AT NATURAL PRICES: ${nat.length} trades booked ${num(nat.reduce((s, r) => s + r.net, 0))}, at natural ${num(nat.reduce((s, r) => s + r.netAtNatural, 0))} (wins ${nat.filter((r) => r.netAtNatural > 0).length})`);
+console.log('\nLOSS ATTRIBUTION ($; RECORDED net from the ledger, everything else a RECONSTRUCTED ESTIMATE: scripts/audit-attribution.js)');
+for (const l of require('./audit-attribution').table(records, rows)) console.log(`  ${l}`);
 console.log('\nFLAG COUNTS (group:what)');
 const fc = {}; for (const r of rows) for (const f of r.flags) { const k = f.split(':')[0] + ':' + f.split(':')[1].replace(/[-+]?\d[\d.]*/g, '#'); fc[k] = (fc[k] || 0) + 1; }
 for (const [k, n] of Object.entries(fc).sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);

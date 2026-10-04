@@ -141,7 +141,7 @@ function sizeOptions(candidate, riskBudget, bankroll, capPct, cashCap = Infinity
   }
   const byRisk = Math.floor(riskBudget / riskPerContract + 1e-9) || 1; // one contract within the 1.25x tolerance
   const byPremium = Math.floor(Math.min(riskBudget * MAX_PREMIUM_R, maxDebit, bankroll * capPct, cashCap) / premiumPerContract + 1e-9);
-  const positionSize = Math.min(byRisk, byPremium);
+  const positionSize = Math.min(byRisk, byPremium, od.maxContracts >= 1 ? Math.floor(od.maxContracts) : Infinity); // Phase 89: a Quick Flip is 1 contract
   if (positionSize < 1) return { error: `Bankroll too small: one contract's premium ${usd(premiumPerContract)} exceeds ${capPct * 100}% of the bankroll or the cash available` };
   return { positionSize, dollarRisk: positionSize * riskPerContract, notional: positionSize * premiumPerContract, cappedByNotional: byPremium < byRisk,
     ...(riskPerContract > riskBudget + 1e-9 ? { smallAccountCap: true } : {}) };

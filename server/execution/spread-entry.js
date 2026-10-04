@@ -61,7 +61,8 @@ async function limitFor(od, now = Date.now()) {
 async function work(pos, status, { api, place, now = Date.now() }) {
   const w = pos.entryWork || { placedAt: now, repricedAt: 0, reprices: 0, limit: pos.limitPrice || pos.optionsData.debit }; // orders placed before Phase 74: re-priced at once
   const giveUp = pos.optionsData.entryTimeoutMs > 0 ? pos.optionsData.entryTimeoutMs : GIVE_UP_MS; // Phase 89: a Quick Flip waits 3 min, never re-priced
-  if (now - w.placedAt >= giveUp) {
+  const deadline = pos.optionsData.entryDeadlineAt > 0 ? pos.optionsData.entryDeadlineAt : Infinity; // ... and never past D + 3 min (the replay's window)
+  if (now - w.placedAt >= giveUp || now >= deadline) {
     const c = await api.cancelOrder(pos.brokerId);
     const s = c.ok ? await api.getOrderStatus(pos.brokerId) : null;
     if (s && s.ok && s.filledQty > 0) return { action: 'waiting', detail: 'filled while canceling: synced next pass' };

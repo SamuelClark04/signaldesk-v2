@@ -103,4 +103,36 @@ async function manage(ledger, pos, deps, now = Date.now()) {
   } finally { busy.delete(pos.id); }
 }
 
-module.exports = { quote, stepLimit, placeTarget, startExit, manage, cancelWorking, STEP_MS, MAX_STEPS, STEP_SHARE, FLOOR_BELOW_BID };
+// Phase 89 URGENT re-price (an Options Quick Flip past its same-day deadline whose close has not filled): cancel the working close
+// and re-place it `discount` under the best reference price we have: the natural bid from fresh quotes, else the LAST known
+// quotes (any age), else the model value. A sell limit under the bid is marketable (Alpaca fills it at the bid), so this exits at
+// the market while staying bounded: never a market order, never under a cent. -> { placed, limit } | { trade } | { waiting } | { error }
+async function urgent(ledger, pos, deps, discount, now = Date.now()) {
+  if (busy.has(pos.id)) return { waiting: true }; // manage() is stepping this close right now (one call per position at a time)
+  busy.add(pos.id);
+  try { return await urgentNow(ledger, pos, deps, discount, now); } finally { busy.delete(pos.id); }
+}
+async function urgentNow(ledger, pos, deps, discount, now) {
+  const w = pos.exitWork || {};
+  if (now - (w.urgentAt || w.placedAt || 0) < URGENT_EVERY_MS) return { waiting: true };
+  const legs = legsOf(pos.optionsData);
+  const q = (await quote(pos, deps, now)) || (() => { const qs = legs.map((l) => deps.fresh(l.contract, 24 * 3600e3, now)); return qs.every(Boolean) ? spreadWidth({ legs }, qs) : null; })();
+  let ref = q ? q.bid : null;
+  if (!(ref > 0)) { const m = require('./option-marks').saleValue(pos, require('../market/latest-prices').getLatestPrice(pos.asset)); ref = m ? m.value : null; }
+  if (!(ref > 0)) return { error: 'no quote (fresh or last known) and no model value to price the deadline exit' };
+  const limit = cents(Math.max(0.01, ref * (1 - discount)));
+  if (pos.paperExitOrderId && w.kind === 'exit' && !(limit < w.limit - 0.005)) { patch(ledger, pos.id, { exitWork: { ...w, urgentAt: now } }); return { waiting: true }; }
+  const c = await cancelWorking(ledger, pos, deps);
+  if (c.trade) return c;
+  if (c.pending) return { waiting: true };
+  const reason = pos.paperExitReason || w.reason || 'QF_DEADLINE';
+  const r = await deps.place(pos, limit, `${pos.id}:u${Math.round(discount * 100)}:${now}`);
+  if (!r.ok) return { error: r.error };
+  patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: pos.paperExitLeg || 'qf_deadline',
+    exitWork: { kind: 'exit', reason, limit, step: MAX_STEPS, stepAt: now, placedAt: w.placedAt || now, urgentAt: now, urgent: discount, q } });
+  console.warn(`[paper] ${pos.id}: deadline exit re-priced to ${limit} (${Math.round(discount * 100)}% under ${q ? 'the bid' : 'the model value'} ${cents(ref)})`);
+  return { placed: true, limit };
+}
+const URGENT_EVERY_MS = 20 * 1000;
+
+module.exports = { quote, stepLimit, placeTarget, startExit, manage, cancelWorking, urgent, STEP_MS, MAX_STEPS, STEP_SHARE, FLOOR_BELOW_BID, URGENT_EVERY_MS };

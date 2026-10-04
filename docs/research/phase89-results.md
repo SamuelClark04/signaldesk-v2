@@ -116,3 +116,134 @@ trades that keep falling); at Coinbase's fees no setup passes the cost gates at 
    scenarios; the untouched 2025-06 to 2026-10 window can serve as a second unseen check if forward results warrant it.
 3. Agree account-specific limits (max positions, combined risk, daily loss / target) before any change to them.
 4. Consider an OPRA data subscription before trusting any option quote-based paper result.
+
+---
+
+# Phase 89b review (2026-10-04)
+
+Protocol 2 (`phase89-protocol-2.md`, SHA-256 `417257ad6cfd0d9b70d859c32878296935bb49606bd1cda67382ad5629955092`) was frozen and committed
+(9d05c41) before the crypto revised-rules and Moonshots out-of-sample tests ran. The protocol-1 validation window stays untouched.
+
+## 7. VM status and the full-history audit
+
+- **This session has no access to the VM** (no gcloud CLI, no SSH key on this PC), and the project rule forbids sending messages to the
+  live server, so the VM ledger (everything after 28 September) is **still not audited**. Every conclusion about the recent losses below
+  is limited to the local copy (25-28 September).
+- **The VM is very likely NOT running Phase 89 / 89b.** The last recorded deploy is b57b376 (Phase 85b); Phases 86-89b are pushed to
+  GitHub but not deployed. Check on the VM with `git log -1 --oneline` in the app folder and `pm2 ls`.
+- **Read-only audit on the VM without deploying or restarting** (copies the ledger first; the original is never opened for writing):
+  see "VM runbook" in section 13.
+- The audit now separates **RECORDED** results (the ledger's netPnl) from **RECONSTRUCTED ESTIMATES** (`scripts/audit-attribution.js`):
+  signal (the plan's result at its own stop / target), execution (slippage past the level and fees), discretion (manual / external
+  closes), contract bid/ask cost, booked-minus-natural (accounting), and trades held past their window. On the local copy:
+
+| Strategy / book | Recorded net | Signal at plan (est.) | Execution incl. fees (est.) | Manual closes (gross) | Booked minus natural (est.) |
+|---|---|---|---|---|---|
+| Moonshots LIVE (17) | +$1.63 | +$1.04 | -$4.87 | +$5.47 | n/a |
+| Options Spreads PAPER (18) | +$354.18 | $0 (no system exit) | -$49.40 | +$403.58 | +$552.30 overstated |
+| Manual LIVE (4) | -$3.71 | -$3.18 | -$1.72 | +$1.19 | n/a |
+
+## 8. Data access, corrected wording
+
+| Data | Offered by Alpaca | Available to OUR account (paper keys, free data plan; tested 2026-10-04) |
+|---|---|---|
+| Real-time consolidated (SIP) stock data | yes (paid plan) | **no** (HTTP 403 "subscription does not permit querying recent SIP data") |
+| SIP stock data older than 15 minutes | yes | yes |
+| IEX stock data, real time | yes | yes |
+| OPRA option quotes (real NBBO) | yes (paid plan + signed OPRA agreement) | **no** (HTTP 403 "OPRA agreement is not signed") |
+| Indicative option quotes (a derived, non-NBBO feed) | yes (free) | yes |
+| Historical option trades and 1-minute bars | yes, from February 2024 (no feed parameter) | yes |
+| Historical option bid / ask quotes | **not offered** (the endpoint does not exist: HTTP 404) | no |
+
+**How each result is labelled:** Quick Flips replays = option TRADE prints + MODELLED spreads (no quotes exist); the paper audit's
+natural-price re-marks = the INDICATIVE quotes stored in the ledger at the time; every internal paper option fill / mark = INDICATIVE
+quotes; Alpaca Paper fills = Alpaca's simulator against its own quotes (not exchange fills). Section 0 of protocol 1 is frozen and
+kept as written; this table supersedes its wording.
+
+## 9. Quick Flips: implementation vs the frozen protocol
+
+| Item | Replay (protocol 1) | Live before 89b | Live now | Status |
+|---|---|---|---|---|
+| Bars / volume | SIP 1-minute | IEX | IEX (no real-time SIP on our plan) | **difference measured; removable only with a paid data plan** |
+| Completeness | session >= 370 / 390 bars | 95% of elapsed minutes (fails on IEX silence; edge case at the minute boundary) | >= 95% of the bars REST IEX reports for minutes completed so far; REST merged each minute (restart recovery); no REST = no entry | fixed |
+| Entry timing | decision = bar end + 60 s, fill within 3 min | manual approval (unknown delay), 3 min after placement | automatic paper execution (your choice, quickFlipsAutoPaper), must fill by decision + 3 min | fixed |
+| Size | 1 contract | risk engine (could be > 1) | 1 contract (maxContracts) | fixed |
+| Liquidity filter | trade activity proxy (no quotes) | indicative quote <= 30 s, bid >= $0.50, bid/ask <= 5% | unchanged | difference (unavoidable: no historical quotes) |
+| Costs | $0.65 / contract / fill + modelled half-spread | $0.65 + paper fills | unchanged | consistent; the forward test measures the actual spread cost |
+| Stop / target | option trade-bar close / VWAP | indicative mark (2 confirmations) / resting limit | unchanged | difference (documented) |
+| Setup failure, 60-min hold | as protocol | as protocol | as protocol (+ REST bars after a restart) | consistent |
+| Deadline | 3:45 PM bar open | 3:40 PM; could rest unfilled overnight (no quote / unfilled ladder) | 3:40 PM; re-priced 25% under the best bid (fresh, else last known, else model) at 3:42 PM, 50% at 3:50 PM, every 20 s | fixed |
+| Partial fills | n/a | entry partial fixed in 89; a partial CLOSE booked the whole position | the sold part is booked, the rest stays open and is retried | fixed |
+
+**SIP vs IEX (development window only):** IEX publishes a minute bar only when IEX traded (median 370 / 390 a session, 5% of
+sessions <= 293). Only 50% of the S1 signals are identical on IEX. The selected configuration on IEX signals: **190 trades, PF 1.10 at
+base costs, 0.90 under stress costs** (SIP: 193 trades, 1.41 / 1.09). On the feed our plan allows live, the configuration is about
+break-even before any forward evidence. Real-time SIP needs a paid Alpaca plan; that is your decision.
+
+**$200 target:** it only stops new automated entries (realized P/L, per book). No strategy, the risk engine or the sizing reads it;
+the forward-test protocol requires it OFF during the test so the daily results are not truncated.
+
+## 10. One evidence standard for every strategy
+
+| Strategy | Evidence | Verdict |
+|---|---|---|
+| Equity Day (ORB) | Phase 88: 167 trades, PF 1.08, not significant | paused |
+| Equity Swing | Phase 88: PF 0.81 | paused |
+| Options Spreads | Phase 87: PF 0.75 in both halves, no directional information | paused |
+| Crypto Swing | Phase 78: PF 0.82-0.96 | paused |
+| Crypto Intraday | Phase 89: BTC / ETH 2 trades; 15-coin list PF 0.81 / 0.57; revised rules failed on unseen 2022-23 data | paused |
+| **Moonshots** | Phase 79 "validation" used the SAME 90 days that inspired the rule change (not independent); coins chosen while hot; live strategy exits PF 0.82 (8 trades); out-of-sample (section 12): PF 0.58 at Coinbase fees, 0.74 Kraken, 0.82 OKX | **paused (pause 90)** |
+| Options Quick Flips | did not pass protocol 1; the IEX version is about break-even | off; forward paper test only (protocol 2A) |
+| Portfolio Pilot | not a scanner: every Pilot buy / sell waits for your approval | not an automated entry |
+
+All automated scanners are now off by default; open positions, stops, targets, time exits and closes keep working.
+
+## 11. Crypto: revised rules on unseen data (protocol 2B)
+
+Development 2022-01-01 to 2023-12-31, BTC / ETH / SOL, OKX fees. **All four configurations failed; the validation window was not run.**
+
+| Config | Trades | Win % | PF | Mean R | Notes |
+|---|---|---|---|---|---|
+| 15m R0 | 23 | 17 | 1.00 | +0.00 | too few trades; bootstrap lower bound -1.18 |
+| 15m RT (time stop) | 24 | 17 | 0.82 | -0.15 | |
+| 1h R0 / RT | 0 | - | - | - | the trend filter + resistance rules leave nothing |
+| 15m R0 without the trend filter (control) | 208 | 16 | 0.66 | -0.33 | removing the 3.2% stop floor alone would have lost heavily |
+
+Mechanism check: the 3.2% minimum stop was not the cause of the losses (without it the signals lose more); the trend filter avoids
+the falling market of 2022-23 (BTC -9%, ETH -38%, SOL -40%) but leaves too few trades to judge. Crypto Intraday stays paused. A next
+idea needs its own frozen protocol and data none of these tests touched (2024-01..09 stays unseen).
+
+## 12. Moonshots out-of-sample (protocol 2C)
+
+The SHIPPED Phase 79 rules, unchanged, on the 90 days before the Phase 79 window (2026-03-31 to 2026-06-29), 56 of the 62 coins with
+data (5 had no candles that far back). **FAIL.**
+
+| Fees | Trades | Win % | PF | Total R | Mean R | Halves PF | Bootstrap lower (95%) |
+|---|---|---|---|---|---|---|---|
+| Coinbase | 63 | 25 | **0.58** | -25.3 | -0.40 | 0.52 / 0.59 | -0.84 |
+| Kraken | 123 | 28 | 0.74 | -26.2 | -0.21 | 0.56 / 0.85 | -0.50 |
+| OKX | 123 | 28 | 0.82 | -16.6 | -0.14 | 0.63 / 0.94 | -0.42 |
+
+(The trade count differs by venue because the cost gates admit more setups at lower fees.) The Phase 79 result (PF 1.40) did not hold
+on data it was not designed on, which matches the live strategy exits (PF 0.82). Moonshots stays paused.
+
+## 13. VM runbook (read-only; no deploy, no restart)
+
+Run in the app folder on the VM (it downloads the two audit scripts from GitHub without changing the running code, audits a COPY of
+the ledger, and prints the running version):
+
+    git fetch origin
+    git show origin/main:scripts/trade-audit.js > /tmp/trade-audit.js
+    git show origin/main:scripts/audit-attribution.js > /tmp/audit-attribution.js
+    cp server/data/ledger-state.json /tmp/ledger-snapshot.json
+    node /tmp/trade-audit.js /tmp/ledger-snapshot.json --csv /tmp/audit.csv > /tmp/audit.txt
+    git log -1 --oneline; pm2 ls
+
+Then copy /tmp/audit.txt and /tmp/audit.csv off the VM (for example the Cloud Console SSH window's "Download file").
+
+## 14. What remains uncertain
+
+- The VM's trades after 28 September (not audited).
+- Whether Alpaca Paper's simulated option fills resemble real fills; indicative quotes are not NBBO.
+- Quick Flips on IEX bars is about break-even in the replay; only the forward test can show how real fills compare.
+- Every historical option result rests on trade prints and modelled spreads.

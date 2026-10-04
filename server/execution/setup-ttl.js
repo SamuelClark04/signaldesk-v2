@@ -21,12 +21,17 @@ function ttlOf(o) {
   return DEFAULT_TTL_MS;
 }
 const createdAtOf = (o) => { const t = typeof o.timestamp === 'number' ? o.timestamp : Date.parse(o.timestamp); return Number.isFinite(t) ? t : o.stagedAt; };
-const expiresAt = (o) => { const t = createdAtOf(o); return Number.isFinite(t) ? t + ttlOf(o) : null; };
+const expiresAt = (o) => { // Phase 89: a Quick Flip expires at its signal-anchored entry deadline (D + 3 min)
+  const qf = o && o.optionsData && o.optionsData.entryDeadlineAt; if (qf > 0) return qf;
+  const t = createdAtOf(o); return Number.isFinite(t) ? t + ttlOf(o) : null;
+};
 
 // Why `o` must leave the queue now (null: it may stay). livePrice: the asset's live price or null.
 function staleness(o, livePrice, now = Date.now()) {
   const ttl = ttlOf(o);
   const t = createdAtOf(o);
+  const qf = o && o.optionsData && o.optionsData.entryDeadlineAt;
+  if (qf > 0 && now > qf) return 'EXPIRED: past the Quick Flip entry deadline (signal + 4 min)';
   if (!Number.isFinite(t) || now - t > ttl) return `EXPIRED: unapproved after ${Math.round(ttl / 60000)}m`;
   if (ttl >= DEFAULT_TTL_MS || !(livePrice > 0) || !o.entryZone) return null;
   const long = o.direction !== 'short';

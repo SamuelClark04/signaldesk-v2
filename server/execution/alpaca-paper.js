@@ -49,8 +49,15 @@ async function open(ledger, order, livePrice, resized = null) {
 
 const patch = (ledger, id, f) => ledger.updatePositions((p) => (p.id === id ? Object.assign(p, f) && true : false));
 
-// Book an Alpaca fill that closed the position.
-function book(ledger, pos, o, reason, leg) {
+// Book an Alpaca fill that closed the position. Phase 89: a closing order that filled only PART of the position (then
+// ended) books just the contracts / shares that sold (ledger.splitPosition); the rest stays open, its exit cleared and retried.
+function book(ledger, pos0, o, reason, leg) {
+  let pos = pos0;
+  if (o.filledQty > 0 && o.filledQty < pos0.positionSize) {
+    pos = ledger.splitPosition(pos0.id, o.filledQty);
+    patch(ledger, pos0.id, { paperExitOrderId: null, paperExitReason: null, paperExitLeg: null, exitWork: null });
+    console.warn(`[paper] ${pos0.id}: closing order filled ${o.filledQty} of ${pos0.positionSize}: booked that part; the rest stays open`);
+  }
   const extra = { exitLeg: leg, pnlSource: 'broker-fills', brokerExitId: o.orderId, ...(o.filledAt ? { closedAt: o.filledAt } : {}) };
   if (pos.market !== 'options') return ledger.closePosition(pos.id, o.avgFillPrice, reason, { ...extra, actualFees: 0 }); // commission-free
   const od = pos.optionsData;

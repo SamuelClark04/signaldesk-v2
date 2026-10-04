@@ -164,6 +164,7 @@ async function pipelinePass() {
       if (result.capitalCapped) console.warn(`[pipeline] ${result.id}: CAPITAL CAP ${result.capitalCapPct * 100}% of bankroll bound the size; `
         + `risking ${(result.actualRiskPct * 100).toFixed(2)}% instead of ${(result.riskPct * 100).toFixed(2)}% (stop is tight relative to price)`);
       notify(staged);
+      require('./auto-paper').consider(staged, { settings, broadcast }); // Phase 89: qualified Quick Flips execute on paper at once (not awaited)
     } catch (err) {
       // Expected when the same setup is re-proposed on the next tick (duplicate id).
       console.log(`[pipeline] not staged ${result.id}: ${err.message}`);

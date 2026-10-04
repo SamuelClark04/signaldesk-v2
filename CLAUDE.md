@@ -176,8 +176,8 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   e76aeb5), results in docs/research/phase89-results.md (PRELIMINARY: Alpaca has option trade bars from Feb 2024 but NO historical option
   quotes; the app's live option quotes are the free INDICATIVE feed, not OPRA). Audit tool scripts/trade-audit.js (read-only, safe on the
   VM: never requires a server module). RESEARCH PAUSE: strategy-toggles.PAUSE (crypto-intraday, equity-day, equity-swing, options-system,
-  crypto-swing) switched off ONCE per ledger (ledger-store, settings.strategyPauseVersion 89), off by default; re-enabling sticks; only
-  Moonshots stays on. OPTIONS QUICK FLIPS (strategies/7-options-quickflips.js + quickflips-signals.js, OFF by default, PAPER ONLY: the
+  crypto-swing) switched off ONCE per ledger (ledger-store, settings.strategyPauseVersion 89), off by default; re-enabling sticks;
+  Phase 89b paused Moonshots too (pause 90). OPTIONS QUICK FLIPS (strategies/7-options-quickflips.js + quickflips-signals.js, OFF by default, PAPER ONLY: the
   replay failed, S1-V1 closest PF 1.41 but bootstrap lower bound < 0; validation window 2025-06..2026-10 kept unseen): SPY / QQQ single
   calls / puts, 3-7 DTE (closest to 5), S1 ORB + VWAP only, debit = the ask from a quote <= 30 s old, bid/ask <= 5% of mid; exits: premium
   -30% / +45% (existing exitRule paths), quickflip-exits.js QF_SETUP_FAILED (5m close back through VWAP) / QF_MAX_HOLD (60 min) /
@@ -193,6 +193,21 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   Flip with no fresh quote is never filled. alpaca-paper: a partial fill stays working; canceled after a partial fill, the position is the
   FILLED quantity (size / 1R / notional); a close cancels the rest first. Crypto: BTC / ETH Crypto Intraday = 2 trades a year (3.2% min
   chart stop); its 15-coin list lost (15m PF 0.81, 1h PF 0.57, OKX fees). Scratch research: ph89/ (qf-*.js, cr-*.js). Test: tests/ph89unit.js.
+- **Phase 89b review**: protocol 2 frozen in 9d05c41 (docs/research/phase89-protocol-2.md: Quick Flips FORWARD paper test, crypto
+  revised rules, Moonshots out-of-sample); results appended to phase89-results.md (sections 7-14). Our Alpaca account: paper keys, free data
+  plan: NO real-time SIP (403), NO OPRA (403, agreement not signed), indicative option quotes, historical option trades / bars from Feb 2024,
+  no historical option quotes at all (404). QUICK FLIPS now: IEX bars; completeness = >= 95% of the bars REST IEX history reports for the
+  minutes completed so far (7-options-quickflips syncSession: REST read once a minute per symbol and merged into the stream store = restart
+  recovery; no REST = no entry; IEX silent minutes are NOT missing data); 1 contract (optionsData.maxContracts, risk-engine sizeOptions);
+  entry must fill by decision (signal bar end + 60 s) + 3 min (optionsData.entryDeadlineAt: spread-entry, setup-ttl); AUTOMATIC paper
+  execution (execution/auto-paper.js via order-router.approveWithGuard, settings.quickFlipsAutoPaper default true, never live); deadline
+  close escalated (spread-exit.urgent from quickflip-exits: 3:42 PM 25% / 3:50 PM 50% under the best bid: fresh, else last known, else
+  model; every 20 s; never a market order). alpaca-paper.book: a PARTIAL closing fill books the sold part (ledger.splitPosition), the rest
+  stays open with its exit cleared. On IEX bars the selected config was PF 1.10 (0.90 stress) on the development window: ~break-even.
+  PAUSES are versioned (strategy-toggles.PAUSES; 90 = Moonshots: its Phase 79 test reused the window that inspired the rules; out-of-sample on the
+  90 days before it FAILED, PF 0.58 Coinbase / 0.74 Kraken / 0.82 OKX); every scanner
+  is off by default. scripts/audit-attribution.js: recorded net vs reconstructed signal / execution / discretion / contract / accounting.
+  Crypto revised rules failed on 2022-23 (15m 24 trades; without the trend filter 208 trades PF 0.66). Test: tests/ph89bunit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

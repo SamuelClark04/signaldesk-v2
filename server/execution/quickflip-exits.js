@@ -8,13 +8,18 @@
 // These are the ONLY time-based exits outside the 2-DTE option rule (the user's Phase 89 exception, Quick Flips only).
 // PAPER only (a Quick Flip can never be live). Internal paper closes at the exit quote (the natural bid); Alpaca Paper through
 // alpaca-paper.sendClose (a working entry is canceled, never a closing trade; a resting target is canceled first).
-// One attempt per position per RETRY_MS; a position already closing is left alone.
+// One attempt per position per RETRY_MS. A close still working at 3:42 PM (unfilled ladder, no fresh quote: priced on the model)
+// is re-priced every 20 s, 25% under the best bid we have (fresh, else last known, else model), 50% from 3:50 PM: marketable
+// limits (Alpaca fills them at the bid), never a market order. A partial closing fill books the part (alpaca-paper.book).
+// Internal paper with no fresh quote books the model value (journal optionsExitBasis 'model': an estimate, labelled).
 const prices = require('../market/latest-prices');
 const session = require('../market/market-session');
 const et = require('../services/et-time');
 const sig = require('../strategies/quickflips-signals');
 
 const RETRY_MS = 20 * 1000;
+const URGENT_1_MIN = 15 * 60 + 42; // a close still working at 3:42 PM: 25% under the bid (marketable)
+const URGENT_2_MIN = 15 * 60 + 50; // ... at 3:50 PM: 50% under
 const tries = new Map();
 const isQf = (p) => p && p.strategyId === 'options-quickflips' && p.market === 'options' && p.optionsData && p.optionsData.quickFlip;
 
@@ -49,11 +54,20 @@ async function run(ledger, { isBusy = () => false, sessionFor = sessionOf } = {}
   const out = [];
   if (!session.isEquityMarketOpen(now)) return out;
   const ap = require('./alpaca-paper');
+  const t = et.parts(now); const min = t.h * 60 + t.m;
   for (const p of ledger.getActivePositions()) {
     if (!isQf(p)) continue;
     const exiting = p.paperExitOrderId && !(p.exitWork && p.exitWork.kind === 'target');
-    if (exiting || isBusy(p.id) || ap.isClosing(p.id)) continue;
+    if (isBusy(p.id) || ap.isClosing(p.id)) continue;
+    if (exiting) { // a close is working: past the deadline it is re-priced until it fills (an unfilled / quote-less close never rides overnight)
+      const disc = min >= URGENT_2_MIN ? 0.5 : min >= URGENT_1_MIN ? 0.25 : null;
+      if (disc && ap.isAtAlpaca(p)) {
+        try { const u = await require('./spread-exit').urgent(ledger, p, ap.exitDeps(), disc, now); if (u.placed || u.trade) out.push({ id: p.id, reason: 'QF_DEADLINE', urgent: disc, ...u }); if (u.error) console.error(`[quickflips] ${p.id}: ${u.error}`); } catch (err) { console.error(`[quickflips] ${p.id}: deadline re-price failed: ${err.message}`); }
+      }
+      continue;
+    }
     let d;
+    if (sessionFor === sessionOf) await require('../strategies/7-options-quickflips').syncSession(p.asset, now).catch(() => null); // restart: REST bars first
     try { d = due(p, now, sessionFor); } catch (err) { console.error(`[quickflips] ${p.id}: exit check failed: ${err.message}`); continue; }
     if (!d || now - (tries.get(p.id) || 0) < RETRY_MS) continue;
     tries.set(p.id, now);

@@ -4,10 +4,13 @@
 //   Signals    quickflips-signals.js (S1 ORB + VWAP; S2 is off: it lost in every development variant), on the latest
 //              completed 5-minute bar, from the decision minute (bar end + 60 s) for up to SIGNAL_TTL_MS (the approval window)
 //   Data       today's IEX 1-minute bars (the stream); prior 30 days of IEX 5-minute bars (EMA20 + the 20-session RelVol
-//              baseline, once a day). A session missing > 5% of its minutes so far (a restart: the stream has no backfill) is skipped
+//              baseline, once a day). Completeness: >= 95% of the bars Alpaca's REST IEX history has for the minutes completed SO
+//              FAR (REST read once a minute and merged: also the restart recovery); no REST = no new entry
+//              IEX, not SIP: our Alpaca plan has no real-time SIP (HTTP 403); the replay's SIP signals were re-checked on IEX bars
 //   Contract   3-7 calendar DTE, the expiration closest to 5 (ties shorter), never 0-2 DTE; call = highest $1 strike <= spot,
 //              put = lowest >= spot; a FRESH two-sided quote (<= QUOTE_MAX_AGE_MS), bid >= $0.50, bid / ask within 5% of mid
-//   Order      debit = the natural ask; entry order times out after ENTRY_TIMEOUT_MS (canceled, never chased)
+//   Order      debit = the natural ask; 1 contract (maxContracts); EXECUTED AUTOMATICALLY on paper when settings.quickFlipsAutoPaper
+//              (execution/auto-paper.js); the entry must fill by D + 3 min (entryDeadlineAt, as in the replay) or it is canceled
 //   Exits      premium stop -30% (2 confirmations), target +45% (a resting limit at Alpaca Paper), setup failure (5m close back
 //              through VWAP), 60 min max hold, 3:40 PM deadline: execution/quickflip-exits.js. Same day, always.
 // The one exception to the user's "nothing closes on time" rule, for this mode only.
@@ -23,8 +26,9 @@ const STRATEGY_ID = 'options-quickflips';
 const CONFIG = {
   symbols: ['SPY', 'QQQ'], setups: ['S1'], stopPct: 0.30, targetPct: 0.45, maxHoldMin: 60, deadlineMin: 15 * 60 + 40,
   dte: { min: 3, max: 7, prefer: 5 }, minBid: 0.5, maxSpreadPct: 0.05, minSessionShare: 0.95, priorDays: 30,
-  SIGNAL_TTL_MS: 3 * 60 * 1000, ENTRY_TIMEOUT_MS: 3 * 60 * 1000, QUOTE_MAX_AGE_MS: 30 * 1000, multiplier: 100,
+  SIGNAL_TTL_MS: 3 * 60 * 1000, ENTRY_TIMEOUT_MS: 3 * 60 * 1000, QUOTE_MAX_AGE_MS: 30 * 1000, multiplier: 100, maxContracts: 1,
 };
+const BAR_GRACE_S = 15;
 const tally = createTally();
 const prior = new Map(); // symbol -> { day, sessions }
 const proposed = new Set(); // signal keys already proposed
@@ -103,23 +107,53 @@ function candidate(symbol, s, pick, now, feed) {
       multiplier: CONFIG.multiplier, iv: c.iv, delta: q.delta ?? c.delta, bid: q.bid, ask: q.ask, debit, netMid: cents(mid), combinedLegSpread: cents(q.ask - q.bid),
       legs: [{ side: 'buy', type, strike: c.strike, ratio: 1, contract: c.symbol, bid: q.bid, ask: q.ask, iv: c.iv, delta: q.delta ?? c.delta }],
       riskPerShare: cents(debit - stopValue), exitRule: { stopValue, targetValue }, refSpot: s.spot, refAt: now, quoteTime: q.quoteTime,
-      entryTimeoutMs: CONFIG.ENTRY_TIMEOUT_MS,
+      entryTimeoutMs: CONFIG.ENTRY_TIMEOUT_MS, maxContracts: CONFIG.maxContracts,
+      entryDeadlineAt: et.toEpoch(et.ymd(now), Math.floor((s.endMin + 1) / 60), (s.endMin + 1) % 60) + CONFIG.ENTRY_TIMEOUT_MS, // D + 3 min, like the replay
       quickFlip: { setup: s.setup, signalEndMin: s.endMin, trigger: cents(s.trigger), vwap: cents(s.vwap), maxHoldMin: CONFIG.maxHoldMin, deadlineMin: CONFIG.deadlineMin },
     },
   };
 }
 
+// Data completeness (protocol 1.1, scaled to NOW and to the feed we can use). IEX publishes a minute bar only when IEX traded in that
+// minute (a median 370 of 390 in 2024-25; 5% of sessions <= 293), so "one bar per minute" is the wrong yardstick: the expected bars are
+// the ones Alpaca's REST IEX history reports for the minutes COMPLETED so far (a bar stamped m is complete at m + 1; the newest gets
+// BAR_GRACE_S). REST is read at most once a minute per symbol and merged into the stream's store (alpaca-stock-socket.ingest): that is
+// also the restart recovery (the stream has no backfill). >= 95% of the expected bars present (>= 1 missing always allowed); no REST
+// read in the last 2 minutes = cannot verify = no new entry (fail closed; exits are not affected). -> { ok, have, expected, missing, allowed, why? }
+const rest = new Map(); // symbol -> { at, minutes: Set(minute index) }
+async function syncSession(symbol, now) {
+  const hit = rest.get(symbol);
+  if (!hit || now - hit.at >= 60000) {
+    const r = await require('../connectors/history-bars').getMinuteBarsSince([symbol], et.toEpoch(et.ymd(now), 9, 30)).catch((e) => ({ ok: false, error: e.message }));
+    if (r.ok) {
+      const bars = r.bars[symbol] || [];
+      if (bars.length) alpacaStocks.ingest(bars);
+      rest.set(symbol, { at: now, minutes: new Set(bars.map((b) => { const q = et.parts(Date.parse(b.time)); return q.h * 60 + q.m - sig.OPEN_MIN; })) });
+    }
+  }
+  return rest.get(symbol) || null;
+}
+function completeness(today, now, ref) {
+  if (!ref || now - ref.at > 2 * 60000) return { ok: false, have: 0, expected: null, missing: null, allowed: null, why: 'REST IEX bars unavailable: completeness cannot be verified' };
+  const p = et.parts(now); const sec = Math.floor((now % 60000) / 1000);
+  const done = Math.max(0, Math.min(390, p.h * 60 + p.m - sig.OPEN_MIN - (sec < BAR_GRACE_S ? 1 : 0)));
+  const want = [...ref.minutes].filter((m) => m >= 0 && m < done);
+  const have = want.filter((m) => today[m]).length;
+  const allowed = Math.max(1, Math.floor((1 - CONFIG.minSessionShare) * want.length));
+  return { ok: want.length - have <= allowed, have, expected: want.length, missing: want.length - have, allowed };
+}
+
 async function evaluate(symbol, now, fomc) {
+  const p = et.parts(now); const nowMin = p.h * 60 + p.m;
+  if (nowMin <= sig.OPEN_MIN) return tally.skip(symbol, 'Before the open');
+  const ref = await syncSession(symbol, now);
   const today = todaySlots(symbol, now);
-  const p = et.parts(now); const elapsed = Math.min(390, p.h * 60 + p.m - sig.OPEN_MIN);
-  if (elapsed <= 0) return tally.skip(symbol, 'Before the open');
-  const have = today.slice(0, elapsed).filter(Boolean).length;
-  if (have < CONFIG.minSessionShare * elapsed) return tally.skip(symbol, `Session bars incomplete (${have}/${elapsed} minutes: after a restart the stream has no backfill)`);
+  const c = completeness(today, now, ref);
+  if (!c.ok) return tally.skip(symbol, c.why || `Session bars incomplete: ${c.have} of the ${c.expected} IEX bars so far (${c.missing} missing, ${c.allowed} allowed)`);
   const past = await priorFor(symbol, now);
   if (!past || past.length < sig.CONFIG.relVolSessions) return tally.skip(symbol, 'Prior 20 sessions of 5-minute bars unavailable');
   const s = sig.build(past, today);
   const list = sig.detect(s, today, { fomc }).filter((x) => CONFIG.setups.includes(x.setup));
-  const nowMin = p.h * 60 + p.m;
   const fresh = list.filter((x) => nowMin >= x.endMin + 1 && (now - et.toEpoch(et.ymd(now), Math.floor((x.endMin + 1) / 60), (x.endMin + 1) % 60)) <= CONFIG.SIGNAL_TTL_MS);
   const live = fresh.find((x) => !x.skip);
   if (!live) return tally.skip(symbol, fresh[0] ? fresh[0].skip : 'No Quick Flip setup on the latest 5-minute bar');
@@ -151,6 +185,6 @@ async function generateCandidates(now = Date.now(), settings = settingsNow()) {
 }
 
 function takeBlocks() { const b = blocks; blocks = []; return b; }
-function reset() { prior.clear(); proposed.clear(); blocks = []; }
+function reset() { prior.clear(); proposed.clear(); rest.clear(); blocks = []; }
 
-module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, pickContract, candidate, evaluate, STRATEGY_ID, CONFIG };
+module.exports = { generateCandidates, takeBlocks, takeScan: tally.take, reset, pickContract, candidate, evaluate, completeness, syncSession, STRATEGY_ID, CONFIG };

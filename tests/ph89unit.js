@@ -36,8 +36,8 @@ const qfPos = (x = {}) => ({ id: `options-quickflips:S1:CALL:SPY:${x.k || 1}`, a
   const L = require(S + 'execution/paper-ledger');
   // 1. Research pause (applied once to an old ledger; the user's re-enable sticks).
   const map = L.getSettings().strategiesEnabled;
-  check('research pause: Crypto Intraday, Equity Day, Equity Swing (unvalidated) and Options Spreads / Crypto Swing (lost in replay, the user had them ON) switched OFF in an old ledger; Moonshots kept ON; Quick Flips OFF',
-    !map['crypto-intraday'] && !map['equity-day'] && !map['equity-swing'] && !map['options-system'] && !map['crypto-swing'] && map['speculative-crypto'] && map['options-quickflips'] === false && L.getSettings().strategyPauseVersion === 89, JSON.stringify(map));
+  check('research pause: Crypto Intraday, Equity Day, Equity Swing (unvalidated) and Options Spreads / Crypto Swing (lost in replay, the user had them ON) switched OFF in an old ledger; Moonshots too (Phase 89b pause 90); Quick Flips OFF',
+    !map['crypto-intraday'] && !map['equity-day'] && !map['equity-swing'] && !map['options-system'] && !map['crypto-swing'] && map['speculative-crypto'] === false && map['options-quickflips'] === false && L.getSettings().strategyPauseVersion === 90, JSON.stringify(map));
   L.updateSettings({ strategiesEnabled: { ...map, 'equity-day': true } });
   const reread = JSON.parse(execFileSync(process.execPath, ['-e', `require(${JSON.stringify(S + 'execution/paper-ledger')}); console.log(JSON.stringify(require(${JSON.stringify(S + 'execution/paper-ledger')}).getSettings().strategiesEnabled))`],
     { env: { ...process.env, ...ENV }, encoding: 'utf8' }).trim().split('\n').pop());

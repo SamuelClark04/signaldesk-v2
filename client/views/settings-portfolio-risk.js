@@ -70,6 +70,10 @@
         + 'Zero-trade days are normal; a daily target is not a promise of daily profit.', (v) => SD.settings.request({ dailyProfitTargetOn: v })),
       field('settings-daily-target', 'Daily profit target ($)', saved.dailyProfitTarget || 200, { min: 1, max: 1000000, step: 10, suffix: '$',
         hint: 'Per book (paper and live separately), realized net P/L of the New York day.', onCommit: (x) => SD.settings.request({ dailyProfitTarget: Math.round(x * 100) / 100 }) }),
+      // Phase 89b: qualified Quick Flips execute automatically on paper (the forward test's timing); never real money.
+      toggle('Quick Flips: execute automatically on paper', saved.quickFlipsAutoPaper !== false, 'When Options Quick Flips is on (Settings > Strategies), a setup that passed every '
+        + 'check is sent to the paper broker at once instead of waiting in Approvals (the replay entered 1-2 minutes after the signal). Paper only: never real money.',
+      (v) => SD.settings.request({ quickFlipsAutoPaper: v })),
       // Phase 89: cross-market limits (risk/exposure-limits.js).
       field('settings-max-positions', 'Max automated positions open at once', Number.isInteger(saved.maxOpenPositions) ? saved.maxOpenPositions : 0, { min: 0, max: 100, step: 1, suffix: 'each',
         hint: `Per book, every market, open + waiting in Approvals. 0 = off. Options + crypto paper risk together is also capped at the ${pct}% ceiling of the combined `

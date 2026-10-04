@@ -52,6 +52,7 @@ const SETTINGS_RULES = {
   // open risk uses maxOpenRiskPct of the combined paper bankrolls (risk/exposure-limits.js).
   maxOpenPositions: { type: 'number', default: 0, min: 0, max: 100, integer: true },
   strategyPauseVersion: { type: 'number', default: toggles.PAUSE.version, min: 0, max: 1000, integer: true }, // the research pause applied
+  quickFlipsAutoPaper: { type: 'choice', values: [true, false], default: true }, // Phase 89: qualified Quick Flips execute on paper without a click
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
@@ -145,7 +146,7 @@ function restoreSettings(saved) {
   const paused = toggles.applyPause(saved.strategyPauseVersion, settings.strategiesEnabled);
   if (paused) {
     settings.strategiesEnabled = paused;
-    console.warn(`[ledger] Phase 89 research pause: ${toggles.PAUSE.ids.join(', ')} switched off (open trades and exits unaffected)`);
+    console.warn(`[ledger] Phase 89 research pause: ${toggles.PAUSES.filter((x) => !(Number(saved.strategyPauseVersion) >= x.version)).flatMap((x) => x.ids).join(', ')} switched off (open trades and exits unaffected)`);
   }
   settings.strategyPauseVersion = toggles.PAUSE.version;
 }
