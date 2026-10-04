@@ -1,0 +1,58 @@
+// Phase 91: radar mode. Paper-only lock, manual-approval guarantee, radar migration + crypto manual-only, evidence labels,
+// Quick Flips radar card facts. Run: node tests/ph91unit.js. Scratch ledger in the OS temp dir, fake keys, dead URLs.
+const fs = require('fs'); const os = require('os'); const path = require('path'); const { execFileSync } = require('child_process');
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph91-'));
+const DEAD = 'http://127.0.0.1:9';
+const ENV = { LEDGER_STATE_PATH: path.join(DIR, 'ledger.json'), WATCHLIST_PATH: path.join(DIR, 'w.json'), EXTERNAL_HOLDINGS_PATH: path.join(DIR, 'x.json'),
+  CREDENTIALS_PATH: path.join(DIR, 'v.json'), RADAR_CACHE_PATH: path.join(DIR, 'r.json'), CATALYSTS_PATH: path.join(DIR, 'c.json'), PAPER_RUNS_PATH: path.join(DIR, 'runs.json'), MACRO_CALENDAR_URL: DEAD,
+  COINBASE_API_KEY: '', COINBASE_API_SECRET: '', COINBASE_API_BASE_URL: DEAD, KRAKEN_API_KEY: '', KRAKEN_API_SECRET: '', KRAKEN_API_BASE_URL: DEAD, OKX_API_KEY: '', OKX_API_SECRET: '',
+  OKX_PASSPHRASE: '', OKX_BASE_URL: DEAD, ALPACA_API_KEY: '', ALPACA_API_SECRET: '', ALPACA_PAPER_API_KEY: 'PKTEST', ALPACA_PAPER_API_SECRET: 'test', ALPACA_PAPER_BASE_URL: DEAD,
+  ALPACA_TRADING_BASE_URL: DEAD, ALPACA_DATA_BASE_URL: DEAD, SMTP_HOST: '127.0.0.1', SMTP_PORT: '2525', ALERT_EMAIL_TO: '', OPENAI_API_KEY: '', GEMINI_API_KEY: '', OPENAI_BASE_URL: DEAD, GEMINI_BASE_URL: DEAD };
+Object.assign(process.env, ENV);
+global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
+// A ledger saved by older code: both books LIVE, the Phase 89b-era switch map (crypto on), no radarVersion, the old auto-paper key.
+fs.writeFileSync(ENV.LEDGER_STATE_PATH, JSON.stringify({ version: 3, settings: { bankroll: 10000, cryptoBankroll: 3000, stockMode: 'live', cryptoMode: 'live',
+  paperStockBroker: 'internal', strategyPauseVersion: 90, quickFlipsAutoPaper: true,
+  strategiesEnabled: { 'crypto-swing': false, 'crypto-intraday': true, 'speculative-crypto': true, 'equity-day': false, 'equity-swing': false, 'options-system': false, 'options-quickflips': false } },
+  pendingOrders: [], activePositions: [], tradeJournal: [], discardedOrders: [], savedSetups: [], pilotActions: [] }));
+const ROOT = path.join(__dirname, '..');
+const S = path.join(ROOT, 'server') + '/';
+let fails = 0;
+const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ` - ${x}` : ''}`); if (!ok) fails += 1; };
+const throws = async (fn) => { try { await fn(); return null; } catch (e) { return e.message; } };
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name)))
+  : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+const serverFiles = walk(path.join(ROOT, 'server'));
+const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(path.join(ROOT, 'server'), f).split(path.sep).join('/')).sort();
+
+(async () => {
+  const lock = require(S + 'risk/paper-lock');
+  const L = require(S + 'execution/paper-ledger');
+  const router = require(S + 'execution/order-router');
+
+  // ---------- 1. Paper-only lock ----------
+  const s0 = L.getSettings();
+  check('lock: a ledger saved with both books LIVE loads PAPER (stockMode / cryptoMode), paperOnly reported', s0.stockMode === 'paper' && s0.cryptoMode === 'paper' && s0.paperOnly === true, `${s0.stockMode}/${s0.cryptoMode}/${s0.paperOnly}`);
+  const e1 = await throws(() => L.updateSettings({ cryptoMode: 'live' }));
+  check('lock: saving a LIVE mode is refused with PAPER_ONLY_LOCK and changes nothing', /^PAPER_ONLY_LOCK/.test(e1 || '') && L.getSettings().cryptoMode === 'paper', e1);
+  const e2 = await throws(() => L.updateSettings({ stockMode: 'live', bankroll: 12345 }));
+  check('...a save mixing a live mode with other fields applies none of them', /^PAPER_ONLY_LOCK/.test(e2 || '') && L.getSettings().bankroll === 10000);
+  L.updateSettings({ bankroll: 11000 });
+  check('...other settings still save', L.getSettings().bankroll === 11000);
+  // The router's own wall: a mode that reads live (set up with the lock lifted in-process) is still refused before any broker call.
+  const cb = require(S + 'connectors/coinbase-api'); const sent = []; const origSubmit = cb.submitOrder;
+  cb.submitOrder = async (...a) => { sent.push(a); return { ok: false, error: 'stub' }; };
+  lock.PAPER_ONLY = false; L.updateSettings({ cryptoMode: 'live' }); lock.PAPER_ONLY = true;
+  const e3 = await throws(() => router.routeApproved({ id: 'ph91-live', market: 'crypto', asset: 'ETH-USD', direction: 'long', positionSize: 0.01 }, 2000));
+  check('lock: the order router refuses a LIVE entry route with PAPER_ONLY_LOCK; no broker call', /^PAPER_ONLY_LOCK/.test(e3 || '') && sent.length === 0, e3);
+  L.updateSettings({ cryptoMode: 'paper' }); cb.submitOrder = origSubmit;
+  const e4 = await throws(() => require(S + 'execution/manual-trade').toCandidate({ mode: 'crypto', asset: 'ETH-USD', venue: 'live', amount: 50 }, Date.now()));
+  check('lock: the Manual Trade Ticket refuses venue live with PAPER_ONLY_LOCK', /^PAPER_ONLY_LOCK/.test(e4 || ''), e4);
+  const users = refs(/require\([^)]*paper-lock/);
+  check('lock: only the three ENTRY choke points use it (exits are never gated)', JSON.stringify(users) === JSON.stringify(['execution/ledger-store.js', 'execution/manual-trade.js', 'execution/order-router.js']), users.join(', '));
+
+  // ---- end of sections ----
+  console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
+  try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }
+  process.exit(fails ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

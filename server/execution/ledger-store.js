@@ -10,6 +10,7 @@ const { RISK_PROFILES, DEFAULT_PROFILE, riskPctFor } = require('../risk/risk-pro
 const { LEVELS: STRICTNESS_LEVELS, DEFAULT_LEVEL: DEFAULT_STRICTNESS } = require('../risk/strictness');
 const { CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT } = require('../risk/risk-engine');
 const toggles = require('../strategies/strategy-toggles');
+const paperLock = require('../risk/paper-lock'); // Phase 91: stockMode / cryptoMode can never be 'live' while locked
 
 const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: older files load with none)
 
@@ -69,6 +70,7 @@ function cleanValue(key, value, rule) {
   }
   if (rule.type === 'choice') {
     if (!rule.values.includes(value)) throw new Error(`${key} must be one of: ${rule.values.join(', ')}`);
+    paperLock.checkMode(key, value); // Phase 91: refused while locked; restoreSettings then keeps the default 'paper' (logged)
     return value;
   }
   const n = Number(value);
@@ -192,7 +194,7 @@ function attach(ledgerLists) {
 // ---------- Settings ----------
 // riskPct and the profile/strictness tables are derived (never stored), so the
 // UI shows the server's numbers instead of keeping its own copy.
-const getSettings = () => ({ ...settings, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
+const getSettings = () => ({ ...settings, paperOnly: paperLock.PAPER_ONLY, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
   strictnessLevels: Object.fromEntries(Object.entries(STRICTNESS_LEVELS).map(([k, v]) => [k, { ...v }])) });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.

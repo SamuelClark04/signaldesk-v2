@@ -14,6 +14,7 @@ const cryptoVenues = require('./crypto-venues');
 const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
+const paperLock = require('../risk/paper-lock'); // Phase 91: no LIVE entry while locked
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: the contract and
@@ -73,6 +74,7 @@ async function routeApproved(order, livePrice) {
   const settings = ledger.getSettings();
   let resized = order.amountOverride ? order : null;
   const paper = settings[venue.modeKey] === 'paper' || order.forcePaper; // forcePaper: a manual PAPER ticket (manual-trade.js)
+  if (!paper) paperLock.assertPaperEntry(`${order.market} ${order.asset} at ${venue.broker}`); // Phase 91: refused before any broker call (stays pending)
   if (order.strategyId === 'options-quickflips' && !paper) throw new Error('QUICKFLIPS_PAPER_ONLY: Options Quick Flips trade on paper only; nothing was sent');
   if (paper) {
     const ap = require('./alpaca-paper'); // Phase 71: paper stocks / options execute at Alpaca Paper

@@ -36,6 +36,7 @@ const manualOptions = require('./manual-options');
 const { exitSpreadCap } = require('../strategies/5-options-system');
 const coinbaseExit = require('./coinbase-exit');
 const { feeHurdle, liveQuote } = require('../risk/break-even'); // Phase 63: round-trip fee hurdle, shown before opening
+const paperLock = require('../risk/paper-lock'); // Phase 91: the ticket is paper-only while locked
 
 const DEFAULT_AMOUNT = { stock: 300, crypto: 20 };
 const STOP_ATR = 1.5;
@@ -112,7 +113,7 @@ async function defaults({ mode, asset, direction = 'long', venue = 'paper', moon
   const k1 = mode === 'crypto' ? 2.5 : 2; // crypto fees need 2.5R for T1 to net the 1.25 : 1 floor
   const out = { ok: true, mode, asset, direction, price: px || null, live: !!live, atr: a, amount: DEFAULT_AMOUNT[mode] || null, stopBasis: cs ? cs.basis : floor > (a ? STOP_ATR * a : 0) ? 'fee floor' : '1.5 x ATR',
     stop: px ? round(px - d * risk, px) : null, t1: px ? round(px + d * k1 * risk, px) : null, t2: px ? round(px + d * (k1 + 1) * risk, px) : null,
-    liveAllowed: settings.cryptoMode === 'live', coinbaseCash: mode === 'crypto' && venue === 'live' ? await coinbaseCash() : null,
+    liveAllowed: settings.cryptoMode === 'live' && !paperLock.PAPER_ONLY, paperOnly: paperLock.PAPER_ONLY, coinbaseCash: mode === 'crypto' && venue === 'live' ? await coinbaseCash() : null,
     optionsSession: session.isEquityMarketOpen(now), paperBankroll: mode === 'crypto' ? settings.cryptoBankroll : settings.bankroll }; // Phase 70: that market's paper pool
   const moon = moonshotOf({ mode, moonshot });
   if (moon && px) {
@@ -131,6 +132,7 @@ async function toCandidate(t, now, { preview = false } = {}) {
   checkAsset(mode, asset);
   const market = MARKET[mode];
   const venue = mode === 'crypto' && t.venue === 'live' ? 'live' : 'paper';
+  if (venue === 'live') paperLock.assertPaperEntry('Manual Trade Ticket, live crypto');
   const settings = ledger.getSettings();
   if (venue === 'live' && settings.cryptoMode !== 'live') throw new Error('LIVE_DISABLED: Settings has Coinbase on PAPER; switch it to LIVE there first');
   const live = livePrice(mode, asset);
