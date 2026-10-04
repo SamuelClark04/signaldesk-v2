@@ -65,8 +65,9 @@
     const left = Math.max(0, (o.expiresAt || (Date.parse(o.timestamp) || o.stagedAt || 0) + ttl) - Date.now());
     const blocked = live && o.market === 'options';
     const failing = SD.scannerData.blockers(staged, ctx.state); // any failed gate (Expired, Escaped...) blocks approval
-    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || blocked || amount.state === 'blocked' || failing.length > 0,
-      textContent: busy ? 'Sending…' : failing.length ? `Blocked: ${failing.join(', ')}` : blocked ? 'Live options not wired' : live ? `Approve / Execute LIVE (${broker})` : 'Approve / Execute (paper)' });
+    const qf = o.strategyId === 'options-quickflips' ? SD.quickFlipCard.facts(o) : null; // Phase 91: the Quick Flips radar card
+    const approve = el('button', { type: 'button', className: `btn apv-approve${live ? ' is-live' : ''}`, disabled: busy || !ctx.online || (qf && qf.expired) || blocked || amount.state === 'blocked' || failing.length > 0,
+      textContent: busy ? 'Sending…' : qf && qf.expired ? 'Expired: quote too old' : failing.length ? `Blocked: ${failing.join(', ')}` : qf ? 'Approve (paper)' : blocked ? 'Live options not wired' : live ? `Approve / Execute LIVE (${broker})` : 'Approve / Execute (paper)' });
     approve.onclick = () => ctx.onApprove(staged, { live, broker });
     const review = el('button', { type: 'button', className: 'btn', textContent: 'Review chart' });
     review.onclick = () => ctx.onReview(o.id);
@@ -83,16 +84,16 @@
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
         el('span', { className: `apv-expiry${left < 3 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
       ]),
-      el('div', { className: 'apv-grid' }, [
+      ...(qf ? [SD.quickFlipCard.body(o)] : [el('div', { className: 'apv-grid' }, [
         kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
         kv('Entry', `${price(o.entryZone.min, o)} – ${price(o.entryZone.max, o)}`),
         kv('Stop', price(o.invalidation, o), 'text-short'),
         kv(o.targets && o.targets[1] ? (o.market === 'options' ? 'T1 / T2 (stretch)' : 'T1 (50%) / T2') : 'Target 1', t1 ? `${price(t1, o)}${o.targets[1] ? ` / ${price(o.targets[1].price, o)}` : ''}` : '—', 'text-long'),
         kv('Risk', `${money(o.dollarRisk)} (${o.sizingBankroll > 0 ? ((o.dollarRisk / o.sizingBankroll) * 100).toFixed(2) : '—'}%)`),
         kv('Reward : risk', rr),
-      ]),
+      ])]),
       // Phase 58 options stats: net Greeks, IV vs HV, max value / profit, breakeven, POP, mid-hold T1.
-      ...(od && od.stats ? [el('div', { className: 'apv-grid' }, SD.optionStats.rows(o, od.stats, od.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
+      ...(qf ? [] : od && od.stats ? [el('div', { className: 'apv-grid' }, SD.optionStats.rows(o, od.stats, od.refSpot).map(([k, v, cls]) => kv(k, v, cls)))] : []),
       ...(o.market === 'crypto' ? [...SD.netPnl.route(o, 'apv-note'), ...SD.netPnl.hurdle(o.hurdle, 'apv-note apv-hurdle')] : []), // fee hurdle up front (63), venue route (69A)
       ...(o.speculative ? [el('p', { className: 'apv-note', textContent: `Smart Investment Amount ${money(o.notional)}: ${Math.round(o.speculativeScale * 100)}% of normal risk (${(o.speculativeRiskPct * 100).toFixed(2)}% of the bankroll, conviction ${o.conviction}). Hype moves reverse fast.` })] : []),
       ...(o.smallAccountCap ? [el('p', { className: 'apv-note is-small-cap', textContent: `${o.smallAccountLabel}: 1 contract risks ${money(o.dollarRisk)} `
@@ -101,7 +102,7 @@
       ...(o.cappedByAmount && amount.amount === null ? [el('p', { className: 'apv-note', textContent: `Sized to the Pilot's ${money(o.maxNotional)} allocation.` })] : []),
       ...catalystChips(o.catalysts),
       ...[SD.tradeContext.block(o, { why: false })].filter(Boolean), // Phase 79: expected hold + setup vs live score (Moonshots)
-      el('p', { className: 'apv-thesis', textContent: o.thesis ? o.thesis.split(/(?<=\.)\s/).slice(0, 2).join(' ') : '' }),
+      el('p', { className: 'apv-thesis', textContent: qf ? '' : o.thesis ? o.thesis.split(/(?<=\.)\s/).slice(0, 2).join(' ') : '' }),
       SD.tradeAmount.control(staged, amount, ctx.rerender),
       el('div', { className: 'apv-actions' }, [approve, SD.aiAnalyst.button('PRE_TRADE', o.id, `${o.asset} ${o.setupType || ''}`.trim(), { disabled: !ctx.online }), review, dismiss]), // Phase 84
     ]);

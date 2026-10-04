@@ -116,6 +116,32 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('badge: a FAILED record -> amber "PF 0.86 · Failed" with its detail + source as the tooltip', tb && tb.label === 'PF 0.86 · Failed' && tb.kind === 'is-failed' && /93 trades/.test(tb.title) && /Phase 90/.test(tb.title));
   check('badge: Pilot / Untested are grey; a manual trade (null) renders nothing', EB.text(ev.of('portfolio-pilot')).kind === 'is-neutral' && EB.text(ev.of('x-new')).kind === 'is-neutral' && EB.text(null) === null && EB.badge(null) === null);
 
+  // ---------- 6. Quick Flips radar card ----------
+  const et = require(S + 'services/et-time'); const T6 = (h, m, s = 0) => et.toEpoch('2026-10-07', h, m) + s * 1000;
+  const pick6 = (ask, type = 'call') => ({ contract: { symbol: `SPY261013${type === 'call' ? 'C' : 'P'}00770000`, expiration: '2026-10-13', strike: 770, dte: 6, iv: 0.15, delta: type === 'call' ? 0.52 : -0.48 },
+    quote: { bid: ask - 0.1, ask, quoteTime: T6(9, 50, 50), delta: type === 'call' ? 0.52 : -0.48 }, mid: ask - 0.05 });
+  const sig6 = { setup: 'S1', dir: 'long', endMin: 590, trigger: 769.5, vwap: 768, spot: 770.2, relVol: 2, or: { high: 769.5, low: 766.25 } };
+  const c6 = qf.candidate('SPY', sig6, pick6(5.1), T6(9, 51), 'indicative');
+  check('qf server: the setup carries RelVol, the opening range, the decision spot and the signal time', c6.optionsData.quickFlip.relVol === 2 && c6.optionsData.quickFlip.orHigh === 769.5
+    && c6.optionsData.quickFlip.orLow === 766.25 && c6.optionsData.quickFlip.spotAtDecision === 770.2 && c6.optionsData.quickFlip.signalAt === T6(9, 50));
+  require(path.join(ROOT, 'client', 'components', 'quickflip-card.js'));
+  const QC = window.SignalDesk.quickFlipCard;
+  const card6 = { ...c6, expiresAt: c6.optionsData.entryDeadlineAt };
+  const f6 = QC.facts(card6, T6(9, 52, 30));
+  const row = (k) => (f6.cost.find(([x]) => x === k) || [])[1];
+  check('qf card: contract + why (opening range, VWAP, RelVol, signal time)', f6.contract === 'BUY 1 SPY 2026-10-13 770 call' && /opening range 766\.25-769\.5/.test(f6.why) && /VWAP 768/.test(f6.why) && /RelVol 2\.0x/.test(f6.why) && /9:50/.test(f6.why), f6.why);
+  check('qf card: cost math per contract (ask $510, spread $10 = 2.0% of mid, $1.30 commission, $11.30 to sell at the bid at once, max loss $154.30 at the -30% stop)',
+    /\$510\.00 per contract/.test(row('Ask (your entry limit)')) && /\$10\.00 \(2\.0% of mid\)/.test(row('Bid / ask spread')) && row('Commission') === '$0.65 x 2 = $1.30'
+    && row('Cost if sold at the bid right away') === '$11.30' && /^\$154\.30/.test(row('Max loss at the -30% stop')) && /10 s old at the signal/.test(row('Quote')) && /not OPRA/.test(row('Quote')), JSON.stringify(f6.cost));
+  check('qf card: the automatic exits are spelled out', /-30% \(\$3\.57\)/.test(f6.exits) && /\+45%/.test(f6.exits) && /VWAP/.test(f6.exits) && /60 min/.test(f6.exits) && /3:40 PM/.test(f6.exits));
+  check('qf card: countdown to the entry deadline, closed at 0 (9:54 for a 9:50 signal)', f6.countdown === 'Approve within 1:30' && !f6.expired && QC.facts(card6, T6(9, 54, 1)).expired);
+  const p6 = QC.facts({ ...qf.candidate('SPY', { ...sig6, dir: 'short', trigger: 766.25, spot: 765.9 }, pick6(4.2, 'put'), T6(9, 51), 'indicative') }, T6(9, 52));
+  check('qf card: a PUT reads "below" and "put"', /put$/.test(p6.contract) && /below the opening range/.test(p6.why) && /still below/.test(p6.why), `${p6.contract} | ${p6.why}`);
+  const old6 = JSON.parse(JSON.stringify(card6)); delete old6.optionsData.quickFlip.orHigh; delete old6.optionsData.quickFlip.orLow; delete old6.optionsData.quickFlip.relVol; delete old6.optionsData.quickFlip.signalAt;
+  const fo = QC.facts(old6, T6(9, 52));
+  check('qf card: a setup staged before the deploy (no new fields) still renders from its trigger; no quickFlip block -> generic card', /trigger 769\.5/.test(fo.why) && !/RelVol/.test(fo.why)
+    && QC.facts({ ...card6, optionsData: { ...card6.optionsData, quickFlip: undefined } }) === null);
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

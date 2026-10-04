@@ -110,7 +110,9 @@ function candidate(symbol, s, pick, now, feed) {
       riskPerShare: cents(debit - stopValue), exitRule: { stopValue, targetValue }, refSpot: s.spot, refAt: now, quoteTime: q.quoteTime,
       entryTimeoutMs: CONFIG.ENTRY_TIMEOUT_MS, maxContracts: CONFIG.maxContracts,
       entryDeadlineAt: et.toEpoch(et.ymd(now), Math.floor((s.endMin + 1) / 60), (s.endMin + 1) % 60) + CONFIG.ENTRY_TIMEOUT_MS, // D + 3 min, like the replay
-      quickFlip: { setup: s.setup, signalEndMin: s.endMin, trigger: cents(s.trigger), vwap: cents(s.vwap), maxHoldMin: CONFIG.maxHoldMin, deadlineMin: CONFIG.deadlineMin },
+      quickFlip: { setup: s.setup, signalEndMin: s.endMin, trigger: cents(s.trigger), vwap: cents(s.vwap), maxHoldMin: CONFIG.maxHoldMin, deadlineMin: CONFIG.deadlineMin,
+        relVol: s.relVol, orHigh: s.or ? cents(s.or.high) : null, orLow: s.or ? cents(s.or.low) : null, spotAtDecision: s.spot, // Phase 91: radar card
+        signalAt: et.toEpoch(et.ymd(now), Math.floor(s.endMin / 60), s.endMin % 60) },
     },
   };
 }
@@ -166,7 +168,7 @@ async function evaluate(symbol, now, fomc) {
     return tally.skip(symbol, `Rejected: ${pick.reason.split(':')[0].replace(/_/g, ' ').toLowerCase()}`);
   }
   proposed.add(key);
-  return candidate(symbol, live, pick, now, options.feed());
+  return candidate(symbol, { ...live, or: s.or }, pick, now, options.feed()); // Phase 91: the opening range for the radar card
 }
 
 // Only while the options book is on paper and the US session is open (the pipeline runs this every pass).
