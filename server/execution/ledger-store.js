@@ -11,6 +11,7 @@ const { LEVELS: STRICTNESS_LEVELS, DEFAULT_LEVEL: DEFAULT_STRICTNESS } = require
 const { CAPITAL_CHOICES, DEFAULT_MAX_CAPITAL_PCT } = require('../risk/risk-engine');
 const toggles = require('../strategies/strategy-toggles');
 const paperLock = require('../risk/paper-lock'); // Phase 91: stockMode / cryptoMode can never be 'live' while locked
+const evidence = require('../strategies/strategy-evidence'); // Phase 91
 
 const STATE_VERSION = 3; // v2 adds settings; v3 adds savedSetups (optional: older files load with none)
 
@@ -201,7 +202,7 @@ function attach(ledgerLists) {
 // ---------- Settings ----------
 // riskPct and the profile/strictness tables are derived (never stored), so the
 // UI shows the server's numbers instead of keeping its own copy.
-const getSettings = () => ({ ...settings, paperOnly: paperLock.PAPER_ONLY, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, strategyManualOnly: [...toggles.CRYPTO_MANUAL_ONLY], riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
+const getSettings = () => ({ ...settings, paperOnly: paperLock.PAPER_ONLY, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, strategyManualOnly: [...toggles.CRYPTO_MANUAL_ONLY], strategyEvidence: { ...evidence.RECORDS }, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
   strictnessLevels: Object.fromEntries(Object.entries(STRICTNESS_LEVELS).map(([k, v]) => [k, { ...v }])) });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.

@@ -87,6 +87,27 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('radar: Settings data lists the crypto scanners as manual-only', JSON.stringify(s3.strategyManualOnly) === JSON.stringify(CRYPTO));
   L.updateSettings({ strategiesEnabled: { ...s3b.strategiesEnabled, 'equity-swing': true } });
 
+  // ---------- 4. Evidence records ----------
+  const ev = require(S + 'strategies/strategy-evidence');
+  check('evidence: exact labels per strategy', ev.of('equity-swing').label === 'PF 0.86 · Failed' && ev.of('equity-day').label === 'PF 1.11 · Failed' && ev.of('options-system').label === 'PF 0.75 · Failed'
+    && ev.of('options-quickflips').label === 'PF 1.41 dev · Failed' && ev.of('crypto-swing').label === 'PF 0.82-0.96 · Failed' && ev.of('crypto-intraday').label === 'PF 0.81 · Failed'
+    && ev.of('speculative-crypto').label === 'PF 0.58 · Failed' && ev.of('portfolio-pilot').label === 'Pilot · not backtested' && ev.of('portfolio-pilot').verdict === 'NOT_A_STRATEGY');
+  check('evidence: an unknown strategy reads "Untested"; manual / adopted trades get no label at all', ev.of('future-x').label === 'Untested' && ev.of('future-x').verdict === 'UNTESTED'
+    && ev.of('manual') === null && ev.of('adopted-hold') === null && ev.of(undefined) === null);
+  const qf = require(S + 'strategies/7-options-quickflips'); const { processCandidate, resizeOrder } = require(S + 'risk/risk-engine');
+  const now4 = Date.now();
+  const pick = (ask) => ({ contract: { symbol: 'SPY261013C00770000', expiration: '2026-10-13', strike: 770, dte: 6, iv: 0.15, delta: 0.52 }, quote: { bid: ask - 0.1, ask, quoteTime: now4 - 2000, delta: 0.52 }, mid: ask - 0.05 });
+  const sized = processCandidate(qf.candidate('SPY', { setup: 'S1', dir: 'long', endMin: 590, trigger: 769.5, vwap: 768, spot: 770.2, relVol: 2 }, pick(5.1), now4, 'indicative'), 10000, { riskPct: 0.02 });
+  const staged = L.stageOrder(sized); // the exact object processCandidate returned (the risk engine tracks its approvals by identity)
+  check('evidence: a staged setup carries its strategy\'s record (as it was at staging)', staged.evidence && staged.evidence.label === 'PF 1.41 dev · Failed' && L.getPendingOrders().some((o) => o.id === sized.id && o.evidence && o.evidence.verdict === 'FAILED'));
+  const pend = L.getPendingOrders().find((o) => o.id === sized.id);
+  const same = resizeOrder(pend, pend.notional, { confirmed: true });
+  check('evidence: a Trade Amount change (resizeOrder) keeps the label', same.approved === true && same.evidence && same.evidence.label === 'PF 1.41 dev · Failed', same.reason || '');
+  check('evidence: Settings data carries every record', L.getSettings().strategyEvidence['equity-swing'].label === 'PF 0.86 · Failed');
+  const mail = require(S + 'execution/notifier').buildAlert(pend);
+  check('evidence: the approval email leads with the label (subject and first detail row)', /\[PF 1\.41 dev · Failed\]/.test(mail.subject) && /Test record\s+PF 1\.41 dev · Failed/.test(mail.text), mail.subject);
+  L.discardOrder(sized.id);
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

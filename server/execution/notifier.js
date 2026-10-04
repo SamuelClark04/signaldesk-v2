@@ -54,6 +54,7 @@ function sizeLabel(o) {
 // Ordered label/value rows shared by the text and HTML bodies.
 function detailRows(o) {
   const rows = [
+    ...(o.evidence ? [['Test record', `${o.evidence.label}: ${o.evidence.detail}`]] : []), // Phase 91: the strategy's record first
     ['Asset', `${o.asset} (${o.market})`],
     ['Setup', `${o.setupType} · ${o.strategyId} · ${o.timeframe}`],
     ['Direction', String(o.direction).toUpperCase()],
@@ -76,7 +77,7 @@ function detailRows(o) {
 }
 
 function buildAlert(o) {
-  const subject = `[ACTION REQUIRED]${o.speculative ? ' [SPECULATIVE MOONSHOT]' : ''} SignalDesk: ${o.direction} ${o.asset} (${o.strategyId})`;
+  const subject = `[ACTION REQUIRED]${o.speculative ? ' [SPECULATIVE MOONSHOT]' : ''}${o.evidence ? ` [${o.evidence.label}]` : ''} SignalDesk: ${o.direction} ${o.asset} (${o.strategyId})`;
   const created = Date.parse(o.timestamp);
   const expiry = Number.isFinite(created)
     ? `Approve before ${etTime(created + MAX_CANDIDATE_AGE_MS)}; after that the order guard expires it.`

@@ -8,6 +8,7 @@
 const { isApproved } = require('../risk/risk-engine');
 const { estimateRoundTripFees, feeKey } = require('../risk/cost-authority'); // feeKey: the venue's fees (69A)
 const store = require('./ledger-store');
+const evidence = require('../strategies/strategy-evidence'); // Phase 91: each setup carries its strategy's test record
 const { grossPnl, priceScenarios, costBreakdown, feeModel, feeLegs } = require('../risk/scenarios');
 const { optionMark } = require('./option-marks');
 const exitQuotes = require('./exit-quote'); // WYSIWYG: the one exit pricing for bookings and the screen (Phase 59)
@@ -46,7 +47,7 @@ function stageOrder(sizedCandidate) {
   if (isKnown(sizedCandidate.id)) {
     throw new Error(`paper-ledger: duplicate candidate id ${sizedCandidate.id}`);
   }
-  const order = { ...sizedCandidate, status: 'pending', stagedAt: Date.now() };
+  const order = { ...sizedCandidate, evidence: sizedCandidate.evidence || evidence.of(sizedCandidate.strategyId), status: 'pending', stagedAt: Date.now() };
   pendingOrders.push(order);
   store.save();
   return { ...order, scenarios: priceScenarios(order), costs: costBreakdown(order) };
