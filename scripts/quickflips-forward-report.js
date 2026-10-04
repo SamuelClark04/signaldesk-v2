@@ -2,6 +2,8 @@
 // Implements docs/research/phase89-protocol-2a-clarification.md exactly: per-trade E1 / X1 / RT / Q (US $ per share of premium; quotes =
 // Alpaca INDICATIVE as stored, fills = Alpaca Paper averages), the 40-trade execution checkpoint, the 100-trade futility check, the
 // 150-trade verdict, INCONCLUSIVE after 12 months with fewer than 150 trades. Never writes the ledger; prints its sha256 before / after.
+// Phase 89d wording: the $0.05 / $0.06 benchmarks compare Alpaca Paper fills with INDICATIVE quotes; they are not verified real-market
+// slippage (no OPRA NBBO, simulated fills). Thresholds and calculations are unchanged.
 const fs = require('fs'); const crypto = require('crypto');
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -56,15 +58,16 @@ const live = journal.filter((t) => t.execution === 'LIVE').length;
 const fmt = (x, d = 3) => (x === null || x === undefined ? '-' : Number.isFinite(x) ? x.toFixed(d) : String(x));
 console.log(`QUICK FLIPS FORWARD TEST  ${file}  sha256 ${h0.slice(0, 16)}...  start ${opt('--start')}  trades ${trades.length} (Alpaca Paper)  internal-paper excluded ${internal}  entries canceled unfilled ${canceled}`);
 console.log('units: US$ per share of premium (x100 per contract). quotes: Alpaca INDICATIVE as stored; fills: Alpaca Paper (simulated)');
+console.log('E1 / X1 / RT = paper fill vs INDICATIVE quote: a comparison against indicative quotes, NOT verified real-market slippage');
 for (const t of trades) console.log(`  ${day(t.openedAt)} ${t.asset} ${t.exitReason.padEnd(16)} net ${fmt(t.net, 2)} R ${fmt(t.r, 2)} | E1 ${fmt(t.E1)} X1 ${fmt(t.X1)} RT ${fmt(t.RT)} Q ${fmt(t.Q, 0)}s${t.overnight ? ' OVERNIGHT' : ''}${t.manual ? ' MANUAL' : ''}`);
 
 const cp = trades.slice(0, 40);
 if (cp.length === 40) {
   const miss = cp.filter((t) => t.E1 === null || t.X1 === null).length;
   const checks = { overnight: cp.filter((t) => t.overnight).length === 0, realMoney: live === 0, ruleExits: cp.filter((t) => !t.manual).length >= 0.95 * cp.length,
-    meanE1: mean(cp.map((t) => t.E1)) <= 0.05, meanX1: mean(cp.map((t) => t.X1)) <= 0.05, missing: miss <= 4 };
+    meanE1VsIndicative: mean(cp.map((t) => t.E1)) <= 0.05, meanX1VsIndicative: mean(cp.map((t) => t.X1)) <= 0.05, missing: miss <= 4 };
   console.log(`\n40-TRADE EXECUTION CHECKPOINT: ${Object.values(checks).every(Boolean) ? 'PASSED (continue)' : 'FAILED (fix the mechanics; the count restarts)'} ${JSON.stringify(checks)}`);
-  console.log(`  E1 mean ${fmt(mean(cp.map((t) => t.E1)))} median ${fmt(median(cp.map((t) => t.E1)))} max ${fmt(max(cp.map((t) => t.E1)))} | X1 mean ${fmt(mean(cp.map((t) => t.X1)))} median ${fmt(median(cp.map((t) => t.X1)))} max ${fmt(max(cp.map((t) => t.X1)))} | missing ${miss}`);
+  console.log(`  vs INDICATIVE quotes (not verified market slippage): E1 mean ${fmt(mean(cp.map((t) => t.E1)))} median ${fmt(median(cp.map((t) => t.E1)))} max ${fmt(max(cp.map((t) => t.E1)))} | X1 mean ${fmt(mean(cp.map((t) => t.X1)))} median ${fmt(median(cp.map((t) => t.X1)))} max ${fmt(max(cp.map((t) => t.X1)))} | missing ${miss}`);
 } else console.log(`\n40-TRADE EXECUTION CHECKPOINT: not reached (${trades.length} / 40)`);
 if (trades.length >= 100) {
   const f = trades.slice(0, 100); const mr = mean(f.map((t) => t.r));
@@ -73,9 +76,9 @@ if (trades.length >= 100) {
 let verdict = 'IN PROGRESS';
 if (trades.length >= 150) {
   const v = trades.slice(0, 150); const by = (s) => v.filter((t) => t.asset === s);
-  const c = { pf: pf(v) >= 1.15, meanR: mean(v.map((t) => t.r)) > 0, boot: bootLower(v) > 0, dd: maxDD(v) < 15, spy: pf(by('SPY')) > 0.9, qqq: pf(by('QQQ')) > 0.9, rt: mean(v.map((t) => t.RT)) <= 0.06 };
+  const c = { pf: pf(v) >= 1.15, meanR: mean(v.map((t) => t.r)) > 0, boot: bootLower(v) > 0, dd: maxDD(v) < 15, spy: pf(by('SPY')) > 0.9, qqq: pf(by('QQQ')) > 0.9, rtVsIndicative: mean(v.map((t) => t.RT)) <= 0.06 };
   verdict = Object.values(c).every(Boolean) ? 'PASS' : 'FAIL';
-  console.log(`150-TRADE VERDICT: ${verdict} ${JSON.stringify(c)} (PF ${fmt(pf(v), 2)}, mean R ${fmt(mean(v.map((t) => t.r)))}, boot lower ${fmt(bootLower(v))}, DD ${fmt(maxDD(v), 1)}R, mean RT ${fmt(mean(v.map((t) => t.RT)))})`);
+  console.log(`150-TRADE VERDICT: ${verdict} ${JSON.stringify(c)} (PF ${fmt(pf(v), 2)}, mean R ${fmt(mean(v.map((t) => t.r)))}, boot lower ${fmt(bootLower(v))}, DD ${fmt(maxDD(v), 1)}R, mean RT vs indicative mid ${fmt(mean(v.map((t) => t.RT)))})`);
 } else if (now - start >= 365 * 864e5) verdict = 'INCONCLUSIVE (12 months, fewer than 150 trades)';
 console.log(`STATUS: ${verdict}`);
 console.log(digest() === h0 ? `input unchanged (sha256 ${h0})` : 'WARNING: the input file changed while it was read: use a COPY');

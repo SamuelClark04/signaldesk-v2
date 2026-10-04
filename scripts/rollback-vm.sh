@@ -32,8 +32,9 @@ if [ "${RESTORE_LEDGER:-0}" = "1" ]; then
   echo "== RESTORE_LEDGER=1: putting the pre-deploy data files back (trades recorded since the deploy are removed from the ledger)"
   for f in "$BACKUP"/*.json "$BACKUP"/credentials.enc.json; do [ -f "$f" ] && cp -p "$f" server/data/; done
 fi
+DEPS_CHANGED=0; git diff --quiet HEAD "$BEFORE" -- package.json package-lock.json || DEPS_CHANGED=1
 git reset --hard --quiet "$BEFORE"
-npm ci --no-audit --no-fund --loglevel=error
+if [ "$DEPS_CHANGED" = 1 ]; then npm ci --no-audit --no-fund --loglevel=error; else echo "== dependencies unchanged: npm ci skipped (shorter stop)"; fi
 if [ "${RESTORE_LEDGER:-0}" != "1" ]; then
   # Every scanner the OLD code knows, written explicitly OFF (a missing or partial map falls back to that version's defaults: mostly ON).
   node -e '

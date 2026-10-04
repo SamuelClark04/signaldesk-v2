@@ -258,23 +258,15 @@ This PC still has no gcloud CLI and no SSH key, and the project rule forbids mes
 nor its enabled strategies were verified. **What is known is LOCAL only:** this PC's ledger copy (last saved 2026-09-28) has no saved
 strategy switches, which on 85b means every scanner except Crypto Swing ON, and cryptoMode live. The VM may differ.
 
-**One set of steps (read-only; uses the reviewed audit scripts of commit 3998693; changes nothing on the VM):**
+**CORRECTED (Phase 89d):** the steps first written here took `trade-audit.js` / `audit-attribution.js` from 3998693, which lack the
+accounting reconciliation (section A) and the input sha256 before / after added in 25b02f3. They are replaced by one pinned, read-only
+script that also separates the checked-out commit from the commit the running process loaded, and reads the strategy switches the way the
+loaded code does: `scripts/vm-audit.sh`, steps in `docs/deploy/phase85b-to-89c.md` section 1:
 
-    cd ~/SignalDesk-V2                      # the app folder on the VM
-    git fetch origin
-    git log -1 --format='%h %cd %s'; pm2 ls  # the checkout + the process (restart time)
-    mkdir -p ~/sd-audit && cp server/data/ledger-state.json ~/sd-audit/ledger-snapshot.json && sha256sum ~/sd-audit/ledger-snapshot.json
-    git show 3998693:scripts/trade-audit.js > ~/sd-audit/trade-audit.js
-    git show 3998693:scripts/audit-attribution.js > ~/sd-audit/audit-attribution.js
-    node ~/sd-audit/trade-audit.js ~/sd-audit/ledger-snapshot.json --csv ~/sd-audit/audit.csv > ~/sd-audit/audit.txt
-    node -e "const s=require(process.env.HOME+'/sd-audit/ledger-snapshot.json').settings||{};console.log(JSON.stringify({strategiesEnabled:s.strategiesEnabled,strategyPauseVersion:s.strategyPauseVersion,stockMode:s.stockMode,cryptoMode:s.cryptoMode,paperStockBroker:s.paperStockBroker}))" > ~/sd-audit/settings.txt
-    tar czf ~/sd-audit.tgz -C ~ sd-audit
+    cd ~/SignalDesk-V2 && git fetch -q origin
+    git show <C>:scripts/vm-audit.sh > /tmp/vm-audit.sh && bash /tmp/vm-audit.sh <C>    # <C> = the Phase 89d commit
 
-Download `~/sd-audit.tgz` (Cloud Console SSH window: gear menu > Download file) into your Downloads folder and tell me. It contains the
-on-VM audit (3998693 tools) AND the ledger COPY, so the Phase 89c reconciliation bridge runs here on the copy; the original ledger is never
-modified (its sha256 is printed before the copy is used). `git log -1` shows the checkout; it is the running code only if pm2 restarted
-after it (compare the commit date with the pm2 restart time). From Phase 89c on the server logs `[version] running <commit>` at boot and
-serves `/api/version`.
+Download `~/sd-audit-<time>.tgz` and say so; the reconciliation of the VM's trades (section 16 for the local copy) is then redone on it.
 
 ## 16. Accounting reconciliation vs hypotheses (local copy; the VM's trades are still missing)
 

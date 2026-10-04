@@ -4,6 +4,12 @@ Written 2026-10-04, before any forward trade (Quick Flips is OFF; no forward dat
 section A. Nothing is loosened. One rule is made STRICTER at the user's request: a PASS requires the full 150 trades.
 The protocol-1 validation window (2025-06-02 to 2026-10-01) stays untouched.
 
+**Wording note (Phase 89d, 2026-10-04, still before any forward trade; no rule, threshold or calculation changed):** the $0.05 (E1, X1)
+and $0.06 (RT) benchmarks are a **comparison of Alpaca Paper fills against INDICATIVE quotes**. They are NOT verified real-market
+slippage: there is no OPRA NBBO behind the quotes and the fills are simulated. Passing them shows the mechanics behave as modelled
+against that feed, nothing more. The test may run on a later commit only if its `server/` and `client/` trees are identical to
+25b02f3's (Phase 89d changes scripts and docs only: `git diff --stat 25b02f3 <commit> -- server client` prints nothing).
+
 ## 1. Configuration id
 
 - Trading rules: exactly as in commit **3998693** (signals, contract choice, liquidity filters, 1 contract, automatic paper execution,
@@ -23,8 +29,8 @@ The protocol-1 validation window (2025-06-02 to 2026-10-01) stays untouched.
 
 | Measure | Definition | Sign |
 |---|---|---|
-| E1 entry slippage | entry fill - the ask of the signal's quote (optionsData.plannedDebit: the quote <= 30 s old used to build the setup) | + = paid more |
-| X1 exit slippage | stop / setup failure / max hold / deadline / manual exits: natural bid of the FIRST exit-trigger quote (exitWork.q0.bid) - exit fill; resting take-profit: target limit - fill | + = received less |
+| E1 entry fill vs indicative ask | entry fill - the ask of the signal's quote (optionsData.plannedDebit: the quote <= 30 s old used to build the setup) | + = paid more |
+| X1 exit fill vs indicative bid | stop / setup failure / max hold / deadline / manual exits: natural bid of the FIRST exit-trigger quote (exitWork.q0.bid) - exit fill; resting take-profit: target limit - fill | + = received less |
 | RT round-trip cost vs mid | (entry fill - signal quote mid) + (first-trigger quote mid - exit fill); a take-profit exit counts 0 on the exit side (the replay filled targets at the target) | + = cost |
 | Q quote age | signal time - the signal quote's own timestamp, seconds | |
 
@@ -39,7 +45,8 @@ trade with partial fills counts once. An overnight hold (closed on a later New Y
 
 All must hold, else the mechanics are fixed and the count restarts from zero:
 - 0 overnight holds; 0 real-money orders; >= 95% of exits by a rule (not manual).
-- **Mean E1 <= $0.05 and mean X1 <= $0.05 per share** (the MEAN over the 40 trades). The median and the maximum are reported for
+- **Mean E1 <= $0.05 and mean X1 <= $0.05 per share** (the MEAN over the 40 trades), measured against INDICATIVE quotes: a
+  comparison with that feed, not verified real-market slippage. The median and the maximum are reported for
   information only; they are not pass / fail.
 - Missing quotes for E1 or X1 on at most 10% of the trades.
 
@@ -48,7 +55,7 @@ All must hold, else the mechanics are fixed and the count restarts from zero:
 - **FAIL (futility) at 100 trades:** PF < 0.80 or mean R < -0.15.
 - **PASS: only at 150 trades**, and only if ALL hold: PF >= 1.15 on Alpaca Paper fills + $0.65 per contract per fill; mean R > 0 with a
   day-block bootstrap (5,000 resamples, seed 89) one-sided 95% lower bound > 0; max drawdown < 15R; PF > 0.9 on SPY and on QQQ separately;
-  mean RT <= $0.06 per share.
+  mean RT <= $0.06 per share (vs the INDICATIVE mid; not verified real-market cost).
 - **FAIL at 150 trades** if any PASS condition is not met.
 - **INCONCLUSIVE:** 12 calendar months elapse with fewer than 150 trades (and no futility stop). No PASS is possible then, whatever the PF.
 - R per trade = the trade's net P/L / its recorded dollarRisk (the risk engine's expected exit risk).

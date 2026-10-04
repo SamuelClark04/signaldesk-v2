@@ -10,8 +10,11 @@
 #
 # Steps: fetch origin -> refuse if tracked files were edited on the VM (unless FORCE=1) -> read-only pre-flight (running commit, open
 # positions, waiting setups) -> BACK UP server/data (ledger, holdings, paper runs, radar, vault) to server/data/backups/deploy-<time>/
-# -> reset to TARGET -> npm ci -> syntax / line-limit check -> pm2 restart + save -> confirm the commit the server REPORTS at boot
-# ("[version] running <commit>", Phase 89c+) -> print the rollback command. .env and server/data/ are untracked: never overwritten.
+# -> syntax / line-limit check of TARGET in a temporary worktree -> reset to TARGET -> pm2 restart + save -> confirm the commit the server
+# REPORTS at boot ("[version] running <commit>", Phase 89c+) -> print the rollback command. .env and server/data/ are untracked: never
+# overwritten. Phase 89d: the running server keeps its exits until the restart: the check runs BEFORE the live checkout changes (the old
+# process loads modules lazily, so a changed tree under it is a mixed version), and npm ci runs only when package-lock.json changed, then
+# with the app STOPPED for the install (it deletes node_modules under a running process); the reset is followed at once by the restart.
 set -euo pipefail
 
 cd "${SIGNALDESK_ROOT:-$(dirname "$0")/..}" # SIGNALDESK_ROOT: run a copy of this script from elsewhere (the first deploy from an old version)
@@ -59,6 +62,13 @@ if [ -f "$LEDGER" ]; then
   ' "$LEDGER"
 fi
 
+# The target must pass the syntax / line check before the live checkout is touched.
+CHECK_DIR="$(mktemp -d /tmp/sd-check-XXXXXX)"
+git worktree add --quiet --detach "$CHECK_DIR" "$AFTER"
+if ! (cd "$CHECK_DIR" && node scripts/check-limits.js); then git worktree remove --force "$CHECK_DIR"; echo "== $AFTER fails the syntax / line check: nothing changed"; exit 1; fi
+git worktree remove --force "$CHECK_DIR"
+DEPS_CHANGED=0; git diff --quiet "$BEFORE" "$AFTER" -- package.json package-lock.json || DEPS_CHANGED=1
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP="server/data/backups/deploy-$STAMP-$BEFORE-to-$AFTER"
 mkdir -p "$BACKUP"
@@ -68,12 +78,17 @@ done
 printf 'before=%s\nafter=%s\ntime=%s\napp=%s\n' "$BEFORE" "$AFTER" "$STAMP" "$APP" > "$BACKUP/meta.txt"
 echo "== backup: $BACKUP ($(ls "$BACKUP" | wc -l) files)"
 
+if [ "$DEPS_CHANGED" = 1 ]; then
+  echo "== dependencies changed: stopping $APP for npm ci (exits pause until the restart; venue-side stops stay at the venues)"
+  pm2 stop "$APP" >/dev/null
+fi
 git reset --hard --quiet "$REF"
 echo "== code: $BEFORE -> $(git rev-parse --short HEAD) ($(git log -1 --pretty=%s))"
+if [ "$DEPS_CHANGED" = 1 ]; then echo "== npm ci"; npm ci --no-audit --no-fund --loglevel=error; else echo "== dependencies unchanged: npm ci skipped"; fi
 
-echo "== npm ci"
-npm ci --no-audit --no-fund --loglevel=error
-npm run --silent check:limits
+echo "== pm2 restart $APP"
+pm2 restart "$APP" --update-env >/dev/null
+pm2 save >/dev/null
 
 # Venue keys the crypto waterfall needs (names only).
 MISSING=""
@@ -82,11 +97,11 @@ for k in COINBASE_API_KEY COINBASE_API_SECRET OKX_API_KEY OKX_API_SECRET OKX_API
 done
 [ -n "$MISSING" ] && echo "== note: not set in .env (that venue stays off):$MISSING"
 
-echo "== pm2 restart $APP"
-pm2 restart "$APP" --update-env >/dev/null
-pm2 save >/dev/null
-sleep 8
-LOG="$(pm2 logs "$APP" --lines 80 --nostream 2>&1 || true)"
+RUNNING=""
+for _ in $(seq 1 30); do # the boot takes a while on an e2-micro: wait up to 90 s for the version line
+  sleep 3; LOG="$(pm2 logs "$APP" --lines 80 --nostream 2>&1 || true)"
+  echo "$LOG" | grep -qF "[version] running $AFTER" && break
+done
 echo "$LOG" | tail -30
 RUNNING="$(echo "$LOG" | grep -o '\[version\] running [0-9a-f]*' | tail -1 | awk '{print $3}')"
 if [ "$RUNNING" = "$AFTER" ]; then echo "== VERIFIED: the server reports it is running $RUNNING"; else echo "== CHECK: expected $AFTER, the server log reports '${RUNNING:-nothing}' (versions before Phase 89c do not log it)"; fi

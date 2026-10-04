@@ -222,6 +222,14 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   prints a pre-flight and verifies the [version] line; SIGNALDESK_ROOT runs a copy (first deploy from an old checkout); scripts/rollback-vm.sh
   (refuses with Quick Flips open; keeps the ledger and writes every scanner the OLD code knows OFF: pre-89 code rejects a map naming
   options-quickflips and falls back to mostly-ON defaults). Review: docs/deploy/phase85b-to-89c.md. Test: tests/ph89cunit.js.
+- **Phase 89d (VM audit + deploy handoff; scripts / docs only, server/ and client/ identical to 25b02f3)**: scripts/vm-audit.sh (read-only,
+  pinned: `git show <C>:scripts/vm-audit.sh > /tmp/vm-audit.sh && bash /tmp/vm-audit.sh <C>`) captures the checkout, the process (pm2 fields,
+  never its env), LOADED = the reflog entry checked out at the process start vs CHECKOUT (VERDICT SAME / DIFFERENT / UNCERTAIN), the switches as
+  the LOADED code reads them (scripts/vm-audit-settings.js: that commit's strategy-toggles defaults + pauses), modes, and trade-audit on a ledger
+  COPY; it refuses audit tools without the 89c reconciliation / fingerprint (the old runbook's 3998693 tools lack them). deploy-vm.sh checks the
+  target in a temp worktree BEFORE the live checkout changes, runs npm ci only when the lockfile changed (app stopped for it), restarts right
+  after the reset, waits up to 90 s for [version]. The $0.05 / $0.06 forward benchmarks are labelled "vs INDICATIVE quotes, not verified
+  real-market slippage" (report + protocol 2A; thresholds unchanged). Runbook + gate + testing rules: docs/deploy/phase85b-to-89c.md.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
