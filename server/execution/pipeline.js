@@ -239,6 +239,7 @@ function startPipeline(options = {}) {
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)
   require('../connectors/coinbase-fees').start(); // the account's real Coinbase fee tier (Phase 65)
+  require('../connectors/venue-fees').start(); // Phase 92: the Kraken / OKX US accounts' real fee rates (read-only)
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
     runPipeline().catch((err) => console.error('[pipeline] pass failed:', err));

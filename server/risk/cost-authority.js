@@ -43,12 +43,21 @@ const COINBASE_SPREAD_BUFFER = feeFromEnv('COINBASE_SPREAD_BUFFER', DEFAULT_SPRE
 let cbFees = { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)', at: null };
 const coinbaseFees = () => ({ ...cbFees, buffer: COINBASE_SPREAD_BUFFER });
 
-// Phase 69A: the other crypto venues' fee schedules (the crypto router's waterfall, cheapest
-// first): OKX US 0.08% / 0.10% (OKX_MAKER_FEE / OKX_TAKER_FEE, Phase 69B), Kraken Pro 0.25% / 0.40%
-// (KRAKEN_MAKER_FEE / KRAKEN_TAKER_FEE). Coinbase keeps its account tier (coinbaseFees below).
+// Phase 69A: the other crypto venues' fees (the crypto router's waterfall). Phase 92: the ACCOUNT's real
+// rates are read at runtime (connectors/venue-fees.js: Kraken TradeVolume, OKX account/trade-fee) and set
+// here (setVenueFees); until a read succeeds the fallback is KRAKEN_* / OKX_* in .env, else the entry tier
+// both venues charged this account when verified on 2026-10-04 (Kraken 0.40% / 0.80%, OKX US Lv1 0.20% /
+// 0.35%). The old defaults (Kraken 0.25% / 0.40%, OKX 0.08% / 0.10%) were never verified and too low.
+// VENUE_FEES objects are updated IN PLACE (break-even.js holds a reference). Coinbase: coinbaseFees below.
+const envNamed = (v) => process.env[`${v}_MAKER_FEE`] !== undefined || process.env[`${v}_TAKER_FEE`] !== undefined;
 const VENUE_FEES = {
-  kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.0025, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.004, 0.05) },
-  okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.0008, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.001, 0.05) },
+  kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.004, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.008, 0.05) },
+  okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.002, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.0035, 0.05) },
+};
+// Where each venue's rates in force came from: { source, at (ms of the account read; null = not verified) }.
+const VENUE_META = {
+  kraken: { source: envNamed('KRAKEN') ? '.env override (unverified)' : 'default: Kraken entry tier (unverified)', at: null },
+  okx: { source: envNamed('OKX') ? '.env override (unverified)' : 'default: OKX US Lv1 (unverified)', at: null },
 };
 
 // Cost of one leg as a fraction of that leg's notional. Keys are markets, plus 'crypto:<venue>'
@@ -70,6 +79,22 @@ const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { m
 // The exact rates an order / position pays at its (routed) venue: { maker, taker }.
 const feesOf = (x) => venueFees(String(feeKey(x) || '').split(':')[1]);
 // The Coinbase rates in force: the .env / default ones until the account's own tier is read.
+
+// Phase 92: a venue account's verified rates (venue-fees.js). Refused when implausible; the old rates stay.
+function setVenueFees(venue, { maker, taker, source, at = Date.now() }) {
+  const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
+  if (!VENUE_FEES[venue] || !ok(maker) || !ok(taker) || !(taker > 0)) return false;
+  Object.assign(VENUE_FEES[venue], { maker: Math.min(maker, taker), taker });
+  VENUE_META[venue] = { source: source || `${venue} account`, at };
+  LEG_RATE[`crypto:${venue}`] = { maker: VENUE_FEES[venue].maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  return true;
+}
+// { maker, taker, source, at, verified } for 'coinbase' | 'kraken' | 'okx' (the rates in force + provenance).
+function feeInfo(venue) {
+  if (VENUE_FEES[venue]) { const m = VENUE_META[venue]; return { ...VENUE_FEES[venue], source: m.source, at: m.at, verified: m.at !== null }; }
+  const c = coinbaseFees();
+  return { maker: c.maker, taker: c.taker, source: c.source, at: c.at, verified: c.at !== null };
+}
 
 function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
   const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
@@ -174,6 +199,8 @@ module.exports = {
   maxFeeDrag,
   coinbaseFees,
   setCoinbaseFees,
+  setVenueFees,
+  feeInfo,
   feeKey,
   venueFees,
   feesOf,

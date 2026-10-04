@@ -247,6 +247,15 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   strategy's test record, copied onto every staged setup (paper-ledger.stageOrder), in the email subject and on every card (components/evidence-badge.js).
   Quick Flips radar card: components/quickflip-card.js (contract, why, cost per contract, automatic exits, countdown to the entry deadline). Suites that
   test LIVE paths on mocks set require(S + 'risk/paper-lock').PAPER_ONLY = false first. Test: tests/ph91unit.js. Supersedes the Phase 89 / 89b notes on automatic Quick Flips paper execution (auto-paper) and on every scanner being off by default.
+- **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken (POST /0/private/TradeVolume, XBTUSD + ETHUSD) and OKX US
+  (GET /api/v5/account/trade-fee, SPOT BTC-USDC + ETH-USDC) ACCOUNT rates at boot + every 6 h (retry 10 min), read-only, like coinbase-fees.js;
+  the highest pair rate -> cost-authority.setVenueFees (VENUE_FEES updated IN PLACE + LEG_RATE). cost-authority.feeInfo(venue) = { maker, taker,
+  source, at, verified }. Fallback until a read succeeds: KRAKEN_* / OKX_* in .env, else the rates verified on this account 2026-10-04 (Kraken
+  0.40 / 0.80%, OKX US Lv1 0.20 / 0.35%, Coinbase Intro 0.50 / 0.90%), labelled unverified; the old 0.25 / 0.40% and 0.08 / 0.10% were never
+  verified and too low. A failed lookup is explicit (status error + time, a log warning; Settings > waterfall shows "Fees UNVERIFIED" or "last
+  lookup failed" in amber); the last verified rates stay in force. OKX US lists NO BTC-USD / ETH-USD book: BTC-USD routes to BTC-USDC (settles
+  in USD / USDC / USDG / RLUSD; only USD / USDC / USDT are counted as spendable), else BTC-USDT (USDT). Kit suites that test routing / cost
+  arithmetic written for the old rates pin them via the .env overrides. Evidence: docs/research/phase92-fee-verification.md. Test: tests/ph92unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
@@ -319,8 +328,8 @@ Client (`client/`)
   cash in ONE currency its books settle in; live staging also skips venues that cannot fund $20);
   live crypto risk % is of ALL live crypto equity, the cash cap is the routed venue's and
   fee-inclusive (cash / (1 + taker) - $0.02; a cash-bound order may go down to $19.80); staged
-  crypto setups re-route each pass (route-refresh.js); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx'
-  0.08/0.10%, 'crypto:kraken' 0.25/0.40%, Coinbase = its account tier). OKX rests an OCO (T1 + stop,
+  crypto setups re-route each pass (route-refresh.js); costs / break-even / R use that venue's fees (cost-authority.feeKey: 'crypto:okx' /
+  'crypto:kraken' = the account's rates read at runtime by connectors/venue-fees.js, Phase 92; Coinbase = its account tier). OKX rests an OCO (T1 + stop,
   market on trigger; p.brokerOco; oco-upgrade.js converts stop-only ones); Kraken only the stop
   (SignalDesk sells at T1). Market stops: no STOP_GAP. OKX charges a BUY's fee in the coin:
   the position size is what was received. Cash checks use one currency (`spendable`).

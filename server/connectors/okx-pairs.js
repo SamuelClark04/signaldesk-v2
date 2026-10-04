@@ -1,10 +1,12 @@
 // OKX US spot instruments (Phase 69B): the PUBLIC /api/v5/public/instruments?instType=SPOT list
 // (no key), cached PAIRS_TTL_MS, so SignalDesk symbols map to OKX instIds and orders respect each
 // instrument's steps and minimum:
-//   SignalDesk 'ETH-USD' <-> OKX instId 'ETH-USD' (also the 'ETH-USDC' / 'ETH-USDT' books)
+//   SignalDesk 'ETH-USD' -> OKX's ETH-USD book if it lists one, else its 'ETH-USDC' / 'ETH-USDT' books (Phase 92,
+//   checked 2026-10-04: OKX US lists NO BTC-USD / ETH-USD instrument; BTC-USDC / ETH-USDC settle in USDG, USD,
+//   USDC or RLUSD, BTC-USDT / ETH-USDT in USDT only)
 //   minSz (minimum base size), lotSz (size step), tickSz (price step)
-//   tradeQuoteCcyList: the quote currencies one book settles in (OKX's ETH-USD book takes USD,
-//   USDC, USDG, RLUSD: an order pays with the one named in tradeQuoteCcy)
+//   tradeQuoteCcyList: the quote currencies one book settles in (an order pays with the one named in
+//   tradeQuoteCcy); only USD / USDC / USDT balances are counted as spendable (QUOTES)
 // Only 'live' USD / USDC / USDT instruments are kept. lists() / get() are synchronous on the
 // cache (empty until the first load: the router's prepare() loads it before routing).
 const config = require('../config');

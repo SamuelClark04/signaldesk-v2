@@ -1,6 +1,6 @@
 // Phase 70D: a crypto strategy's stop FLOOR is costed on the venue the setup would route to now
-// (crypto-router.preRoute: listing + the last known cash when crypto is LIVE): OKX US 0.08% /
-// 0.10% and Kraken Pro 0.25% / 0.40% need a far smaller stop than Coinbase's tier to keep fees
+// (crypto-router.preRoute: listing + the last known cash when crypto is LIVE): OKX US / Kraken Pro at
+// their account rates (Phase 92: venue-fees.js) can need a smaller stop than Coinbase's tier to keep fees
 // under the fee-drag budget. The stop itself still comes from the chart structure; the floor only
 // widens a stop that would be too tight for the venue's fees. The pipeline routes the candidate
 // the same way (same pass, same caches), so the setup is costed on the venue its floor assumed.
