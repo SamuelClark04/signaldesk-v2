@@ -168,6 +168,7 @@
       ...(res ? [el('p', { className: res.ok ? 'mt-ok' : 'mt-error', textContent: res.ok ? `Opened: ${res.position.positionSize} ${res.position.asset} (${res.position.execution}${res.position.brokerId ? ` · ${res.position.brokerId}` : ''})` : res.error })] : [])]);
   }
 
+  const paperOnly = () => !!((t && t.defaults && t.defaults.paperOnly) || (SD.app && SD.app.state && SD.app.state.settings && SD.app.state.settings.paperOnly));
   function render() {
     if (!t) return;
     const focus = document.activeElement && document.activeElement.id;
@@ -189,7 +190,7 @@
       seg(modes, t.mode, setMode, 'mt-modes'),
       el('div', { className: 'mt-body' }, body),
       actions(),
-      el('p', { className: 'mt-foot', textContent: 'Sized and checked by the risk engine and the order guard, like any setup. Paper unless you pick Live (routed to the cheapest venue: OKX US, Kraken Pro, then Coinbase).' }),
+      el('p', { className: 'mt-foot', textContent: 'Sized and checked by the risk engine and the order guard, like any setup. ' + (paperOnly() ? 'Paper only: SignalDesk is locked to paper trading in every market.' : 'Paper unless you pick Live (routed to the cheapest venue: OKX US, Kraken Pro, then Coinbase).') }),
     ]);
     const next = el('div', { className: 'mt-overlay', id: 'mt-overlay' }, [panel]);
     next.onclick = (e) => { if (e.target === next) close(); };

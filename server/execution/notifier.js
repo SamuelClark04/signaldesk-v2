@@ -79,7 +79,9 @@ function detailRows(o) {
 function buildAlert(o) {
   const subject = `[ACTION REQUIRED]${o.speculative ? ' [SPECULATIVE MOONSHOT]' : ''}${o.evidence ? ` [${o.evidence.label}]` : ''} SignalDesk: ${o.direction} ${o.asset} (${o.strategyId})`;
   const created = Date.parse(o.timestamp);
-  const expiry = Number.isFinite(created)
+  const deadline = require('./setup-ttl').expiresAt(o); // the real window: a Quick Flip's entry deadline, not +30 min
+  const expiry = Number.isFinite(deadline) ? `Approve before ${etTime(deadline)}; after that the order guard expires it.`
+    : Number.isFinite(created)
     ? `Approve before ${etTime(created + MAX_CANDIDATE_AGE_MS)}; after that the order guard expires it.`
     : 'Approve soon; the order guard expires setups after 30 minutes.';
   const rows = detailRows(o);

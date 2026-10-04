@@ -9,9 +9,9 @@ const git = (args) => { try { return execFileSync('git', args, { cwd: ROOT, enco
 const BOOT = Object.freeze({ commit: git(['rev-parse', '--short', 'HEAD']) || 'unknown', subject: git(['log', '-1', '--pretty=%s']) || '', dirty: !!git(['status', '--porcelain', '--untracked-files=no']),
   startedAt: new Date().toISOString(), node: process.version });
 
-// What can trade right now (no secrets): the switches, the books' modes, the paper broker, Quick Flips' automatic paper execution.
+// What can trade right now (no secrets): the switches, the books' modes, the paper broker, the paper-only lock (paperOnly) and the radar migration applied (radarVersion).
 function report(settings = {}) {
-  return { ...BOOT, strategiesEnabled: { ...(settings.strategiesEnabled || {}) }, strategyPauseVersion: settings.strategyPauseVersion ?? null,
+  return { ...BOOT, strategiesEnabled: { ...(settings.strategiesEnabled || {}) }, strategyPauseVersion: settings.strategyPauseVersion ?? null, radarVersion: settings.radarVersion ?? null, paperOnly: settings.paperOnly ?? null,
     stockMode: settings.stockMode, cryptoMode: settings.cryptoMode, paperStockBroker: settings.paperStockBroker,
     dailyProfitTargetOn: settings.dailyProfitTargetOn, maxOpenPositions: settings.maxOpenPositions };
 }

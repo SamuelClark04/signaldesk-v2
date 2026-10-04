@@ -25,6 +25,10 @@ if (T) {
     const paused = T.applyPause(s.strategyPauseVersion, map);
     if (paused) { map = paused; note += `; a research pause not yet saved is applied at load (saved pauseVersion ${s.strategyPauseVersion ?? 'none'})`; }
   }
+  if (typeof T.applyRadar === 'function') { // Phase 91: like ledger-store.restoreSettings, after the pause
+    const radar = T.applyRadar(s.radarVersion, map);
+    if (radar) { map = radar; note += `; the radar migration not yet saved is applied at load (saved radarVersion ${s.radarVersion ?? 'none'})`; }
+  }
   const eff = { ...(T.DEFAULTS || {}), ...(map || {}) };
   console.log(`STRATEGY SWITCHES as the loaded code reads them (${note}):`);
   for (const id of T.IDS) console.log(`  ${(T.isEnabled(id, { strategiesEnabled: eff }) ? 'ON ' : 'off')}  ${id.padEnd(20)} ${(T.LABELS && T.LABELS[id]) || ''}`);
@@ -32,7 +36,7 @@ if (T) {
 }
 
 console.log('\nMODES + LIMITS (saved settings; "(not saved)" = the code default: stockMode / cryptoMode default paper):');
-console.log(`  ${JSON.stringify(pick(['stockMode', 'cryptoMode', 'paperStockBroker', 'strategyPauseVersion', 'quickFlipsAutoPaper', 'dailyProfitTargetOn', 'dailyProfitTarget',
+console.log(`  ${JSON.stringify(pick(['stockMode', 'cryptoMode', 'paperStockBroker', 'strategyPauseVersion', 'radarVersion', 'dailyProfitTargetOn', 'dailyProfitTarget',
   'dailyLossLimitPaper', 'dailyLossLimitLive', 'maxOpenPositions', 'maxOpenRiskPct', 'maxOptionEntriesPerDay', 'bankroll', 'cryptoBankroll', 'riskProfile']))}`);
 
 const pos = L.activePositions || [];

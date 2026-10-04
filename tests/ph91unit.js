@@ -69,6 +69,18 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   router.QUEUE_ACTIONS.APPROVE = origApprove;
   check('guarantee: a client APPROVE is passed on as the signed-in user\'s (an "actor" in the message is overwritten)', !!seen && seen.actor === 'user', JSON.stringify(seen));
   check('guarantee: the quickFlipsAutoPaper setting is gone (an old saved value is dropped silently)', !('quickFlipsAutoPaper' in L.getSettings()));
+  const fillers = refs(/(?<!function )\bexecuteOrder\(/);
+  check('guarantee: outside order-router, alpaca-paper and paper-fills no server module calls executeOrder( (the only path that opens a position)',
+    JSON.stringify(fillers) === JSON.stringify(['execution/alpaca-paper.js', 'execution/order-router.js', 'execution/paper-fills.js']), fillers.join(', '));
+  // The Manual Trade Ticket's injected approve: capture what message-handler hands createHandler and call it (a click on the ticket is the user's).
+  const mt = require(S + 'execution/manual-trade'); const origCreate = mt.createHandler; let injected = null;
+  mt.createHandler = (deps) => { injected = deps.approve; return origCreate(deps); };
+  require(S + 'execution/message-handler').createMessageHandler({ send: () => {}, broadcast: () => {} });
+  mt.createHandler = origCreate;
+  const m1 = await throws(() => injected('ph91-none', { amount: 50, confirmed: true }));
+  const m2 = await throws(() => injected('ph91-none', { amount: 50, confirmed: true, actor: 'system' }));
+  check('guarantee: the Manual Trade Ticket\'s approve is the user\'s (actor "user", also when the caller says otherwise): the guard accepts it (here: no such order)',
+    typeof injected === 'function' && /^no pending order/.test(m1 || '') && /^no pending order/.test(m2 || ''), `${m1} | ${m2}`);
 
   // ---------- 3. Radar migration, crypto manual-only ----------
   const tg = require(S + 'strategies/strategy-toggles'); const s3 = L.getSettings();
@@ -153,6 +165,24 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('qf card: onExpire fires exactly once when the deadline passes on screen; an already-expired card never fires it', expired1 === 1 && expired0 === 0, `on-screen ${expired1}, already-expired ${expired0}`);
   check('qf card: the countdown text switches to closed', /closed/.test(cdNode.textContent) && /is-expired/.test(cdNode.className), cdNode.textContent);
   window.SignalDesk.ui.el = realEl;
+
+  // ---------- 7. Final-review fixes ----------
+  const etT = (ms) => new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+  const dl = c6.optionsData.entryDeadlineAt; const qfMail = require(S + 'execution/notifier').buildAlert(c6);
+  const stamp = Date.parse(c6.timestamp);
+  check('email: a Quick Flip names its REAL deadline (the entry deadline), not the +30 min of the default window', dl > 0 && qfMail.text.includes(`Approve before ${etT(dl)}`) && dl - stamp < 10 * 60000
+    && !qfMail.text.includes(`Approve before ${etT(stamp + 30 * 60000)}`), qfMail.text.split('\n').pop());
+  const swMail = require(S + 'execution/notifier').buildAlert({ ...c6, strategyId: 'equity-swing', optionsData: undefined, market: 'stocks' });
+  check('email: any other setup still names its 30 minute window', swMail.text.includes(`Approve before ${etT(stamp + 30 * 60000)}`));
+  const natural0 = require(S + 'execution/spread-entry').natural; const PF = require(S + 'execution/paper-fills');
+  const qfOrder = { id: 'ph91-fill', market: 'options', strategyId: 'options-quickflips', optionsData: { ...c6.optionsData } }; // debit (the ask on the card) 5.1
+  const fillAt = async (ask, order = qfOrder) => { require(S + 'execution/spread-entry').natural = async () => ask; try { return await PF.price(order, 770); } catch (e) { return e; } };
+  const above = await fillAt(5.2); const atAsk = await fillAt(5.1); const below = await fillAt(5.0);
+  const otherAbove = await fillAt(5.2, { ...qfOrder, strategyId: 'options-system' });
+  require(S + 'execution/spread-entry').natural = natural0;
+  check('paper fill: a Quick Flip whose fresh ask is above its entry limit is refused (QUICKFLIPS_ASK_ABOVE_LIMIT, nothing filled)', above instanceof Error && /^QUICKFLIPS_ASK_ABOVE_LIMIT/.test(above.message), String(above.message || above));
+  check('paper fill: at the limit (or below it) it fills at that natural ask; other strategies are not capped',
+    atAsk.extra.optionsData.debit === 5.1 && below.extra.optionsData.debit === 5 && otherAbove.extra && otherAbove.extra.optionsData.debit === 5.2);
 
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);

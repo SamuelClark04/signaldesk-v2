@@ -84,7 +84,8 @@
         p && !p.alpacaLive.configured ? '⚠ No Alpaca Live keys are connected: add them under Accounts & Connections.' : p && p.alpacaLive.test && p.alpacaLive.test.warning ? `⚠ ${p.alpacaLive.test.warning}` : '']
       : [s.paperStockBroker === 'internal' ? 'Alpaca mode Paper + Paper broker Simulated: stock / options trades fill inside SignalDesk (no broker account), sized from the Paper Bankroll.'
         : 'Alpaca mode Paper + Paper broker Alpaca Paper: stock / options trades execute in your Alpaca Paper account (PK... keys), sized from the Paper Bankroll, never from its $100k.',
-      'Switch Alpaca mode to LIVE to trade real money with your Alpaca Live account; both key pairs can be connected at once.'];
+      s.paperOnly ? 'SignalDesk is paper-only: no order here ever uses real money (Alpaca Live and the crypto venues are market data and balances only).'
+        : 'Switch Alpaca mode to LIVE to trade real money with your Alpaca Live account; both key pairs can be connected at once.'];
     box.textContent = lines.filter(Boolean).join(' ');
   }
 

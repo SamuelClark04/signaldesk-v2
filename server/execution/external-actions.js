@@ -74,7 +74,7 @@ async function execute(a, p, settings) {
     return { summary: `${a.action === 'ADD' ? 'added' : 'deducted'} ${q} ${p.asset} (${p.broker}); now ${r.quantity}`, exitPrice: px, quantity: q };
   }
   // Broker-synced: a real order, only in LIVE mode for that venue.
-  if (settings[MODE_KEY[p.broker]] !== 'live') throw new Error(`BROKER_PAPER_MODE: ${p.broker} is in Paper mode in Settings, so SignalDesk sends no real order. Switch it to LIVE, or sell at ${p.broker}`);
+  if (settings[MODE_KEY[p.broker]] !== 'live') throw new Error(`BROKER_PAPER_MODE: SignalDesk is paper-only, so it sends no real order; sell it in ${p.broker}'s own app.`);
   if (a.action === 'ADD') throw new Error('broker ADDs are staged as buy setups, not actions');
   const free = external.brokerFree().find((b) => b.key === p.ref);
   if (!free) throw new Error(`no synced ${p.asset} at ${p.broker} outside SignalDesk: press Sync Broker`);

@@ -106,5 +106,6 @@ echo "$LOG" | tail -30
 RUNNING="$(echo "$LOG" | grep -o '\[version\] running [0-9a-f]*' | tail -1 | awk '{print $3}')"
 if [ "$RUNNING" = "$AFTER" ]; then echo "== VERIFIED: the server reports it is running $RUNNING"; else echo "== CHECK: expected $AFTER, the server log reports '${RUNNING:-nothing}' (versions before Phase 89c do not log it)"; fi
 echo "$LOG" | grep -E 'research pause' | tail -1 || true
+echo "$LOG" | grep -E 'Phase 91 radar mode' | tail -1 || true
 echo "== rollback (if needed): bash scripts/rollback-vm.sh $BACKUP"
 echo "== deployed $AFTER. If crypto is LIVE here, keep every other SignalDesk server on PAPER (one live server per set of keys)."
