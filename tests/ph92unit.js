@@ -87,7 +87,7 @@ console.warn = ((warn) => (...a) => { if (!/^\[(venue-fees|okx|kraken)\]/.test(S
   const row = (id) => w.rows.find((r) => r.id === id);
   check('waterfall: OKX row verified, source + time, lookup ok', row('okx').fee.verified && row('okx').fee.at === 9000 && /OKX US account/.test(row('okx').fee.source) && row('okx').fee.lookupOk && near(row('okx').taker, 0.0035), JSON.stringify(row('okx').fee));
   check('waterfall: Kraken row verified at 5000 but its LATEST lookup failed (shown with the error)', row('kraken').fee.verified && row('kraken').fee.lookupOk === false && /Invalid key/.test(row('kraken').fee.lookupError));
-  check('waterfall: Coinbase row unverified (no key in this test)', row('coinbase').fee.verified === false && row('coinbase').fee.lookupOk === false);
+  check('waterfall: Coinbase row unverified and NOT READ YET (never looked up in this test: no "failed" claim)', row('coinbase').fee.verified === false && row('coinbase').fee.lookupOk === null && row('coinbase').fee.lookupError === null);
   check('waterfall: route order still cheapest first at the verified rates (OKX < Kraken < Coinbase taker)', row('okx').taker < row('kraken').taker && row('kraken').taker <= 0.008 && w.rows.map((r) => r.id).join() === 'okx,kraken,coinbase');
 
   // ---------- 6. OKX routing against OKX US's real listing (public instruments, 2026-10-04) ----------
