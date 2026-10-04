@@ -53,6 +53,7 @@ const SETTINGS_RULES = {
   // open risk uses maxOpenRiskPct of the combined paper bankrolls (risk/exposure-limits.js).
   maxOpenPositions: { type: 'number', default: 0, min: 0, max: 100, integer: true },
   strategyPauseVersion: { type: 'number', default: toggles.PAUSE.version, min: 0, max: 1000, integer: true }, // the research pause applied
+  radarVersion: { type: 'number', default: toggles.RADAR.version, min: 0, max: 1000, integer: true }, // Phase 91: the radar migration applied
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
@@ -65,7 +66,7 @@ function cleanValue(key, value, rule) {
       if (!rule.keys.includes(k)) throw new Error(`${key}: unknown strategy "${k}"`);
       if (typeof v !== 'boolean') throw new Error(`${key}.${k} must be true or false`);
     }
-    return { ...rule.default, ...value };
+    return { ...rule.default, ...value, ...Object.fromEntries(toggles.CRYPTO_MANUAL_ONLY.map((id) => [id, false])) }; // Phase 91: crypto manual-only
   }
   if (rule.type === 'choice') {
     if (!rule.values.includes(value)) throw new Error(`${key} must be one of: ${rule.values.join(', ')}`);
@@ -150,6 +151,13 @@ function restoreSettings(saved) {
     console.warn(`[ledger] Phase 89 research pause: ${toggles.PAUSES.filter((x) => !(Number(saved.strategyPauseVersion) >= x.version)).flatMap((x) => x.ids).join(', ')} switched off (open trades and exits unaffected)`);
   }
   settings.strategyPauseVersion = toggles.PAUSE.version;
+  // Phase 91: radar mode, once per ledger (strategy-toggles.RADAR): stock / options scanners ON (alerts only, paper), crypto OFF.
+  const radar = toggles.applyRadar(saved.radarVersion, settings.strategiesEnabled);
+  if (radar) {
+    settings.strategiesEnabled = radar;
+    console.warn(`[ledger] Phase 91 radar mode: ${toggles.RADAR.on.join(', ')} switched on (setups wait in Approvals, paper only); crypto scanners manual-only`);
+  }
+  settings.radarVersion = toggles.RADAR.version;
 }
 
 // An unreadable file is moved aside (never silently overwritten) and the ledger starts empty.
@@ -193,7 +201,7 @@ function attach(ledgerLists) {
 // ---------- Settings ----------
 // riskPct and the profile/strictness tables are derived (never stored), so the
 // UI shows the server's numbers instead of keeping its own copy.
-const getSettings = () => ({ ...settings, paperOnly: paperLock.PAPER_ONLY, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
+const getSettings = () => ({ ...settings, paperOnly: paperLock.PAPER_ONLY, strategiesEnabled: { ...settings.strategiesEnabled }, strategyLabels: { ...toggles.LABELS }, strategyNotes: { ...toggles.REASONS }, strategyManualOnly: [...toggles.CRYPTO_MANUAL_ONLY], riskPct: riskPctFor(settings.riskProfile), riskProfiles: { ...RISK_PROFILES }, maxCapitalChoices: [...CAPITAL_CHOICES],
   strictnessLevels: Object.fromEntries(Object.entries(STRICTNESS_LEVELS).map(([k, v]) => [k, { ...v }])) });
 
 // Validates, applies and persists. Throws (changing nothing) if any value is invalid.

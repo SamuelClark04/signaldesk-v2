@@ -70,6 +70,23 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('guarantee: a client APPROVE is passed on as the signed-in user\'s (an "actor" in the message is overwritten)', !!seen && seen.actor === 'user', JSON.stringify(seen));
   check('guarantee: the quickFlipsAutoPaper setting is gone (an old saved value is dropped silently)', !('quickFlipsAutoPaper' in L.getSettings()));
 
+  // ---------- 3. Radar migration, crypto manual-only ----------
+  const tg = require(S + 'strategies/strategy-toggles'); const s3 = L.getSettings();
+  const RADAR_IDS = ['equity-day', 'equity-swing', 'options-system', 'options-quickflips']; const CRYPTO = ['crypto-swing', 'crypto-intraday', 'speculative-crypto'];
+  check('radar: the migration switched the four stock / options scanners ON once and crypto OFF (radarVersion 1)',
+    RADAR_IDS.every((id) => s3.strategiesEnabled[id] === true) && CRYPTO.every((id) => s3.strategiesEnabled[id] === false) && s3.radarVersion === 1, JSON.stringify(s3.strategiesEnabled));
+  L.updateSettings({ strategiesEnabled: { ...s3.strategiesEnabled, 'equity-swing': false, 'crypto-intraday': true } });
+  const s3b = L.getSettings();
+  check('radar: a radar scanner switched off stays off; a crypto switch sent ON is saved OFF (manual-only)', s3b.strategiesEnabled['equity-swing'] === false && s3b.strategiesEnabled['crypto-intraday'] === false);
+  const reread = JSON.parse(execFileSync(process.execPath, ['-e', `const L = require(${JSON.stringify(S + 'execution/paper-ledger')}); console.log(JSON.stringify(L.getSettings().strategiesEnabled))`],
+    { env: { ...process.env, ...ENV }, encoding: 'utf8' }).trim().split('\n').pop());
+  check('radar: after a restart the user\'s OFF stays off (the migration does not re-run)', reread['equity-swing'] === false && reread['equity-day'] === true, JSON.stringify(reread));
+  check('radar: crypto scanners never run, even with a map that says on', !tg.isEnabled('crypto-intraday', { strategiesEnabled: { 'crypto-intraday': true } }) && !tg.isEnabled('speculative-crypto', {}) && tg.isEnabled('equity-day', {}));
+  check('radar: applyRadar runs once (null at version 1) and fresh-install defaults are the radar set', tg.applyRadar(1, { 'equity-swing': false }) === null && !!tg.applyRadar(undefined, {})
+    && RADAR_IDS.every((id) => tg.DEFAULTS[id] === true) && CRYPTO.every((id) => tg.DEFAULTS[id] === false));
+  check('radar: Settings data lists the crypto scanners as manual-only', JSON.stringify(s3.strategyManualOnly) === JSON.stringify(CRYPTO));
+  L.updateSettings({ strategiesEnabled: { ...s3b.strategiesEnabled, 'equity-swing': true } });
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

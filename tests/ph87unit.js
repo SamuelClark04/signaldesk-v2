@@ -40,7 +40,7 @@ const NOW = Date.parse('2026-10-01T16:30:00Z'); // Thu 12:30 PM ET
 
   // ---------- 2. Options Spreads off by default; a saved choice is kept ----------
   const tg = require(S + 'strategies/strategy-toggles');
-  check('Options Spreads is OFF by default (new installs), with the replay result under its switch', tg.DEFAULTS['options-system'] === false && !tg.isEnabled('options-system', {})
+  check('Options Spreads is ON by default since Phase 91 (radar mode: alerts only), with the replay result under its switch', tg.DEFAULTS['options-system'] === true && tg.isEnabled('options-system', {})
     && /profit factor 0\.75/.test(tg.REASONS['options-system']) && /reversed lose as much/.test(tg.REASONS['options-system']));
   check('...an existing ledger that saved it ON keeps it on (the user\'s call, e.g. paper stress tests)', tg.isEnabled('options-system', { strategiesEnabled: { 'options-system': true } }));
 

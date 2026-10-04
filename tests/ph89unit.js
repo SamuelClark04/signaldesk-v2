@@ -20,7 +20,7 @@ global.fetch = async (u) => {
 const quote = (sym, bp, ap, ageMs = 2000) => { QUOTES[sym] = { bp, ap, t: new Date(Date.now() - ageMs).toISOString() }; };
 const OLD_MAP = Object.fromEntries(['crypto-swing', 'crypto-intraday', 'speculative-crypto', 'equity-day', 'equity-swing', 'options-system'].map((id) => [id, true]));
 fs.writeFileSync(ENV.LEDGER_STATE_PATH, JSON.stringify({ version: 3, settings: { bankroll: 10000, cryptoBankroll: 5000, stockMode: 'paper', cryptoMode: 'paper', paperStockBroker: 'internal',
-  strategiesEnabled: OLD_MAP }, pendingOrders: [], activePositions: [], tradeJournal: [], discardedOrders: [], savedSetups: [], pilotActions: [] }));
+  radarVersion: 1, strategiesEnabled: OLD_MAP }, pendingOrders: [], activePositions: [], tradeJournal: [], discardedOrders: [], savedSetups: [], pilotActions: [] }));
 const S = path.join(__dirname, '..', 'server') + '/';
 let fails = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ` - ${x}` : ''}`); if (!ok) fails += 1; };
@@ -36,8 +36,8 @@ const qfPos = (x = {}) => ({ id: `options-quickflips:S1:CALL:SPY:${x.k || 1}`, a
   const L = require(S + 'execution/paper-ledger');
   // 1. Research pause (applied once to an old ledger; the user's re-enable sticks).
   const map = L.getSettings().strategiesEnabled;
-  check('research pause: Crypto Intraday, Equity Day, Equity Swing (unvalidated) and Options Spreads / Crypto Swing (lost in replay, the user had them ON) switched OFF in an old ledger; Moonshots too (Phase 89b pause 90); Quick Flips OFF',
-    !map['crypto-intraday'] && !map['equity-day'] && !map['equity-swing'] && !map['options-system'] && !map['crypto-swing'] && map['speculative-crypto'] === false && map['options-quickflips'] === false && L.getSettings().strategyPauseVersion === 90, JSON.stringify(map));
+  check('research pause: Crypto Intraday, Equity Day, Equity Swing (unvalidated) and Options Spreads / Crypto Swing (lost in replay, the user had them ON) switched OFF in an old ledger; Moonshots too (Phase 89b pause 90); Quick Flips OFF (Quick Flips ON by the Phase 91 radar default)',
+    !map['crypto-intraday'] && !map['equity-day'] && !map['equity-swing'] && !map['options-system'] && !map['crypto-swing'] && map['speculative-crypto'] === false && map['options-quickflips'] === true && L.getSettings().strategyPauseVersion === 90, JSON.stringify(map));
   L.updateSettings({ strategiesEnabled: { ...map, 'equity-day': true } });
   const reread = JSON.parse(execFileSync(process.execPath, ['-e', `require(${JSON.stringify(S + 'execution/paper-ledger')}); console.log(JSON.stringify(require(${JSON.stringify(S + 'execution/paper-ledger')}).getSettings().strategiesEnabled))`],
     { env: { ...process.env, ...ENV }, encoding: 'utf8' }).trim().split('\n').pop());

@@ -28,8 +28,13 @@ const PAUSES = Object.freeze([
   Object.freeze({ version: 90, ids: Object.freeze(['speculative-crypto']) }),
 ]);
 const PAUSE = Object.freeze({ version: PAUSES[PAUSES.length - 1].version, ids: Object.freeze(PAUSES.flatMap((p) => p.ids)) });
-const DEFAULTS = Object.freeze({ ...Object.fromEntries(IDS.map((id) => [id, true])), 'crypto-swing': false, 'options-system': false, 'options-quickflips': false,
-  ...Object.fromEntries(PAUSE.ids.map((id) => [id, false])) });
+// Phase 91 RADAR MODE (spec docs/superpowers/specs/2026-10-04-radar-manual-approval-design.md): SignalDesk never trades on its own;
+// scanners stage setups into Approvals for a click (paper only: risk/paper-lock.js), each labelled with its failed test record
+// (strategy-evidence.js). The stock / options scanners are switched ON once (RADAR.version, settings.radarVersion; the user may switch
+// them off and it sticks); crypto is MANUAL-ONLY: its scanners never run, whatever a saved switch says.
+const CRYPTO_MANUAL_ONLY = Object.freeze(['crypto-swing', 'crypto-intraday', 'speculative-crypto']);
+const RADAR = Object.freeze({ version: 1, on: Object.freeze(['equity-day', 'equity-swing', 'options-system', 'options-quickflips']) });
+const DEFAULTS = Object.freeze({ ...Object.fromEntries(IDS.map((id) => [id, false])), ...Object.fromEntries(RADAR.on.map((id) => [id, true])) });
 const REASONS = Object.freeze({
   'crypto-swing': 'Off by default (Phase 78): replayed on real Coinbase 4h candles it lost money in both the last 90 days and the 90 before '
     + '(profit factor 0.82-0.96), and neither a BTC trend filter nor a confirmed reversal candle fixed it (worse, or almost no trades). '
@@ -59,6 +64,7 @@ const REASONS = Object.freeze({
 
 // settings.strategiesEnabled may be missing (older ledger) or partial: DEFAULTS fill the gaps.
 const isEnabled = (id, settings) => {
+  if (CRYPTO_MANUAL_ONLY.includes(id)) return false; // Phase 91: crypto is manual-only
   const map = settings && settings.strategiesEnabled;
   return map && typeof map[id] === 'boolean' ? map[id] : DEFAULTS[id] !== false;
 };
@@ -70,4 +76,10 @@ function applyPause(savedVersion, map) {
   return { ...DEFAULTS, ...(map || {}), ...Object.fromEntries(due.flatMap((p) => p.ids).map((id) => [id, false])) };
 }
 
-module.exports = { isEnabled, applyPause, IDS, LABELS, DEFAULTS, REASONS, PAUSE, PAUSES };
+// Phase 91: radar mode for a ledger saved before it -> the new map (radar ids ON, crypto OFF), or null when already applied.
+function applyRadar(savedVersion, map) {
+  if (Number(savedVersion) >= RADAR.version) return null;
+  return { ...DEFAULTS, ...(map || {}), ...Object.fromEntries(RADAR.on.map((id) => [id, true])), ...Object.fromEntries(CRYPTO_MANUAL_ONLY.map((id) => [id, false])) };
+}
+
+module.exports = { isEnabled, applyPause, applyRadar, IDS, LABELS, DEFAULTS, REASONS, PAUSE, PAUSES, RADAR, CRYPTO_MANUAL_ONLY };
