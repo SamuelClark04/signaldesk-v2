@@ -1,7 +1,8 @@
 // Quick Flips radar card (Phase 91): what an Approvals card shows for an Options Quick Flip, so it can be judged from the card alone:
 // the contract, why it fired, the full cost per contract, the exits that run automatically after approval, and the approval window
 // (the setup expires at its entry deadline: signal bar end + 60 s + 3 min). facts(o, now) is pure (tested in Node); body(o) builds the
-// DOM and ticks its countdown every second while on screen. Exposes window.SignalDesk.quickFlipCard.
+// DOM and ticks its countdown every second while on screen; when the deadline passes while it is on screen it calls onExpire() once (the
+// Approvals view passes its rerender, which disables Approve). Exposes window.SignalDesk.quickFlipCard.
 (() => {
   const SD = window.SignalDesk;
   const FEE = 0.65; // per contract per fill (the app's options commission model)
@@ -35,18 +36,20 @@
       leftMs: left, expired: left <= 0, countdown: countdownOf(left),
     };
   }
-  function body(o) {
+  function body(o, { onExpire } = {}) {
     const f = facts(o); if (!f) return null;
     const { el } = SD.ui;
     const cd = el('p', { className: `qf-countdown${f.expired ? ' is-expired' : f.leftMs < 60000 ? ' is-soon' : ''}`, textContent: f.countdown });
     const deadline = o.expiresAt || o.optionsData.entryDeadlineAt || 0;
-    const timer = setInterval(() => {
-      if (!cd.isConnected) { clearInterval(timer); return; }
-      const left = Math.max(0, deadline - Date.now());
-      cd.textContent = countdownOf(left);
-      cd.className = `qf-countdown${left <= 0 ? ' is-expired' : left < 60000 ? ' is-soon' : ''}`;
-      if (left <= 0) clearInterval(timer);
-    }, 1000);
+    if (!f.expired) { // already closed at render: nothing to tick, and onExpire is for a deadline that passes on screen
+      const timer = setInterval(() => {
+        if (!cd.isConnected) { clearInterval(timer); return; }
+        const left = Math.max(0, deadline - Date.now());
+        cd.textContent = countdownOf(left);
+        cd.className = `qf-countdown${left <= 0 ? ' is-expired' : left < 60000 ? ' is-soon' : ''}`;
+        if (left <= 0) { clearInterval(timer); if (typeof onExpire === 'function') onExpire(); }
+      }, 1000);
+    }
     return el('div', { className: 'qf-card' }, [
       el('div', { className: 'qf-contract' }, [el('strong', { textContent: f.contract }), el('span', { className: 'qf-muted', textContent: `${f.occ} · ${f.terms}` })]),
       el('p', { className: 'qf-why', textContent: f.why }),

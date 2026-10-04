@@ -142,6 +142,18 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   check('qf card: a setup staged before the deploy (no new fields) still renders from its trigger; no quickFlip block -> generic card', /trigger 769\.5/.test(fo.why) && !/RelVol/.test(fo.why)
     && QC.facts({ ...card6, optionsData: { ...card6.optionsData, quickFlip: undefined } }) === null);
 
+  // The expiry callback: the card re-renders its Approvals view the moment the deadline passes while on screen (Approve disables then).
+  const realEl = window.SignalDesk.ui.el; const nodes = [];
+  window.SignalDesk.ui.el = (tag, props, kids) => { const n = { tag, isConnected: true, ...props, kids }; nodes.push(n); return n; };
+  let expired1 = 0; let expired0 = 0;
+  QC.body({ ...card6, expiresAt: Date.now() + 1200 }, { onExpire: () => { expired1++; } });
+  QC.body({ ...card6, expiresAt: Date.now() - 1000 }, { onExpire: () => { expired0++; } });
+  await new Promise((r) => setTimeout(r, 2500));
+  const cdNode = nodes.find((n) => /qf-countdown/.test(n.className || ''));
+  check('qf card: onExpire fires exactly once when the deadline passes on screen; an already-expired card never fires it', expired1 === 1 && expired0 === 0, `on-screen ${expired1}, already-expired ${expired0}`);
+  check('qf card: the countdown text switches to closed', /closed/.test(cdNode.textContent) && /is-expired/.test(cdNode.className), cdNode.textContent);
+  window.SignalDesk.ui.el = realEl;
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

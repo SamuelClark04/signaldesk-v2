@@ -84,7 +84,7 @@
           el('span', { textContent: `${o.setupType || 'Setup'} · ${o.strategyId} · ${o.tradeType || o.timeframe || ''}` })]),
         el('span', { className: `apv-expiry${left < 3 * 60 * 1000 ? ' is-soon' : ''}`, textContent: left > 0 ? `staged ${age(o.stagedAt)} ago · expires in ${Math.ceil(left / 60000)}m` : 'Expired: leaving the queue' }),
       ]),
-      ...(qf ? [SD.quickFlipCard.body(o)] : [el('div', { className: 'apv-grid' }, [
+      ...(qf ? [SD.quickFlipCard.body(o, { onExpire: ctx.rerender })] : [el('div', { className: 'apv-grid' }, [
         kv('Size', `${size(o)} · ${money(o.notional)}${od && od.contract ? ` · ${od.label || od.contract}` : ''}`),
         kv('Entry', `${price(o.entryZone.min, o)} – ${price(o.entryZone.max, o)}`),
         kv('Stop', price(o.invalidation, o), 'text-short'),
