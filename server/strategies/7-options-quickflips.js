@@ -12,7 +12,8 @@
 //   Order      debit = the natural ask; 1 contract (maxContracts); EXECUTED AUTOMATICALLY on paper when settings.quickFlipsAutoPaper
 //              (execution/auto-paper.js); the entry must fill by D + 3 min (entryDeadlineAt, as in the replay) or it is canceled
 //   Exits      premium stop -30% (2 confirmations), target +45% (a resting limit at Alpaca Paper), setup failure (5m close back
-//              through VWAP), 60 min max hold, 3:40 PM deadline: execution/quickflip-exits.js. Same day, always.
+//              through VWAP), 60 min max hold, 3:40 PM deadline: execution/quickflip-exits.js. Intended to close the same day; a close
+//              the paper broker does not fill is re-priced, alerted (quickflip-alerts.js) and worked again at the next session.
 // The one exception to the user's "nothing closes on time" rule, for this mode only.
 const alpacaStocks = require('../connectors/alpaca-stock-socket');
 const options = require('../connectors/options-data');

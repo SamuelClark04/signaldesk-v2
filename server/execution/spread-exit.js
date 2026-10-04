@@ -73,7 +73,7 @@ async function startExit(ledger, pos, reason, leg, deps, now = Date.now()) {
   if (!(limit > 0)) return { error: 'no fresh option quote and no model value to price the exit' };
   const r = await deps.place(pos, limit, `${pos.id}:x0:${now}`);
   if (!r.ok) return { error: r.error };
-  patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: leg, exitWork: { kind: 'exit', reason, limit, step: 0, stepAt: now, placedAt: now, q } });
+  patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: leg, exitWork: { kind: 'exit', reason, limit, step: 0, stepAt: now, placedAt: now, q, q0: q, triggeredAt: now } });
   console.log(`[paper] ${pos.id}: ${reason} as a limit at ${limit}${q ? ` (mid ${cents(q.mid)}, natural bid ${cents(q.bid)})` : ' (model value: no fresh quote)'}; re-priced every ${STEP_MS / 1000} s`);
   return { pending: true, brokerExitId: r.brokerId, limit };
 }
@@ -129,7 +129,7 @@ async function urgentNow(ledger, pos, deps, discount, now) {
   const r = await deps.place(pos, limit, `${pos.id}:u${Math.round(discount * 100)}:${now}`);
   if (!r.ok) return { error: r.error };
   patch(ledger, pos.id, { paperExitOrderId: r.brokerId, paperExitReason: reason, paperExitLeg: pos.paperExitLeg || 'qf_deadline',
-    exitWork: { kind: 'exit', reason, limit, step: MAX_STEPS, stepAt: now, placedAt: w.placedAt || now, urgentAt: now, urgent: discount, q } });
+    exitWork: { kind: 'exit', reason, limit, step: MAX_STEPS, stepAt: now, placedAt: w.placedAt || now, urgentAt: now, urgent: discount, q, q0: w.q0 || w.q || q, triggeredAt: w.triggeredAt || now } });
   console.warn(`[paper] ${pos.id}: deadline exit re-priced to ${limit} (${Math.round(discount * 100)}% under ${q ? 'the bid' : 'the model value'} ${cents(ref)})`);
   return { placed: true, limit };
 }

@@ -1,6 +1,7 @@
 // Entry-shield banners (Phase 81, server risk/entry-shields.js ENTRY_SHIELDS): one line at the top of Today and
 // Opportunities ([data-shield] boxes).
 //   DAILY KILL SWITCH ACTIVE (Paper): -$150 loss limit reached (that book only; Phase 83)
+//   QUICK FLIP NOT CLOSED / HELD OVERNIGHT                   (Phase 89c: open past its deadline; shown first)
 //   DAILY PROFIT TARGET REACHED (Paper): $200                 (Phase 89, optional; that book only)
 //   PAUSED FOR MACRO EVENT: CPI · Resumes at 8:45 AM ET      (stocks / options; crypto only if opted in)
 //   otherwise a quiet "next blackout" note when one is due within 18 hours, else nothing.
@@ -13,6 +14,13 @@
   const scopeText = (m) => (m.crypto ? 'stocks, options and crypto' : 'stocks and options (crypto keeps trading)');
 
   function content(s) {
+    // Phase 89c: a Quick Flip still open past its deadline outranks everything (it may be held overnight).
+    const qf = (s && s.quickFlipAlerts) || [];
+    if (qf.length) {
+      const crit = qf.some((a) => a.level === 'critical');
+      return [crit ? 'is-stop' : 'is-warn', crit ? `QUICK FLIP HELD OVERNIGHT (${qf.map((a) => a.asset).join(', ')})` : `QUICK FLIP NOT CLOSED BY ITS DEADLINE (${qf.map((a) => a.asset).join(', ')})`,
+        qf.map((a) => a.text).join(' ')];
+    }
     // Phase 83: one switch per book (s.kill = { paper, live }); the other book keeps trading.
     const hit = s && s.kill ? ['live', 'paper'].map((b) => s.kill[b]).filter((k) => k && k.active) : [];
     if (hit.length) {

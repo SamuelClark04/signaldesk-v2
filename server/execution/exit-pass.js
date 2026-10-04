@@ -96,6 +96,7 @@ async function runOnce(broadcast) {
     const q = await require('./quickflip-exits').run(ledger, { isBusy: require('./order-router').isBusy });
     if (q.some((x) => x.trade || x.pending || x.canceled)) { out.positionsChanged = true; out.journalChanged = true; }
   } catch (err) { console.error('[pipeline] Quick Flips exits failed:', err.message); }
+  publishQfAlerts(broadcast);
   // PAPER exits from local prices (monitorPositions skips LIVE ones: the broker exits those).
   try {
     const closed = ledger.monitorPositions(prices.getLatestPrices());
@@ -112,6 +113,8 @@ async function runOnce(broadcast) {
 // 60 s pass (a slow scan never delays an exit). Phase 83 (loop parity): options at Alpaca Paper are checked in
 // the same 5 s loop (alpaca-paper.exits: limit exits stepped, targets resting), and the held option legs are
 // re-quoted every QUOTE_REFRESH_MS during market hours so a stop never runs on a minute-old quote.
+// Phase 89c: Quick Flips still open past their deadline -> the banner whenever that list changes (quickflip-alerts.publish).
+const publishQfAlerts = (broadcast) => require('./quickflip-alerts').publish(broadcast, ledger.getSettings());
 const FAST_EXIT_MS = 5000;
 const QUOTE_REFRESH_MS = 12 * 1000;
 let fastTimer = null;
@@ -128,6 +131,7 @@ async function fastOptions(broadcast = () => {}, now = Date.now()) {
   }
   const sent = await require('./alpaca-paper').exits(ledger, now);
   const qf = await require('./quickflip-exits').run(ledger, { isBusy: require('./order-router').isBusy }, now).catch((err) => { console.error('[exits] Quick Flips exits failed:', err.message); return []; });
+  publishQfAlerts(broadcast);
   if (sent.length || qf.some((x) => x.trade || x.pending || x.canceled)) publish(broadcast, { positionsChanged: true, journalChanged: true });
   return { quoted, exits: sent.length + qf.length };
 }

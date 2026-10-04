@@ -230,10 +230,13 @@ function buildExternalActionEmail(a) {
   return { subject, text, html, consoleText: text.replace(link, approvalsUrl()) };
 }
 const sendExternalActionAlert = async (a) => dispatch(buildExternalActionEmail(a));
+// Phase 89c: an operational failure (e.g. a Quick Flip not closed by its deadline): plain subject + text, logged when SMTP is not set.
+const sendOperationalAlert = async ({ subject, text }) => dispatch({ subject: String(subject).slice(0, 180), text: String(text),
+  html: `<div style="font-family:system-ui,sans-serif;padding:16px"><p style="color:#b91c1c;font-weight:600">${escapeHtml(subject)}</p><p>${escapeHtml(text)}</p></div>` });
 
 const emailConfigured = () => REQUIRED.every((k) => String(process.env[k] || '').trim());
 // Phase 73: new SMTP keys (Settings > Accounts & Connections) -> a new transport on the next email.
 const resetTransport = () => { if (transporter) transporter.close(); transporter = null; warnedMissing = false; };
 
-module.exports = { resetTransport, sendApprovalAlert, sendTunnelReadyEmail, sendExternalActionAlert, buildAlert, buildTunnelEmail, buildExternalActionEmail, approvalsUrl, emailConfigured,
+module.exports = { resetTransport, sendApprovalAlert, sendTunnelReadyEmail, sendExternalActionAlert, sendOperationalAlert, buildAlert, buildTunnelEmail, buildExternalActionEmail, approvalsUrl, emailConfigured,
   lastTunnelEmail: () => lastTunnelEmail };

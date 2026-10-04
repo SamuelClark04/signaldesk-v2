@@ -172,7 +172,7 @@ kept as written; this table supersedes its wording.
 | Costs | $0.65 / contract / fill + modelled half-spread | $0.65 + paper fills | unchanged | consistent; the forward test measures the actual spread cost |
 | Stop / target | option trade-bar close / VWAP | indicative mark (2 confirmations) / resting limit | unchanged | difference (documented) |
 | Setup failure, 60-min hold | as protocol | as protocol | as protocol (+ REST bars after a restart) | consistent |
-| Deadline | 3:45 PM bar open | 3:40 PM; could rest unfilled overnight (no quote / unfilled ladder) | 3:40 PM; re-priced 25% under the best bid (fresh, else last known, else model) at 3:42 PM, 50% at 3:50 PM, every 20 s | fixed |
+| Deadline | 3:45 PM bar open | 3:40 PM; could rest unfilled overnight (no quote / unfilled ladder) | 3:40 PM; re-priced 25% under the best bid (fresh, else last known, else model) at 3:42 PM, 50% at 3:50 PM, every 20 s; 89c: carried over + alerted | improved: a fill is likely, NOT guaranteed (section 17) |
 | Partial fills | n/a | entry partial fixed in 89; a partial CLOSE booked the whole position | the sold part is booked, the rest stays open and is retried | fixed |
 
 **SIP vs IEX (development window only):** IEX publishes a minute bar only when IEX traded (median 370 / 390 a session, 5% of
@@ -247,3 +247,74 @@ Then copy /tmp/audit.txt and /tmp/audit.csv off the VM (for example the Cloud Co
 - Whether Alpaca Paper's simulated option fills resemble real fills; indicative quotes are not NBBO.
 - Quick Flips on IEX bars is about break-even in the replay; only the forward test can show how real fills compare.
 - Every historical option result rests on trade prints and modelled spreads.
+
+---
+
+# Phase 89c: operations and the full audit (2026-10-04)
+
+## 15. VM version, enabled strategies, full audit: still blocked (no access), steps for you
+
+This PC still has no gcloud CLI and no SSH key, and the project rule forbids messaging the live server, so neither the VM's running commit
+nor its enabled strategies were verified. **What is known is LOCAL only:** this PC's ledger copy (last saved 2026-09-28) has no saved
+strategy switches, which on 85b means every scanner except Crypto Swing ON, and cryptoMode live. The VM may differ.
+
+**One set of steps (read-only; uses the reviewed audit scripts of commit 3998693; changes nothing on the VM):**
+
+    cd ~/SignalDesk-V2                      # the app folder on the VM
+    git fetch origin
+    git log -1 --format='%h %cd %s'; pm2 ls  # the checkout + the process (restart time)
+    mkdir -p ~/sd-audit && cp server/data/ledger-state.json ~/sd-audit/ledger-snapshot.json && sha256sum ~/sd-audit/ledger-snapshot.json
+    git show 3998693:scripts/trade-audit.js > ~/sd-audit/trade-audit.js
+    git show 3998693:scripts/audit-attribution.js > ~/sd-audit/audit-attribution.js
+    node ~/sd-audit/trade-audit.js ~/sd-audit/ledger-snapshot.json --csv ~/sd-audit/audit.csv > ~/sd-audit/audit.txt
+    node -e "const s=require(process.env.HOME+'/sd-audit/ledger-snapshot.json').settings||{};console.log(JSON.stringify({strategiesEnabled:s.strategiesEnabled,strategyPauseVersion:s.strategyPauseVersion,stockMode:s.stockMode,cryptoMode:s.cryptoMode,paperStockBroker:s.paperStockBroker}))" > ~/sd-audit/settings.txt
+    tar czf ~/sd-audit.tgz -C ~ sd-audit
+
+Download `~/sd-audit.tgz` (Cloud Console SSH window: gear menu > Download file) into your Downloads folder and tell me. It contains the
+on-VM audit (3998693 tools) AND the ledger COPY, so the Phase 89c reconciliation bridge runs here on the copy; the original ledger is never
+modified (its sha256 is printed before the copy is used). `git log -1` shows the checkout; it is the running code only if pm2 restarted
+after it (compare the commit date with the pm2 restart time). From Phase 89c on the server logs `[version] running <commit>` at boot and
+serves `/api/version`.
+
+## 16. Accounting reconciliation vs hypotheses (local copy; the VM's trades are still missing)
+
+**A. Accounting reconciliation** (`node scripts/trade-audit.js <copy>`, section A): recorded = the ledger, untouched; the rest are estimates.
+
+| Book | Recorded | - paper overstatement | + LIVE fee difference | = Reconciled (est.) | bid/ask cost C | of which booked | missing (= overstatement) |
+|---|---|---|---|---|---|---|---|
+| Options Spreads PAPER (18) | +$354.18 | -$552.30 | $0.00 | **-$198.12** | $789.00 | $236.70 | $552.30 |
+| Moonshots LIVE (17) | +$1.63 | 0 | $0.00 | +$1.63 | 0 | 0 | 0 |
+| Manual LIVE (4) / PAPER (1) | -$3.71 / +$1.02 | 0 | 0 | -$3.71 / +$1.02 | 0 | 0 | 0 |
+
+**The $552 and the $789 overlap; they must not be added.** The $789 is the whole round-trip bid/ask cost of the chosen contracts at natural
+prices (legs' combined bid/ask x 100, exit width assumed equal to entry). The old paper model charged 30% of it ($236.70); the other 70%
+($552.30) is exactly the overstatement. The reconciliation subtracts only that $552.30. LIVE fee difference: 0 here (the broker-reported fees
+matched the ledger on every LIVE record that has them). Input file sha256 `442e51fa...` unchanged after the run.
+
+**B. Hypotheses (why, not accounting),** summing to the reconciled net: Options Spreads -$198.12 = $0 at the plan's own levels (no strategy
+exit ever fired) - $49.40 fees - $148.72 from the manual closes; Moonshots +$1.63 = +$1.04 at plan - $4.87 slippage and fees + $5.47 manual
+closes. These are reconstructions, not records.
+
+## 17. Deadline exits beyond 3:45 PM (verified in tests/ph89cunit.js)
+
+- A Quick Flips deadline close is not gated by the 9:35-3:45 options window: a close first sent at 3:47 PM goes out and books the fill.
+- Escalation is timed from the 3:40 PM deadline of the day the position opened: 25% under the best bid from 3:42 PM, 50% from 3:50 PM,
+  re-priced every 20 s only when lower. Best bid = fresh quote, else the last known quote, else the model value.
+- A restart near the close (all in-memory state lost) resumes from the persisted close and re-prices it.
+- A rejected or unfilled close: the failure is recorded, the position stays monitored, the banner and an email say so ("not closed by its
+  deadline" from 3:45 PM; "held overnight" once the session ends), and it is due at once the next session (the 50% tier).
+- A partial closing fill books only the part sold; the rest stays open, alerted, and is closed next.
+- **A re-priced limit order makes a fill likely; it does not guarantee a same-day close.** Protocol 2's "Same day, always" (frozen) is
+  corrected by `phase89-protocol-2a-clarification.md`: an overnight hold is a protocol violation that is reported, not something that
+  cannot happen.
+
+## 18. What better data would and would not resolve
+
+- **Would resolve (measurement):** real-time SIP would let live Quick Flips use the exact bars the replay used (removing the 50% signal
+  mismatch); OPRA quotes would replace indicative quotes for stops, limits and paper marks; historical quotes (from a vendor, not Alpaca)
+  would let replays price real bid / ask instead of modelled spreads.
+- **Would NOT resolve (evidence):** none of it creates an edge. No tested strategy passed its pre-registered test on unseen data. Better
+  data would only make the next test's verdict more trustworthy; it is not a profitability fix and is not recommended as one.
+- **Strategy evidence still missing:** a strategy that passes a frozen protocol on unseen data, then a forward paper test with enough
+  trades (150 for Quick Flips). Today only Quick Flips (S1, IEX version, about break-even in replay) is eligible for an isolated paper
+  test, and only as a measurement exercise under protocol 2A.

@@ -208,6 +208,20 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   90 days before it FAILED, PF 0.58 Coinbase / 0.74 Kraken / 0.82 OKX); every scanner
   is off by default. scripts/audit-attribution.js: recorded net vs reconstructed signal / execution / discretion / contract / accounting.
   Crypto revised rules failed on 2022-23 (15m 24 trades; without the trend filter 208 trades PF 0.66). Test: tests/ph89bunit.js.
+- **Phase 89c (operations)**: server/version.js: the git commit read once at boot, logged `[version] running <commit>`, served with the
+  switches / modes at GET /api/version (http-routes.installVersion, signed-in). Quick Flips deadline = 3:40 PM of the day the position opened
+  (quickflip-alerts.deadlineAt): a position still open later is due at once next session; escalation timed from it (2 min: 25%, 10 min /
+  later day: 50%); not gated by the 9:35-3:45 window. A re-priced limit does NOT guarantee a same-day close: quickflip-alerts.js reports
+  every Quick Flip open 5 min past its deadline (warn) or after the session (critical, "held overnight") in ENTRY_SHIELDS.quickFlipAlerts
+  (banner), the log (once a minute) and notifier.sendOperationalAlert (once per level); failures (rejections, no price) are recorded.
+  exitWork.q0 / triggeredAt = the first exit-trigger quote (forward-test slippage). Audit: scripts/audit-attribution.js A = accounting
+  reconciliation (recorded - paper overstatement + LIVE fee diff = reconciled; the bid/ask cost C OVERLAPS the overstatement: 0.7 x C),
+  B = hypotheses; trade-audit prints the input sha256 before / after. scripts/quickflips-forward-report.js implements
+  docs/research/phase89-protocol-2a-clarification.md (E1 / X1 / RT in $ per share vs INDICATIVE quotes, means; PASS only at 150 trades; 12
+  months short = INCONCLUSIVE). Deploy: scripts/deploy-vm.sh TARGET=<commit> (pinned) backs up server/data to server/data/backups/deploy-*,
+  prints a pre-flight and verifies the [version] line; SIGNALDESK_ROOT runs a copy (first deploy from an old checkout); scripts/rollback-vm.sh
+  (refuses with Quick Flips open; keeps the ledger and writes every scanner the OLD code knows OFF: pre-89 code rejects a map naming
+  options-quickflips and falls back to mostly-ON defaults). Review: docs/deploy/phase85b-to-89c.md. Test: tests/ph89cunit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

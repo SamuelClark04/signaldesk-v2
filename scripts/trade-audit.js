@@ -18,6 +18,9 @@ const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--'))) || path.join(__dirname, '..', 'server', 'data', 'ledger-state.json');
 const since = opt('--since') ? Date.parse(`${opt('--since')}T00:00:00Z`) : 0;
+const crypto = require('crypto');
+const digest = () => { const b = fs.readFileSync(file); return { sha256: crypto.createHash('sha256').update(b).digest('hex'), bytes: b.length }; };
+const before = digest(); // Phase 89c: proof the original was not changed (re-hashed at the end)
 const L = JSON.parse(fs.readFileSync(file, 'utf8'));
 const runsFile = opt('--runs') || path.join(path.dirname(file), 'paper-runs.json');
 const runs = fs.existsSync(runsFile) ? JSON.parse(fs.readFileSync(runsFile, 'utf8')) : null;
@@ -91,15 +94,19 @@ function stats(list) {
 const line = (label, s) => `${label.padEnd(46)} n ${String(s.n).padStart(3)}  win ${String(s.winPct).padStart(3)}%  net ${String(s.net).padStart(9)}  avg win ${s.avgWin}  avg loss ${s.avgLoss}  PF ${s.pf ?? '-'}  avg R ${s.avgR ?? '-'}`;
 const group = (key) => { const m = new Map(); for (const r of rows) { const k = key(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)); };
 
-console.log(`TRADE AUDIT ${file}  (${rows.length} closed records; ${(L.activePositions || []).length} open; paper runs archived: ${runs ? (runs.runs || []).length : 0})`);
+console.log(`TRADE AUDIT ${file}  sha256 ${before.sha256.slice(0, 16)}... ${before.bytes} bytes  (${rows.length} closed records; ${(L.activePositions || []).length} open; paper runs archived: ${runs ? (runs.runs || []).length : 0})`);
 console.log(rows.length ? `first close ${rows[0].closedAt}, last ${rows[rows.length - 1].closedAt} (ET)` : 'no closed trades');
 console.log('\nBY STRATEGY x EXECUTION'); for (const [k, list] of group((r) => `${r.strategy} ${r.execution}`)) console.log(line(k, stats(list)));
 console.log('\nBY STRATEGY x WHO CLOSED IT'); for (const [k, list] of group((r) => `${r.strategy} ${r.execution} ${r.exitBy}`)) console.log(line(k, stats(list)));
 console.log('\nBY EXIT REASON'); for (const [k, list] of group((r) => `${r.execution} ${r.exitReason.replace(/ @ .*/, '').slice(0, 30)}`)) console.log(line(k, stats(list)));
 const nat = rows.filter((r) => r.netAtNatural !== null);
 if (nat.length) console.log(`\nPAPER OPTION SPREADS AT NATURAL PRICES: ${nat.length} trades booked ${num(nat.reduce((s, r) => s + r.net, 0))}, at natural ${num(nat.reduce((s, r) => s + r.netAtNatural, 0))} (wins ${nat.filter((r) => r.netAtNatural > 0).length})`);
-console.log('\nLOSS ATTRIBUTION ($; RECORDED net from the ledger, everything else a RECONSTRUCTED ESTIMATE: scripts/audit-attribution.js)');
-for (const l of require('./audit-attribution').table(records, rows)) console.log(`  ${l}`);
+const AA = require('./audit-attribution');
+rows.forEach((r, i) => { const rc = AA.reconcile(records[i], r); Object.assign(r, { estOverstatement: num(rc.overstatement), estFeeDiff: num(rc.feeDiff), estReconciledNet: num(rc.reconciled), estSpreadCostC: num(rc.spreadCost) }); });
+console.log('\nA. ACCOUNTING RECONCILIATION ($; RECORDED = the ledger, untouched; the adjustments and RECONCILED are ESTIMATES: scripts/audit-attribution.js)');
+for (const l of AA.bridge(records, rows)) console.log(`  ${l}`);
+console.log('\nB. HYPOTHESES: why the reconciled result happened ($, reconstructed per trade; not accounting)');
+for (const l of AA.table(records, rows)) console.log(`  ${l}`);
 console.log('\nFLAG COUNTS (group:what)');
 const fc = {}; for (const r of rows) for (const f of r.flags) { const k = f.split(':')[0] + ':' + f.split(':')[1].replace(/[-+]?\d[\d.]*/g, '#'); fc[k] = (fc[k] || 0) + 1; }
 for (const [k, n] of Object.entries(fc).sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);
@@ -122,3 +129,5 @@ if (csv) {
   fs.writeFileSync(csv, [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n'));
   console.log(`\nCSV written: ${csv}`);
 }
+const after = digest();
+console.log(after.sha256 === before.sha256 ? `\nInput file unchanged (sha256 ${after.sha256})` : '\nWARNING: the input file CHANGED while it was read (the live server may be writing it): audit a COPY');

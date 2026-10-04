@@ -112,6 +112,7 @@ function status(settings = {}, now = Date.now()) {
       upcoming: macro.upcoming(now, 36).map((e) => ({ ...e, clock: et.clock(e.releaseTime), day: et.ymd(e.releaseTime) })) },
     kill: dailyLoss.current(),
     maxTradesPerSector: sectorMax(settings),
+    quickFlipAlerts: require('../execution/quickflip-alerts').alerts(), // Phase 89c: Quick Flips still open past their deadline
   };
 }
 

@@ -1,5 +1,5 @@
 // Phase 89b: Quick Flips completeness vs REST IEX bars + restart recovery, automatic paper execution, the signal-anchored entry
-// deadline, 1 contract, deadline exits that never ride overnight (unfilled close, no quote, partial close), versioned pauses
+// deadline, 1 contract, deadline exits re-priced when unfilled (unfilled close, no quote, partial close), versioned pauses
 // (Moonshots), the audit attribution. Run: node tests/ph89bunit.js. Scratch ledger, fake keys, dead URLs, stubbed brokers.
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph89b-'));
@@ -59,13 +59,14 @@ const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
   check('...never when the options book is LIVE, when switched off, or for other strategies', !auto.eligible(sized, { stockMode: 'live' }) && !auto.eligible(sized, { quickFlipsAutoPaper: false })
     && !auto.eligible({ ...sized, strategyId: 'options-system' }, {}) && !auto.eligible({ ...sized, sizingBasis: 'alpaca-live' }, {}));
 
-  // 4. Deadline exits that never ride overnight (Alpaca Paper, stubbed).
+  // 4. Deadline exits re-priced when they do not fill (Alpaca Paper, stubbed).
   const L = require(S + 'execution/paper-ledger'); const ap = require(S + 'execution/alpaca-paper'); const paperApi = require(S + 'connectors/alpaca-api').paper;
   const spreads = require(S + 'connectors/alpaca-options'); const od = require(S + 'connectors/options-data');
   const placed = []; spreads.closeSpread = async (pos, id, limit) => { placed.push(limit); return { ok: true, brokerId: `x${placed.length}` }; };
   paperApi.cancelOrder = async () => ({ ok: true }); paperApi.getOrder = async () => ({ ok: true, terminal: true, filledQty: 0, status: 'canceled' });
   L.stageOrder(sized); L.executeOrder(sized.id, 770, { paperBroker: 'alpaca', broker: 'Alpaca Paper', brokerId: 'e1', fillEstimated: false,
     paperExitOrderId: 'x0', paperExitReason: 'QF_DEADLINE', paperExitLeg: 'qf_deadline', exitWork: { kind: 'exit', reason: 'QF_DEADLINE', limit: 6.0, step: 4, stepAt: T(15, 40), placedAt: T(15, 40) } });
+  L.updatePositions((p) => (p.id === sized.id ? Object.assign(p, { openedAt: T(15, 30) }) && true : false)); // opened on the test day (Phase 89c: the deadline is that day's 3:40 PM)
   od.freshQuote = (sym, maxAge) => (maxAge > 60e3 ? { bid: 4.8, ask: 4.9, quoteTime: T(15, 30), at: T(15, 30) } : null); // only a STALE quote exists
   const QX = require(S + 'execution/quickflip-exits');
   const quiet = () => ({ b5: [] });

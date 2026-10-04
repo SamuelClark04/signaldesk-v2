@@ -84,6 +84,7 @@ function broadcast(type, payload) {
 const handleMessage = createMessageHandler({ send, broadcast });
 externalApi.install(app, { broadcast }); // /api/portfolio/external (behind the sign-in gate)
 require('./http-routes').installPaperRuns(app, PORT, { broadcast }); // Phase 88: /api/paper/runs, POST /api/paper/reset-run
+require('./http-routes').installVersion(app, PORT); // Phase 89c: GET /api/version (running commit + what can trade)
 rejectionStats.onChange((stats) => broadcast('REJECTION_STATS', stats)); // "Why we passed"
 scanLog.onChange((log) => broadcast('SCAN_LOG', log)); // live scanner log, once per pass
 watchlist.onChange((items) => broadcast('WATCHLIST_UPDATED', items)); // "Watching"
@@ -171,6 +172,7 @@ function banner() {
 
 server.listen(PORT, HOST, () => {
   console.log(`SignalDesk-V2 listening on http://${HOST}:${PORT}`);
+  const v = require('./version').BOOT; console.log(`[version] running ${v.commit}${v.dirty ? ' (+ local edits)' : ''}: ${v.subject}`); // Phase 89c
   banner();
   tunnel.start(PORT);
   if (LAN_ACCESS) {

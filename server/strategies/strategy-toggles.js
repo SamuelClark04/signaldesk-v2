@@ -45,7 +45,7 @@ const REASONS = Object.freeze({
     + 'on the underlying) lost in both halves of the window: profit factor 0.75 (0.79 / 0.70); with the 200-day history fixed 0.75, an SPY trend '
     + 'filter 0.79, retest entries 0.76. The signals carry no direction: price moved -0.03 ATR their way over 1-5 days (48-49% right), '
     + 'and the same trades reversed lose as much. Paper wins came from closing early by hand. On only to test the mechanics on paper.',
-  'options-quickflips': 'Off by default (Phase 89): SPY / QQQ single calls / puts, 3-7 DTE, entries 9:50 AM-2:30 PM, every position closed the same day '
+  'options-quickflips': 'Off by default (Phase 89): SPY / QQQ single calls / puts, 3-7 DTE, entries 9:50 AM-2:30 PM, each position closed by a 3:40 PM deadline (if the paper broker does not fill the close it is re-priced and you are alerted) '
     + '(60 min max, 3:40 PM deadline: the one exception to "nothing closes on time"). Its replay did not pass the pre-registered test: the selected '
     + 'rule (ORB, -30% / +45%) made profit factor 1.41 on consolidated (SIP) bars but not significantly, and on the IEX bars our data plan allows live '
     + 'it was 1.10 (0.90 with stress costs): about break-even. On = the frozen forward paper test (docs/research/phase89-protocol-2.md), executed '

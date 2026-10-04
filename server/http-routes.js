@@ -80,4 +80,12 @@ function installPaperRuns(app, PORT, { broadcast }) {
   });
 }
 
-module.exports = { install, installAi, installPaperRuns };
+// Phase 89c: which commit is running + the switches that decide what can trade (no secrets). Same guard as the routes above.
+function installVersion(app, PORT) {
+  app.get('/api/version', (req, res) => {
+    if (!checkHttp(req, PORT).ok) { res.status(403).json({ ok: false, error: 'forbidden' }); return; }
+    res.set('Cache-Control', 'no-store').json({ ok: true, ...require('./version').report(require('./execution/paper-ledger').getSettings()) });
+  });
+}
+
+module.exports = { install, installAi, installPaperRuns, installVersion };
