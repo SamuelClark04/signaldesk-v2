@@ -238,6 +238,15 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   SPY / QQQ 2019-2023 with a Black-Scholes model (calibrated on S1-V1 real prints: corr 0.97, slightly optimistic): all 4 FAIL (best N1-A
   PF 1.15, stress 0.92); stages 2-3 NOT run: the 2025-06-02..2026-10-01 option window stays UNSEEN (never downloaded) for one future
   pre-registered test. No automated strategy has passed on unseen data; all stay off. Scripts / caches: session scratchpad ph90/.
+- **Phase 91 (radar mode: scanner + manual terminal)**: spec docs/superpowers/specs/2026-10-04-radar-manual-approval-design.md. risk/paper-lock.js
+  PAPER_ONLY = true (a code constant: no setting / UI / .env lifts it): stockMode / cryptoMode 'live' refused (a saved live mode loads paper),
+  order-router refuses a LIVE entry route, the Manual Trade Ticket refuses live (PAPER_ONLY_LOCK); exits / closes of existing LIVE positions are never
+  gated. auto-paper.js deleted; order-router.approveWithGuard needs actor 'user', set only by message-handler (APPROVE click, ticket submit);
+  APPROVAL_REQUIRES_USER otherwise. Radar migration (settings.radarVersion 1): equity-day / equity-swing / options-system / options-quickflips ON once
+  (alerts in Approvals, paper), crypto scanners manual-only (strategy-toggles.isEnabled false whatever is saved). strategies/strategy-evidence.js: each
+  strategy's test record, copied onto every staged setup (paper-ledger.stageOrder), in the email subject and on every card (components/evidence-badge.js).
+  Quick Flips radar card: components/quickflip-card.js (contract, why, cost per contract, automatic exits, countdown to the entry deadline). Suites that
+  test LIVE paths on mocks set require(S + 'risk/paper-lock').PAPER_ONLY = false first. Test: tests/ph91unit.js. Supersedes the Phase 89 / 89b notes on automatic Quick Flips paper execution (auto-paper) and on every scanner being off by default.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

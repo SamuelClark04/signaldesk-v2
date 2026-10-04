@@ -30,6 +30,7 @@ fs.writeFileSync(ENV.LEDGER_STATE_PATH, JSON.stringify({ version: 3, settings: {
   pendingOrders: [setup('paper-setup'), setup('live-setup', { sizingBasis: 'live', execution: 'LIVE' })], activePositions: [internal, atAlpaca, liveCoin, adopted],
   tradeJournal: JOURNAL, discardedOrders: [setup('old-rejected')], savedSetups: [], pilotActions: [] }, null, 2));
 const S = path.join(__dirname, '..', 'server') + '/';
+require(S + 'risk/paper-lock').PAPER_ONLY = false; // Phase 91: this suite tests the LIVE paths on mocks (the app itself is paper-only)
 let fails = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ` - ${x}` : ''}`); if (!ok) fails += 1; };
 const PX = { KO: 61, NVDA: 180, 'ETH-USD': 2600, 'BTC-USD': 90000 };

@@ -18,6 +18,7 @@ const pos = { id: 'opt:SPY:alpaca', asset: 'SPY', market: 'options', strategyId:
 fs.writeFileSync(process.env.LEDGER_STATE_PATH, JSON.stringify({ version: 3, settings: { bankroll: 3000, cryptoBankroll: 3000, stockMode: 'paper', cryptoMode: 'live', riskProfile: 'aggressive', dailyLossLimit: 90 },
   pendingOrders: [], activePositions: [pos, { ...pos, id: 'opt:SPY:held', paperBroker: undefined }], tradeJournal: [], discardedOrders: [], savedSetups: [], pilotActions: [] }));
 const S = path.join(__dirname, '..', 'server') + '/';
+require(S + 'risk/paper-lock').PAPER_ONLY = false; // Phase 91: this suite tests the LIVE paths on mocks (the app itself is paper-only)
 let fails = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ` - ${x}` : ''}`); if (!ok) fails += 1; };
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;

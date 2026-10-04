@@ -1,6 +1,6 @@
 # Radar mode: paper-only lock, manual-approval guarantee, evidence labels, Quick Flips radar card (Phase 91)
 
-Status: DRAFT for review (2026-10-04). Parts 1 and 2 of the "Scanner-Only / Manual Approval" pivot. Part 3 (an N1 radar scanner) and
+Status: APPROVED 2026-10-04; implemented in Phase 91. Parts 1 and 2 of the "Scanner-Only / Manual Approval" pivot. Part 3 (an N1 radar scanner) and
 a new crypto approach are separate later projects.
 
 ## 1. Intent (agreed 2026-10-04)

@@ -22,6 +22,7 @@ const OLD_MAP = Object.fromEntries(['crypto-swing', 'crypto-intraday', 'speculat
 fs.writeFileSync(ENV.LEDGER_STATE_PATH, JSON.stringify({ version: 3, settings: { bankroll: 10000, cryptoBankroll: 5000, stockMode: 'paper', cryptoMode: 'paper', paperStockBroker: 'internal',
   radarVersion: 1, strategiesEnabled: OLD_MAP }, pendingOrders: [], activePositions: [], tradeJournal: [], discardedOrders: [], savedSetups: [], pilotActions: [] }));
 const S = path.join(__dirname, '..', 'server') + '/';
+require(S + 'risk/paper-lock').PAPER_ONLY = false; // Phase 91: this suite tests the LIVE paths on mocks (the app itself is paper-only)
 let fails = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ` - ${x}` : ''}`); if (!ok) fails += 1; };
 const et = require(S + 'services/et-time');
