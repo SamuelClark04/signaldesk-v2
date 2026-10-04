@@ -3,16 +3,19 @@
 **Target:** the Phase 89d commit (named in its report; on the VM: `git log origin/main -1 --format=%h -- scripts/vm-audit.sh`). Its
 `server/` and `client/` are identical to 25b02f3 (Phase 89c): 89d changes only the audit / deploy / rollback scripts and docs, so the
 running code is 89c's and the Quick Flips forward test configuration is unchanged (`git diff --stat 25b02f3 <target> -- server client`
-prints nothing). **Starting point: b24e750 (Phase 88), possibly 73b3192 (Phase 87); NOT 85b.** Evidence from the VM ledger itself (audit
-of 2026-10-04 04:30 UTC): its saved settings include `maxOptionEntriesPerDay` (added in 73b3192, Phase 87) and lack
-`strategyPauseVersion` and an `options-quickflips` switch (added in b5e9ace, Phase 89), so the code that last wrote it was 87 or 88.
-The exact commit is the reflog in the archive's `checkout.txt` (or the `<from>` in `server/data/backups/deploy-*-<from>-to-*`).
-Phases 86-88 in section 2 are therefore already on the VM; only 89, 89b, 89c and 89d change anything.
+prints nothing).
 
-**Status (2026-10-04):** the audit ran, but its result reached us only as two AI summaries that CONTRADICT each other (one: LOADED and
-CHECKOUT 6381a58, process started 19 s before the archive, every scanner off by the pause; the other: b24e750, five scanners ON). The
-archive's `checkout.txt` / `process.txt` decide which is true. If 6381a58 is already running, the deploy has happened: go to section 4.
-If b24e750 is running, five scanners are ON (paper books): switch them Off in Settings > Strategies before anything else.
+**DEPLOYED 2026-10-04, b24e750 (Phase 88) -> 6381a58, VERIFIED** (the archive itself, docs/research/phase89-results.md section 19):
+reflog b24e750 from 10-02 17:21 UTC, then resets to origin/main at 04:26:47, 04:27:02, 04:30:13, 04:30:26 UTC; process started 04:30:26,
+VERDICT SAME, no tracked edits; the server logged `[version] running 6381a58` and the research pause (every scanner off, Quick Flips off,
+the daily profit target unsaved = off). The first reset (04:26:47) came from an UNPINNED run (origin/main; the b24e750 script makes no
+backup), so both backups are named `6381a58-to-6381a58`. They still hold the pre-deploy ledger: ledger-state.json was last written at
+04:01 UTC by b24e750 and unchanged since. **Rollback to b24e750** therefore needs the start named: `sed -i 's/^before=.*/before=b24e750/'
+server/data/backups/deploy-20261004T042702Z-6381a58-to-6381a58/meta.txt`, then section 6 (not needed so far).
+Paper history: archived by the Phase 88 reset of 10-02 16:15 UTC (paper-runs.json, Run 1, 50 records), not lost.
+
+**Still open:** section 4 checks 3-5 (`/api/version`, Settings > Strategies, 30 minutes of log), and the LIVE ETH check against Coinbase
+itself (section 19). Settings now: stocks PAPER, crypto PAPER, paperStockBroker internal; open: 2 LIVE ETH (Coinbase), 2 PAPER spreads.
 
 ## 1. Before the deploy: read-only audit (no restart, no request to the server, no ledger write)
 
@@ -46,17 +49,9 @@ until a restart. From 89c on the server also states it: `[version] running <comm
 
 ## 1b. Gate before the deploy (decided on the audit)
 
-**What the relayed audit shows (recorded P&L from the ledger; to be re-checked on the archive itself):** 29 closed records, first close
-09/25 10:17 ET (the same LIVE PRCL record that opens the local copy), last 10/02 15:26 ET; recorded total -$12.49, no paper overstatement
-(no closed paper option spreads), LIVE fee difference $0. By book: Moonshots LIVE 22 (-$4.13), manual LIVE 5 (-$5.17), Crypto Swing LIVE 1
-(-$1.17), Equity Swing PAPER 1 (-$2.02). Compared with the local copy (40 records to 09/28): the LIVE history continues (21 -> 28 records:
-+5 Moonshots -$5.76, +1 manual -$1.46, +1 Crypto Swing -$1.17, if the first 21 match by id), but the local copy's 19 closed PAPER records
-(18 Options Spreads, recorded +$354.18 / reconciled about -$198.12, and 1 manual) and 7 of its 9 open paper spreads are NOT in the VM
-snapshot, and there is no archived paper run (`paper runs archived: 0`). So that paper history is MISSING from this ledger, not archived
-by the Phase 88 reset (which writes paper-runs.json first). Those spreads were internal paper (no Alpaca Paper orders), so nothing is left
-working at a broker. Where it went is open: the pre-88 Danger-zone paper reset (no archive), or the VM ledger started from a different copy;
-`ls -la server/data server/data/backups` on the VM shows any older ledger files. Settings now: stocks PAPER, crypto PAPER,
-paperStockBroker internal; 4 open: 2 LIVE ETH at Coinbase (Pilot rotation, adopted hold), 2 PAPER Options Spreads.
+**What the audit shows:** docs/research/phase89-results.md section 19 (79 records with the archived paper run: recorded +$84.07,
+reconciled about -$920.43; LIVE -$10.47 over 28 records). An earlier note here called the paper history "missing": wrong, it was the
+trade-audit bug that read archived runs from the wrong key (fixed in Phase 89d).
 
 **LIVE crypto under cryptoMode paper:** paper mode stops new LIVE entries and stops the live balance display (broker-state queries a venue
 only in live mode), but NOT the monitoring of open LIVE positions: the reconciler and external-close query the venue whatever the mode. The

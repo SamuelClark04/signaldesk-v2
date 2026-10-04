@@ -122,6 +122,14 @@ const quiet = () => ({ b5: [] });
   const late = report(Array.from({ length: 120 }, (_, i) => mk(i, 50)), '2027-10-10');
   check('12 months with 120 (< 150) trades: INCONCLUSIVE even with every trade a winner (no early pass)', /STATUS: INCONCLUSIVE/.test(late) && !/VERDICT: PASS/.test(late));
 
+  // 7a. Phase 89d: trade-audit reads archived paper runs from paper-runs.json's "archived" key (it read "runs": 0 found on the VM).
+  { const sub = path.join(DIR, 'ta'); fs.mkdirSync(sub, { recursive: true });
+    const rec = (id, net, closedAt) => ({ id, strategyId: 'equity-swing', market: 'stocks', execution: 'PAPER', asset: 'MU', netPnl: net, grossPnl: net + 1, fees: 1, exitReason: 'STOP_LOSS', openedAt: closedAt - 36e5, closedAt });
+    fs.writeFileSync(path.join(sub, 'ledger.json'), JSON.stringify({ tradeJournal: [rec('cur1', -2, Date.parse('2026-10-02T19:00:00Z'))], activePositions: [] }));
+    fs.writeFileSync(path.join(sub, 'paper-runs.json'), JSON.stringify({ version: 1, current: { runId: 'run-2' }, archived: [{ runId: 'run-1', name: 'Run 1', tradeJournal: [rec('old1', 5, Date.parse('2026-09-30T15:00:00Z')), rec('old2', -1, Date.parse('2026-10-01T15:00:00Z'))] }] }));
+    const out = execFileSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'trade-audit.js'), path.join(sub, 'ledger.json')], { encoding: 'utf8' });
+    check('trade-audit: the archived run (paper-runs.json "archived") is counted and its records audited with the current journal (3 records)', /3 closed records/.test(out) && /paper runs archived: 1/.test(out)); }
+
   // 7b. The banner text (client/components/shield-banner.js content(), loaded with a stub window).
   global.window = { SignalDesk: { ui: { el: () => ({}), money: (x) => `$${Number(x).toFixed(2)}` } } };
   require(path.join(__dirname, '..', 'client', 'components', 'shield-banner.js'));

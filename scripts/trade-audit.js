@@ -24,6 +24,7 @@ const before = digest(); // Phase 89c: proof the original was not changed (re-ha
 const L = JSON.parse(fs.readFileSync(file, 'utf8'));
 const runsFile = opt('--runs') || path.join(path.dirname(file), 'paper-runs.json');
 const runs = fs.existsSync(runsFile) ? JSON.parse(fs.readFileSync(runsFile, 'utf8')) : null;
+const archivedRuns = (runs && (runs.archived || runs.runs)) || []; // Phase 89d fix: paper-runs.js stores them under "archived" (was read as "runs": 0 found)
 
 const et = (ms) => (ms ? new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
 const num = (x, d = 2) => (Number.isFinite(x) ? Number(x.toFixed(d)) : null);
@@ -80,7 +81,7 @@ function auditRow(t, source) {
 const rows = []; const records = [];
 const take = (t, src) => { if (Number.isFinite(t.netPnl) && (t.closedAt || 0) >= since) { rows.push(auditRow(t, src)); records.push(t); } };
 for (const t of L.tradeJournal || []) take(t, 'current');
-for (const run of (runs && runs.runs) || []) for (const t of run.tradeJournal || run.journal || []) take(t, `run ${run.name || run.runId}`);
+for (const run of archivedRuns) for (const t of run.tradeJournal || run.journal || []) take(t, `run ${run.name || run.runId}`);
 const order = rows.map((r, i) => i).sort((a, b) => (records[a].closedAt || 0) - (records[b].closedAt || 0));
 rows.splice(0, rows.length, ...order.map((i) => rows[i])); records.splice(0, records.length, ...order.map((i) => records[i]));
 
@@ -94,7 +95,7 @@ function stats(list) {
 const line = (label, s) => `${label.padEnd(46)} n ${String(s.n).padStart(3)}  win ${String(s.winPct).padStart(3)}%  net ${String(s.net).padStart(9)}  avg win ${s.avgWin}  avg loss ${s.avgLoss}  PF ${s.pf ?? '-'}  avg R ${s.avgR ?? '-'}`;
 const group = (key) => { const m = new Map(); for (const r of rows) { const k = key(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)); };
 
-console.log(`TRADE AUDIT ${file}  sha256 ${before.sha256.slice(0, 16)}... ${before.bytes} bytes  (${rows.length} closed records; ${(L.activePositions || []).length} open; paper runs archived: ${runs ? (runs.runs || []).length : 0})`);
+console.log(`TRADE AUDIT ${file}  sha256 ${before.sha256.slice(0, 16)}... ${before.bytes} bytes  (${rows.length} closed records; ${(L.activePositions || []).length} open; paper runs archived: ${archivedRuns.length}, their records included and labelled "run <name>")`);
 console.log(rows.length ? `first close ${rows[0].closedAt}, last ${rows[rows.length - 1].closedAt} (ET)` : 'no closed trades');
 console.log('\nBY STRATEGY x EXECUTION'); for (const [k, list] of group((r) => `${r.strategy} ${r.execution}`)) console.log(line(k, stats(list)));
 console.log('\nBY STRATEGY x WHO CLOSED IT'); for (const [k, list] of group((r) => `${r.strategy} ${r.execution} ${r.exitBy}`)) console.log(line(k, stats(list)));

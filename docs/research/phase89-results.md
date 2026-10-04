@@ -310,3 +310,51 @@ closes. These are reconstructions, not records.
 - **Strategy evidence still missing:** a strategy that passes a frozen protocol on unseen data, then a forward paper test with enough
   trades (150 for Quick Flips). Today only Quick Flips (S1, IEX version, about break-even in replay) is eligible for an isolated paper
   test, and only as a measurement exercise under protocol 2A.
+
+## 19. VM audit, 2026-10-04 04:30 UTC (the archive itself; ledger copy sha256 25c109ee..., unchanged before / after the copy)
+
+**Version.** Reflog: b24e750 (Phase 88) from 2026-10-02 17:21 UTC until 2026-10-04 04:26:47 UTC, then 6381a58 (four resets to
+origin/main 04:26-04:30; deploy backups `deploy-20261004T042702Z-6381a58-to-6381a58` and `...043026Z-...`). The process started 04:30:26;
+VERDICT SAME, no tracked edits, the server logged `[version] running 6381a58` and the Phase 89 / 90 pause (every scanner off). So the
+deploy has happened, from **b24e750** (not 85b). Both backups hold the pre-deploy ledger: the file was last written 04:01, by b24e750.
+
+**History reconciliation (recorded = ledger records; reconciled / natural = ESTIMATES).** The first audit printed "paper runs archived: 0"
+and 29 records: a bug in trade-audit.js (it read paper-runs.json's runs from `runs`, the file stores them in `archived`; fixed in Phase 89d,
+regression check in tests/ph89cunit.js). The paper history was NOT lost: the Phase 88 reset of 2026-10-02 16:15 UTC archived Run 1
+(Sep 25 - Oct 2, 50 records) in paper-runs.json, and the pre-reset ledger is kept beside it (`ledger-state.json.pre-reset-all-...`).
+Full history: **79 records, recorded +$84.07, reconciled about -$920.43.**
+
+| Book | n | Recorded | Reconciled (est.) | Notes |
+|---|---|---|---|---|
+| Options Spreads PAPER | 42 | -$20.43 | -$1,024.93 | at natural prices 39 trades -$1,048.68 vs booked -$44.18; 39 closed by hand (+$447.05), 3 stops (-$467.48) |
+| Equity Swing PAPER | 8 | +$113.95 | +$113.95 | COIN T1 + runner +$114.38 on 10/02 |
+| Moonshots LIVE | 22 | -$4.13 | -$4.13 | 11 venue exits: 9 stops (-0.7 to -1.3R), 2 targets; fees $6.51 |
+| Manual LIVE | 5 | -$5.17 | -$5.17 | PNG stop -$3.81, MORPHO stop -$1.46 |
+| Crypto Swing LIVE | 1 | -$1.17 | -$1.17 | ENA stop -1.2R |
+| Manual PAPER | 1 | +$1.02 | +$1.02 | |
+
+LIVE total recorded -$10.47 over 28 records (the local copy's 21 to 09/28 plus 7 later: 5 Moonshots, MORPHO, ENA). The large paper
+losses: the 09/30 stops (XOM -$129.83, GOOGL -$289.15: the GOOGL stop sold at 3:53 PM ET at 0.73 against a 1.98 stop, -1.78R, before
+Phase 82's 3:45 PM lockout existed; Phase 82 cites this trade) and the 10/02 11:53 ET hand-close of all 10 open spreads before the reset
+(-$422.50 recorded). The local 40-record copy is a SUBSET of this history (same first record, LIVE PRCL 09/25 10:17 ET).
+
+**The two open spreads (PAPER, internal, 1 contract each; opened under b24e750 with the scanners on, about 40 s and 90 s after the
+reset, 9 s / 7 s after staging).** Quotes below: Alpaca INDICATIVE, last of Friday 10/02 (3:59:59 PM ET), not OPRA, not executable.
+
+| | AMZN Oct 16 255/245 put spread (Breakdown 1D) | XOM Oct 16 162.5/167.5 call spread (Trend reclaim 1D) |
+|---|---|---|
+| Signal | rejected under the falling 20-day SMA 252.02, RSI 48 | reclaimed the rising 20-day SMA 162.68 above the 200-day, RSI 55 |
+| Entry cost | debit 4.74 booked (old model: mid 4.68 + 0.06); natural ask then 4.88; 47% of width; 14 DTE | debit 2.32 booked (mid 2.25); natural ask then 2.46; 46% of width; 14 DTE |
+| Quote age at the signal | 56 s | 113 s |
+| Exits armed | stop at value 2.61, T1 7.82; 2 DTE auto-close from Wed 10/14 10:00 AM ET | stop 1.16, T1 3.94; same 2 DTE date |
+| Last value (est.) | natural bid 4.27 / mid 4.55 / natural ask 4.84 -> -$47 at natural bid, -$19 at mid | 1.97 / 2.44 / 2.91 -> -$35 at natural bid, +$12 at mid |
+| Setup now | AMZN 251.42, 20-day 251.64 (falling): still below it, by $0.22; invalidation 258.29 not hit | XOM 164.11, 20-day 162.77 (rising), 200-day 149.09: intact; invalidation 158.99 not hit |
+| Held | about 4 trading hours (expected 5-15 sessions) | same |
+
+Both come from Options Spreads, which is paused (its Phase 87 replay showed no edge). They stay under their own stop / target / 2 DTE
+exits; CPI (10/14) falls inside the hold. Recorded P&L on them is 0 until they close.
+
+**LIVE crypto (Coinbase).** Pilot ROTATION ETH 0.00760476 at 2684.73 ($20.46, stop 2306.34, bracket ARMED since 09/26) and the adopted
+hold 0.04079445 ETH (no SignalDesk stop, by design). The reconciler checks the Pilot one each pass whatever cryptoMode says; the log
+shows it twice as "Coinbase unreachable: fetch failed; unchanged" (near the restarts: to confirm it is transient). Not yet verified
+against Coinbase's own records: needs the Coinbase app (balance >= 0.04839921 ETH; one stop-loss of 0.00760476 ETH near 2306.34).

@@ -230,6 +230,8 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   target in a temp worktree BEFORE the live checkout changes, runs npm ci only when the lockfile changed (app stopped for it), restarts right
   after the reset, waits up to 90 s for [version]. The $0.05 / $0.06 forward benchmarks are labelled "vs INDICATIVE quotes, not verified
   real-market slippage" (report + protocol 2A; thresholds unchanged). Runbook + gate + testing rules: docs/deploy/phase85b-to-89c.md.
+  trade-audit reads archived paper runs from paper-runs.json "archived" (it read "runs": the VM showed 0 runs, 29 of 79 records); vm-audit.sh
+  refuses tools without that fix. VM (2026-10-04): deployed b24e750 -> 6381a58, verified; findings in docs/research/phase89-results.md section 19.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

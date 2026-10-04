@@ -19,9 +19,10 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"; OUT="$HOME/sd-audit-$STAMP"; mkdir -p "$OUT/
 for f in trade-audit.js audit-attribution.js quickflips-forward-report.js vm-audit-settings.js; do git show "$C:scripts/$f" > "$OUT/tools/$f" 2>/dev/null || rm -f "$OUT/tools/$f"; done
 FIX=ok
 grep -q 'AA.bridge' "$OUT/tools/trade-audit.js" && grep -q 'Input file unchanged' "$OUT/tools/trade-audit.js" || FIX=MISSING
+grep -q 'archivedRuns' "$OUT/tools/trade-audit.js" || FIX=MISSING # Phase 89d fix: archived paper runs were read from the wrong key (counted 0)
 grep -q 'reconcile, attribute, bridge' "$OUT/tools/audit-attribution.js" || FIX=MISSING
 [ -f "$OUT/tools/vm-audit-settings.js" ] || FIX=MISSING
-[ "$FIX" = ok ] || { echo "The audit tools of $C lack the Phase 89c reconciliation / fingerprint (or vm-audit-settings.js): use a later commit"; exit 1; }
+[ "$FIX" = ok ] || { echo "The audit tools of $C lack the Phase 89c reconciliation / fingerprint, the archived-runs fix or vm-audit-settings.js: use a later commit"; exit 1; }
 
 # 1. Checkout.
 HEAD_FULL="$(git rev-parse HEAD)"; HEAD_S="$(git rev-parse --short HEAD)"
