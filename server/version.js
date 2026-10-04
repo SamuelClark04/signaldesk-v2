@@ -12,7 +12,7 @@ const BOOT = Object.freeze({ commit: git(['rev-parse', '--short', 'HEAD']) || 'u
 // What can trade right now (no secrets): the switches, the books' modes, the paper broker, Quick Flips' automatic paper execution.
 function report(settings = {}) {
   return { ...BOOT, strategiesEnabled: { ...(settings.strategiesEnabled || {}) }, strategyPauseVersion: settings.strategyPauseVersion ?? null,
-    stockMode: settings.stockMode, cryptoMode: settings.cryptoMode, paperStockBroker: settings.paperStockBroker, quickFlipsAutoPaper: settings.quickFlipsAutoPaper,
+    stockMode: settings.stockMode, cryptoMode: settings.cryptoMode, paperStockBroker: settings.paperStockBroker,
     dailyProfitTargetOn: settings.dailyProfitTargetOn, maxOpenPositions: settings.maxOpenPositions };
 }
 

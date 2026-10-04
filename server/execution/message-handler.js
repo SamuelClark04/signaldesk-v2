@@ -38,7 +38,7 @@ function createMessageHandler({ send, broadcast }) {
     if (typeof id === 'string') inFlight.add(id);
     try {
       if (typeof id !== 'string' || !id) throw new Error('missing order id');
-      const result = await QUEUE_ACTIONS[type](id, msg);
+      const result = await QUEUE_ACTIONS[type](id, { ...msg, actor: 'user' }); // Phase 91: a signed-in click; a client "actor" is overwritten
       console.log(`[ledger] ${type} ${id} -> ${result.status}${result.execution === 'LIVE' ? ` (LIVE ${result.brokerId})` : ''}`);
       if (result.status === 'open') {
         broadcast('POSITIONS_UPDATED', ledger.getActivePositions());
@@ -124,7 +124,7 @@ function createMessageHandler({ send, broadcast }) {
   // Portfolio Pilot: deposit -> staged BUY setups; SELL / TRIM approvals (pilot-handler.js).
   const handlePilot = createPilotHandler({ send, broadcast });
   // Manual Trade Ticket + [Close at Coinbase] (Phase 60: manual-trade.js, coinbase-exit.js).
-  const handleManual = require('./manual-trade').createHandler({ send, broadcast, approve: approveWithGuard,
+  const handleManual = require('./manual-trade').createHandler({ send, broadcast, approve: (id, o) => approveWithGuard(id, { ...o, actor: 'user' }),
     publish: () => { try { publishIntelligence(broadcast); } catch (err) { console.error('[intel] publish failed:', err.message); } publishBrokerState(broadcast, { force: true }).catch(() => {}); } });
 
   // Settings: the ledger validates and persists; every client sees the new values.

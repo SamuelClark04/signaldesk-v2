@@ -49,15 +49,8 @@ const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
   const api = { cancelOrder: async () => ({ ok: true }), getOrderStatus: async () => ({ ok: true, terminal: true, filledQty: 0 }) };
   check('an entry placed late (9:53:50) is canceled at the signal\'s deadline (9:54), not 3 min after placement', (await SE.work(work, {}, { api, place: null, now: T(9, 54, 5) })).void === 'ENTRY_UNFILLED');
 
-  // 3. Automatic paper execution (the user's choice), paper only, once, via the normal approval path.
-  const auto = require(S + 'execution/auto-paper');
-  const calls = []; const router = { inFlight: new Set(), approveWithGuard: async (id) => { calls.push(id); return { ok: true }; } };
-  const led = { getPendingOrders: () => [], getActivePositions: () => [] };
-  await auto.consider(sized, { settings: { stockMode: 'paper' }, router, ledger: led });
-  await auto.consider(sized, { settings: { stockMode: 'paper' }, router, ledger: led });
-  check('auto paper: a staged Quick Flip is approved through order-router.approveWithGuard, exactly once', calls.length === 1 && calls[0] === sized.id);
-  check('...never when the options book is LIVE, when switched off, or for other strategies', !auto.eligible(sized, { stockMode: 'live' }) && !auto.eligible(sized, { quickFlipsAutoPaper: false })
-    && !auto.eligible({ ...sized, strategyId: 'options-system' }, {}) && !auto.eligible({ ...sized, sizingBasis: 'alpaca-live' }, {}));
+  // 3. Phase 91: automatic paper execution is gone (radar mode: every entry waits for the user's click).
+  check('auto paper removed (Phase 91): execution/auto-paper.js no longer exists', !fs.existsSync(S + 'execution/auto-paper.js'));
 
   // 4. Deadline exits re-priced when they do not fill (Alpaca Paper, stubbed).
   const L = require(S + 'execution/paper-ledger'); const ap = require(S + 'execution/alpaca-paper'); const paperApi = require(S + 'connectors/alpaca-api').paper;

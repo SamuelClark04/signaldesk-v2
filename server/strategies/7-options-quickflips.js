@@ -9,8 +9,8 @@
 //              IEX, not SIP: our Alpaca plan has no real-time SIP (HTTP 403); the replay's SIP signals were re-checked on IEX bars
 //   Contract   3-7 calendar DTE, the expiration closest to 5 (ties shorter), never 0-2 DTE; call = highest $1 strike <= spot,
 //              put = lowest >= spot; a FRESH two-sided quote (<= QUOTE_MAX_AGE_MS), bid >= $0.50, bid / ask within 5% of mid
-//   Order      debit = the natural ask; 1 contract (maxContracts); EXECUTED AUTOMATICALLY on paper when settings.quickFlipsAutoPaper
-//              (execution/auto-paper.js); the entry must fill by D + 3 min (entryDeadlineAt, as in the replay) or it is canceled
+//   Order      debit = the natural ask; 1 contract (maxContracts); waits in Approvals for the user's click (Phase 91 radar mode: auto-paper
+//              removed); the entry must fill by D + 3 min (entryDeadlineAt, as in the replay) or it is canceled
 //   Exits      premium stop -30% (2 confirmations), target +45% (a resting limit at Alpaca Paper), setup failure (5m close back
 //              through VWAP), 60 min max hold, 3:40 PM deadline: execution/quickflip-exits.js. Intended to close the same day; a close
 //              the paper broker does not fill is re-priced, alerted (quickflip-alerts.js) and worked again at the next session.

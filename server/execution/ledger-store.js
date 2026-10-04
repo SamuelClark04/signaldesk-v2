@@ -53,7 +53,6 @@ const SETTINGS_RULES = {
   // open risk uses maxOpenRiskPct of the combined paper bankrolls (risk/exposure-limits.js).
   maxOpenPositions: { type: 'number', default: 0, min: 0, max: 100, integer: true },
   strategyPauseVersion: { type: 'number', default: toggles.PAUSE.version, min: 0, max: 1000, integer: true }, // the research pause applied
-  quickFlipsAutoPaper: { type: 'choice', values: [true, false], default: true }, // Phase 89: qualified Quick Flips execute on paper without a click
 };
 const settings = Object.fromEntries(Object.entries(SETTINGS_RULES).map(([k, r]) => [k, r.type === 'toggles' ? { ...r.default } : r.default]));
 
@@ -134,7 +133,7 @@ function restoreSettings(saved) {
   if (!saved) return;
   // Phase 83: Phase 81's single dailyLossLimit becomes the PAPER book's limit (it was set against the paper losses).
   if (saved.dailyLossLimit !== undefined && saved.dailyLossLimitPaper === undefined) saved = { ...saved, dailyLossLimitPaper: saved.dailyLossLimit };
-  const { dailyLossLimit, ...rest } = saved; // eslint-disable-line no-unused-vars
+  const { dailyLossLimit, quickFlipsAutoPaper, ...rest } = saved; // eslint-disable-line no-unused-vars -- Phase 91: auto-paper removed (dropped silently)
   for (const [key, value] of Object.entries(rest)) {
     try {
       Object.assign(settings, cleanSettings({ [key]: value }));

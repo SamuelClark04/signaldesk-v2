@@ -51,6 +51,25 @@ const refs = (re) => serverFiles.filter((f) => re.test(fs.readFileSync(f, 'utf8'
   const users = refs(/require\([^)]*paper-lock/);
   check('lock: only the three ENTRY choke points use it (exits are never gated)', JSON.stringify(users) === JSON.stringify(['execution/ledger-store.js', 'execution/manual-trade.js', 'execution/order-router.js']), users.join(', '));
 
+  // ---------- 2. Manual-approval guarantee ----------
+  check('guarantee: execution/auto-paper.js is gone and the pipeline no longer references it',
+    !fs.existsSync(S + 'execution/auto-paper.js') && !/auto-paper/.test(fs.readFileSync(S + 'execution/pipeline.js', 'utf8')));
+  const callers = refs(/approveWithGuard|routeApproved|QUEUE_ACTIONS/).filter((f) => f !== 'execution/order-router.js');
+  check('guarantee: outside order-router only message-handler references approveWithGuard / routeApproved / QUEUE_ACTIONS',
+    JSON.stringify(callers) === JSON.stringify(['execution/message-handler.js']), callers.join(', '));
+  const e5 = await throws(() => router.approveWithGuard('ph91-none'));
+  const e6 = await throws(() => router.approveWithGuard('ph91-none', { actor: 'system' }));
+  const e7 = await throws(() => router.approveWithGuard('ph91-none', { actor: 'user' }));
+  check('guarantee: approveWithGuard without actor "user" -> APPROVAL_REQUIRES_USER; with it the approval proceeds (here: no such order)',
+    /^APPROVAL_REQUIRES_USER/.test(e5 || '') && /^APPROVAL_REQUIRES_USER/.test(e6 || '') && /^no pending order/.test(e7 || ''), `${e5} | ${e6} | ${e7}`);
+  let seen = null; const origApprove = router.QUEUE_ACTIONS.APPROVE;
+  router.QUEUE_ACTIONS.APPROVE = async (id, msg) => { seen = msg; return { status: 'pending' }; };
+  const handle = require(S + 'execution/message-handler').createMessageHandler({ send: () => {}, broadcast: () => {} });
+  await handle({}, JSON.stringify({ type: 'APPROVE', id: 'ph91-x', actor: 'system' }));
+  router.QUEUE_ACTIONS.APPROVE = origApprove;
+  check('guarantee: a client APPROVE is passed on as the signed-in user\'s (an "actor" in the message is overwritten)', !!seen && seen.actor === 'user', JSON.stringify(seen));
+  check('guarantee: the quickFlipsAutoPaper setting is gone (an old saved value is dropped silently)', !('quickFlipsAutoPaper' in L.getSettings()));
+
   // ---- end of sections ----
   console.log(`\n${fails ? `${fails} FAILED` : 'ALL PASS'}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* temp */ }

@@ -135,7 +135,7 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x 
   const jpm = ledger.getPendingOrders().find((o) => o.asset === 'JPM');
   ledger.updateSettings({ dailyLossLimitPaper: 30 }); // today's real KO paper stop-out (~-$35, above) now passes the paper limit
   let err = null;
-  try { await require(S + 'execution/order-router').approveWithGuard(jpm.id); } catch (e) { err = e.message; }
+  try { await require(S + 'execution/order-router').approveWithGuard(jpm.id, { actor: 'user' }); } catch (e) { err = e.message; }
   check('approval after the kill switch trips: refused with DAILY_LOSS_LIMIT_REACHED and the setup STAYS pending', /^DAILY_LOSS_LIMIT_REACHED/.test(err || '') && ledger.getPendingOrders().some((o) => o.id === jpm.id), err);
 
   // ---------- 5. Settings, buckets, banner ----------

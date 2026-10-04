@@ -131,7 +131,10 @@ async function routeApproved(order, livePrice) {
 // amount: the user's Trade Amount ($) for this order (Setups / Approvals); the
 // risk engine re-sizes it (fractional shares on paper only: live Alpaca brackets
 // need whole shares). An invalid amount leaves the order pending.
-async function approveWithGuard(id, { amount, confirmed } = {}) {
+// actor: 'user' only (Phase 91 radar mode): message-handler sets it for a signed-in APPROVE click or Manual Trade Ticket submit;
+// nothing else may open a position.
+async function approveWithGuard(id, { amount, confirmed, actor } = {}) {
+  if (actor !== 'user') throw new Error('APPROVAL_REQUIRES_USER: an entry needs your click (Approve or the Manual Trade Ticket); nothing was sent');
   const order = ledger.getPendingOrders().find((o) => o.id === id);
   if (!order) throw new Error(`no pending order ${id}`);
   const livePrice = prices.getLatestPrice(order.asset);
