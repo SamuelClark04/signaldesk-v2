@@ -35,6 +35,7 @@ const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
 const session = require('../market/market-session');
+const dc = require('../research/decision-context'); // Phase 93: record-only decision inputs (never changes a value below)
 
 const STRATEGY_ID = 'options-system';
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
@@ -176,12 +177,19 @@ async function evaluate(symbol, px, env, bench) {
   if (r.conflict) return tally.skip(symbol, 'Call and put signals conflict: no trade');
   if (!r.list.length) return tally.skip(symbol, 'No call or put archetype fired');
   let last = null;
+  // Phase 93: the inputs every proposal / block of this symbol was decided on (record-only).
+  const inputs = (sig, od = null) => ({ strategyId: STRATEGY_ID, symbol, values: { px, change: changeOf(bars, px), benchChange: bench, afterHours: !!env.afterHours,
+    signal: sig ? { archetype: sig.archetype, direction: sig.direction, timeframe: sig.timeframe, horizon: sig.horizon, text: sig.text, stop: sig.stop } : null,
+    signals: r.list.map((x) => `${x.archetype}:${x.direction}:${x.timeframe}`), ctx: d.ctx,
+    contract: od ? { contract: od.contract, shortContract: od.shortContract || null, bid: od.bid, ask: od.ask, debit: od.debit, iv: od.iv, delta: od.delta, hv20: od.hv20, dte: od.dte, quoteTime: od.quoteTime } : null },
+    series: [{ name: 'dailyLong', tf: '1D', bars }, { name: 'hourly', tf: '1h', bars: hb }, { name: 'session1m', tf: '1m', bars: Array.isArray(session1m) ? session1m : null }] });
   for (const sig of r.list.slice(0, CONFIG.maxTries)) {
     const out = await propose(symbol, px, sig, d.ctx, bars, env);
-    if (out.candidate) return out.candidate;
+    if (out.candidate) { dc.capture(out.candidate.id, inputs(sig, out.candidate.optionsData)); return out.candidate; }
     last = out;
   }
   const top = r.list[0];
+  dc.capture(last.id, inputs(top));
   return block(symbol, last.id, last.reason, { setupType: `${top.direction === 'call' ? 'Call' : 'Put'} spread · ${ARCH[top.archetype][top.direction === 'call' ? 0 : 1]}`, direction: top.direction === 'call' ? 'long' : 'short', timeframe: top.timeframe });
 }
 

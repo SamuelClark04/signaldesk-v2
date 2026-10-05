@@ -20,6 +20,7 @@ const { planTargets } = require('../risk/target-plan');
 const sentiment = require('../connectors/news-sentiment');
 const { createTally } = require('./scan-tally');
 const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
+const dc = require('../research/decision-context'); // Phase 93: record-only decision inputs (never changes a value below)
 
 const STRATEGY_ID = 'equity-swing';
 const MIN_DAYS_TO_EARNINGS = 3;
@@ -76,10 +77,13 @@ async function evaluate(symbol, livePrice, now) {
   if (!uptrend) return tally.skip(symbol, `Not in an uptrend (SMA${CONFIG.fast} at or below SMA${CONFIG.slow})`);
   if (!pulledBack) return tally.skip(symbol, `No ${(CONFIG.pullbackPct * 100).toFixed(0)}% pullback from the ${CONFIG.highLookback}-day high`);
   if (!atSupport) return tally.skip(symbol, `Not at SMA${CONFIG.fast} support`);
+  const id = `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`;
+  const inputs = (more = {}) => ({ strategyId: STRATEGY_ID, symbol, values: { livePrice, sma20: fast, sma50: slow, recentHigh, pullbackFromHighPct: (recentHigh - livePrice) / recentHigh,
+    distanceFromSma20Pct: (livePrice - fast) / fast, ...more }, series: [{ name: 'daily', tf: '1D', bars }] }); // Phase 93
 
   const guard = await shield(symbol, now);
   if (!guard.allowed) {
-    const id = `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`;
+    dc.capture(id, inputs({ earnings: guard.text }));
     blocks.push({ id, reason: guard.reason, candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
     const key = `${symbol}:${date}:${guard.text}`;
     if (!shieldLogged.has(key)) {
@@ -101,17 +105,20 @@ async function evaluate(symbol, livePrice, now) {
   const tgt = planTargets({ bars, entry: entryMax, stop: invalidation, market: 'stocks', fmt: cents,
     targets: [{ level: 1, price: t1, allocation: 0.5 }, { level: 2, price: t2, allocation: 0.5 }] });
   if (!tgt.ok) {
+    dc.capture(id, inputs({ entryMax, invalidation, t1, t2, targetPlan: tgt.reason }));
     blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: tgt.reason,
       candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
     return tally.skip(symbol, 'Rejected: resistance too close to snap T1');
   }
   const cap = gate.atrCap(entryMax, tgt.targets[0].price, gate.dailyAtr(bars), 'swing');
   if (!cap.ok) {
+    dc.capture(id, inputs({ entryMax, invalidation, t1: tgt.targets[0].price, atrCap: cap.reason }));
     blocks.push({ id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`, reason: `ATR_TARGET_UNREALISTIC: ${cap.reason}`,
       candidate: { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID, setupType: 'SMA pullback', direction: 'long', timeframe: '1D' } });
     return tally.skip(symbol, 'Rejected: T1 beyond 2.5x the daily ATR');
   }
   const news = await sentiment.getSentiment(symbol, now);
+  dc.capture(id, inputs({ entryMax, invalidation, swingLow, t1: tgt.targets[0].price, earnings: earnings.date || null, news: news.ok ? news.label : null }));
 
   return {
     id: `${STRATEGY_ID}:PULLBACK:${symbol}:${date}`,

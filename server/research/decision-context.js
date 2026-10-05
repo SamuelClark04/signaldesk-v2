@@ -12,14 +12,14 @@ const MAX_BARS = 3000;
 const store = new Map(); // id -> { at, strategyId, values, series }
 let errors = 0;
 
-function copyValues(v) {
-  if (!v || typeof v !== 'object') return null;
+// Bounded copy of signal values: scalars as-is; arrays <= 50 items, objects <= 40 keys, 3 levels deep (signal contexts can hold
+// whole indicator arrays: the bar series are kept separately, in full). Functions and deeper levels are dropped.
+function copyValues(v, depth = 0) {
+  if (v === null || ['number', 'string', 'boolean'].includes(typeof v)) return v;
+  if (typeof v !== 'object' || depth >= 3) return undefined;
+  if (Array.isArray(v)) return v.slice(0, 50).map((x) => copyValues(x, depth + 1));
   const out = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (x === null || ['number', 'string', 'boolean'].includes(typeof x)) out[k] = x;
-    else if (Array.isArray(x)) out[k] = x.slice(0, 50);
-    else if (typeof x === 'object') out[k] = { ...x };
-  }
+  for (const [k, x] of Object.entries(v).slice(0, 40)) { const c = copyValues(x, depth + 1); if (c !== undefined) out[k] = c; }
   return out;
 }
 

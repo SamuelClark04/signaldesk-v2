@@ -87,8 +87,11 @@ function record(pathName, id, info = {}) {
     } else if (LIFECYCLE.has(pathName)) {
       for (const s of seen.values()) if (s.id === id) emitRepeats(s, now); // the observations before this event come first
     }
-    const ctx = require('./decision-context').get(id);
-    if (!ctx && RADAR.has(c.strategyId) && !LIFECYCLE.has(pathName)) st.missingContext += 1;
+    // The decision inputs ride on the first observation and on STAGED only: a strategy re-captures every pass, so a later
+    // lifecycle event (approval, close) would otherwise carry newer bars than the decision used.
+    const withCtx = OBSERVED.has(pathName) || pathName === 'STAGED';
+    const ctx = withCtx ? require('./decision-context').get(id) : null;
+    if (withCtx && !ctx && RADAR.has(c.strategyId)) st.missingContext += 1;
     push({ type: 'decision', v: 1, at: now, seq: (seq += 1), path: pathName, id, reason: info.reason ? String(info.reason) : null, reasonBucket: bucket,
       setup: ser.pick(c), price: { last: price, at: now }, guard: info.guard || null, extra: info.extra || null, context: ctx || null, code: codeVersion() });
     st.recordedToday += 1; st.byPath[pathName] = (st.byPath[pathName] || 0) + 1;

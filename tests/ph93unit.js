@@ -103,8 +103,10 @@ const bars = (n, t0 = 1790000000, step = 60) => Array.from({ length: n }, (_, i)
   check('a failing write is counted with its error, and the batch stays queued for the next flush', s1.writeErrors === 1 && /ENOSPC/.test(s1.lastError) && s1.queued === 1, JSON.stringify(s1));
   T.setFs(null); await rec.flush();
   check('...the next good flush writes it', readLines().some((x) => x.id === 'w-1') && rec.status().queued === 0);
+  const mc0 = rec.status().missingContext;
   rec.record('PIPELINE_REJECT', 'options-system:TREND:CALL:XOM:2026-10-07', { reason: 'MACRO_SHIELD_ACTIVE: CPI', candidate: { ...cand('m'), strategyId: 'options-system', asset: 'XOM' } });
-  check('missingContext: a radar strategy decision that arrived without its inputs is counted', rec.status().missingContext === 1);
+  rec.record('APPROVED', 'options-system:TREND:CALL:XOM:2026-10-07', { candidate: { ...cand('m'), strategyId: 'options-system', asset: 'XOM' } });
+  check('missingContext: a radar decision (rejection / staging) without its inputs is counted; a later lifecycle event is not', rec.status().missingContext === mc0 + 1);
   const huge = { type: 'decision', id: 'h', context: { series: [{ name: 'x', symbol: 'X', tf: '1m', bars: bars(20000).map((b) => ({ ...b, note: 'y'.repeat(30) })) }] } };
   const out = require(S + 'research/decision-serialize').lines(huge, () => false, () => {});
   const sl = JSON.parse(out.lines[0]);
@@ -115,6 +117,7 @@ const bars = (n, t0 = 1790000000, step = 60) => Array.from({ length: n }, (_, i)
   delete process.env.DECISIONS_RECORDER;
 
   await require('./ph93hooks')({ S, check, rec, dc, readLines, wipe, cand, T, ENV, setNow: (x) => { NOW = x; } });
+  await require('./ph93strategies')({ S, check, rec, dc, readLines, wipe, T });
   console.log(`\nph93unit: ${fails ? `${fails} FAIL` : 'all passed'}`);
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
