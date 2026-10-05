@@ -24,6 +24,7 @@ function sweep(broadcast, now = Date.now()) {
       ledger.discardOrder(o.id);
       recordRejection(o.id, why, o);
       scanLog.rejected(o.id, why, o);
+      require('../research/decision-recorder').record('EXPIRED', o.id, { reason: why, candidate: o }); // Phase 93: record-only
     } catch (err) { console.warn(`[sweeper] ${o.id}: ${err.message}`); }
   }
   if (expired.length) {

@@ -74,6 +74,7 @@ function executeOrder(candidateId, fillPrice, extra = {}, resized = null) {
   };
   activePositions.push(position);
   store.save();
+  require('../research/decision-recorder').record('OPENED', position.id, { candidate: position }); // Phase 93: record-only
   return { ...position };
 }
 
@@ -130,6 +131,7 @@ function closePosition(candidateId, exitPrice, exitReason, extra = {}, booked = 
   activePositions.splice(i, 1);
   tradeJournal.push(entry);
   store.save();
+  require('../research/decision-recorder').record('CLOSED', entry.id, { reason: entry.exitReason, candidate: entry, extra: { parentId: entry.parentId || null } }); // Phase 93
   return { ...entry };
 }
 

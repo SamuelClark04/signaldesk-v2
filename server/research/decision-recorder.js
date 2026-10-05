@@ -5,7 +5,7 @@
 //                            strategy left in decision-context (by id), pushed onto a bounded queue (MAX_QUEUE; overflow drops
 //                            the OLDEST and is counted).
 //   paths                    lifecycle (never deduplicated): STAGED APPROVAL_HOLD APPROVAL_REJECT APPROVED USER_REJECT EXPIRED
-//                            OPENED CLOSED; repeated observations (deduplicated per id + path + reason bucket): STRATEGY_BLOCK
+//                            OPENED ROUTE_FAILED FILLED VOIDED CLOSED; repeated observations (deduplicated per id + path + reason bucket): STRATEGY_BLOCK
 //                            PIPELINE_REJECT. A repeat only bumps a counter, written as a REPEATS line at most every 15 min per
 //                            key, before any lifecycle event of that id, and at the New York day rollover.
 //   flush (every 5 s, unref) serializes in <= SLICE_MS slices (setImmediate between them), each distinct bar series ONCE per day
@@ -22,7 +22,7 @@ const SLICE_MS = 10;
 const REPEAT_EVERY_MS = 15 * 60 * 1000;
 const MAX_SEEN = 20000;
 const KEEP_DAYS = 180;
-const LIFECYCLE = new Set(['STAGED', 'APPROVAL_HOLD', 'APPROVAL_REJECT', 'APPROVED', 'USER_REJECT', 'EXPIRED', 'OPENED', 'CLOSED']);
+const LIFECYCLE = new Set(['STAGED', 'APPROVAL_HOLD', 'APPROVAL_REJECT', 'APPROVED', 'USER_REJECT', 'EXPIRED', 'OPENED', 'ROUTE_FAILED', 'FILLED', 'VOIDED', 'CLOSED']);
 const OBSERVED = new Set(['STRATEGY_BLOCK', 'PIPELINE_REJECT']);
 const RADAR = new Set(['equity-day', 'equity-swing', 'options-system', 'options-quickflips']);
 

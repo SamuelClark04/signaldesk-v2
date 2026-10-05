@@ -15,6 +15,12 @@ const alpacaApi = require('../connectors/alpaca-api');
 const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
 const paperLock = require('../risk/paper-lock'); // Phase 91: no LIVE entry while locked
+const decisions = require('../research/decision-recorder'); // Phase 93: record-only lifecycle events
+// APPROVED = the click passed every guard (recorded before routing); then OPENED (the ledger) or ROUTE_FAILED (execution refused).
+async function tracked(id, order, run) {
+  decisions.record('APPROVED', id, { candidate: order });
+  try { return await run(); } catch (err) { decisions.record('ROUTE_FAILED', id, { reason: err.message, candidate: order, extra: { stillPending: ledger.getPendingOrders().some((o) => o.id === id) } }); throw err; }
+}
 
 // Execution venue per market: which mode setting governs it, and which broker
 // connector places LIVE orders. Options have no live path yet: the contract and
@@ -149,18 +155,19 @@ async function approveWithGuard(id, { amount, confirmed, actor } = {}) {
   if (check.valid && amount !== undefined && amount !== null) {
     const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
     const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });
-    if (!resized.approved) throw new Error(resized.reason);
+    if (!resized.approved) { decisions.record('APPROVAL_HOLD', id, { reason: resized.reason, candidate: order }); throw new Error(resized.reason); }
     const heat2 = book(resized);
-    if (heat2) throw new Error(heat2); // a bigger trade amount would pass the ceiling: the setup stays pending
+    if (heat2) { decisions.record('APPROVAL_HOLD', id, { reason: heat2, candidate: order }); throw new Error(heat2); } // a bigger trade amount would pass the ceiling: the setup stays pending
     console.log(`[ledger] APPROVE ${id}: trade amount $${Number(amount).toFixed(2)} -> ${resized.positionSize} (was ${order.positionSize}), risk $${resized.dollarRisk.toFixed(2)}`);
-    return routeApproved(resized, livePrice);
+    return tracked(id, resized, () => routeApproved(resized, livePrice));
   }
-  if (check.valid) return routeApproved(order, livePrice);
+  if (check.valid) return tracked(id, order, () => routeApproved(order, livePrice));
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
   if (check.reason !== 'NO_LIVE_PRICE' && !heat) { // a book limit is temporary (close a trade, then approve): it stays pending
     ledger.discardOrder(id);
     recordRejection(id, check.reason, order);
   }
+  decisions.record(check.reason !== 'NO_LIVE_PRICE' && !heat ? 'APPROVAL_REJECT' : 'APPROVAL_HOLD', id, { reason: check.reason, candidate: order });
   throw new Error(check.reason);
 }
 
@@ -170,6 +177,7 @@ const QUEUE_ACTIONS = {
     const order = ledger.getPendingOrders().find((o) => o.id === id);
     const discarded = ledger.discardOrder(id);
     recordRejection(id, 'REJECTED_BY_USER', order);
+    decisions.record('USER_REJECT', id, { reason: 'REJECTED_BY_USER', candidate: order });
     return discarded;
   },
 };
