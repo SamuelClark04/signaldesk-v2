@@ -19,11 +19,12 @@ const QUOTES = ['USD', 'USDC', 'USDT'];
 let cache = { at: 0, bySymbol: new Map(), error: null };
 let inflight = null;
 
-// One instrument -> { symbol, instId, base, quote, minSz, lotSz, tickSz, tradeQuotes }.
+// One instrument -> { symbol, instId, base, quote, minSz, lotSz, tickSz, tradeQuotes, groupId (its fee group, Phase 92) }.
 function entryOf(x) {
   if (!x || x.instType && x.instType !== 'SPOT' || x.state !== 'live' || !QUOTES.includes(x.quoteCcy)) return null;
   return { symbol: `${x.baseCcy}-${x.quoteCcy}`, instId: x.instId, base: x.baseCcy, quote: x.quoteCcy, minSz: Number(x.minSz) || 0,
-    lotSz: Number(x.lotSz) || 1e-8, tickSz: Number(x.tickSz) || 1e-8, tradeQuotes: Array.isArray(x.tradeQuoteCcyList) && x.tradeQuoteCcyList.length ? x.tradeQuoteCcyList : [x.quoteCcy] };
+    lotSz: Number(x.lotSz) || 1e-8, tickSz: Number(x.tickSz) || 1e-8, tradeQuotes: Array.isArray(x.tradeQuoteCcyList) && x.tradeQuoteCcyList.length ? x.tradeQuoteCcyList : [x.quoteCcy],
+    groupId: x.groupId !== undefined && x.groupId !== null && String(x.groupId) !== "" ? String(x.groupId) : null };
 }
 
 function load(list, now = Date.now()) {
@@ -74,4 +75,5 @@ const price = (e, px) => (Math.round(px / e.tickSz) * e.tickSz).toFixed(decimals
 // OKX's minimum order size (base). null when fine.
 const minProblem = (e, qty) => (qty >= e.minSz && qty > 0 ? null : `${qty} is under OKX's ${e.instId} minimum of ${e.minSz}`);
 
-module.exports = { refresh, load, get, books, lists, baseOf, size, price, minProblem, snapshot: () => ({ at: cache.at, pairs: cache.bySymbol.size, error: cache.error }), PAIRS_TTL_MS, QUOTES };
+const entries = () => [...cache.bySymbol.values()]; // every routable book (venue-fees maps their fee groups)
+module.exports = { refresh, load, get, books, lists, entries, baseOf, size, price, minProblem, snapshot: () => ({ at: cache.at, pairs: cache.bySymbol.size, error: cache.error }), PAIRS_TTL_MS, QUOTES };

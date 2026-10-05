@@ -40,3 +40,15 @@ tests/ph92unit.js pins all of this.
 
 - BTC-USDC and ETH-USDC: hourly history starts about **2025-08-21**.
 - BTC-USDT and ETH-USDT: hourly history from 2019, and 1-minute bars present on 2020-12-01, 2021-06-01 and 2024-03-01.
+
+## 4. OKX fee groups and Kraken pair coverage (review fix, 2026-10-05)
+
+- **OKX fee groups.** OKX US fees are set per fee group. Each instrument's `groupId` comes from the public instruments list.
+  - `GET /api/v5/account/trade-fee?instType=SPOT` returns the account's rate for every group in `feeGroup[]`.
+  - Its top-level `maker` / `taker` fields belong to one group only. On this account they read 0.14% / 0.23%, group 1's rate, not the BTC / ETH books' rate.
+  - All four BTC / ETH books (BTC-USDC, ETH-USDC, BTC-USDT, ETH-USDT) are in **group 12: 0.20% / 0.35%**.
+  - The live read (2026-10-05 01:11 UTC) mapped all 702 routable USD / USDC / USDT books to groups 11, 12 and 17. The highest, 0.20% / 0.35%, is the venue rate.
+  - Other groups on the account include 0% / 0% and 0% / 0.05%.
+- **Kraken pair coverage.** `TradeVolume` for XBTUSD, ETHUSD, XBTUSDC and ETHUSDC returned all four (XXBTZUSD, XETHZUSD, XBTUSDC, ETHUSDC) at **0.40% / 0.80%**.
+  - The verified rate is claimed for these four pairs only.
+  - Other Kraken pairs are costed at the same rate, labelled unverified.

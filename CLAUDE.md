@@ -247,14 +247,19 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   strategy's test record, copied onto every staged setup (paper-ledger.stageOrder), in the email subject and on every card (components/evidence-badge.js).
   Quick Flips radar card: components/quickflip-card.js (contract, why, cost per contract, automatic exits, countdown to the entry deadline). Suites that
   test LIVE paths on mocks set require(S + 'risk/paper-lock').PAPER_ONLY = false first. Test: tests/ph91unit.js. Supersedes the Phase 89 / 89b notes on automatic Quick Flips paper execution (auto-paper) and on every scanner being off by default.
-- **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken (POST /0/private/TradeVolume, XBTUSD + ETHUSD) and OKX US
-  (GET /api/v5/account/trade-fee, SPOT BTC-USDC + ETH-USDC) ACCOUNT rates at boot + every 6 h (retry 10 min), read-only, like coinbase-fees.js;
-  the highest pair rate -> cost-authority.setVenueFees (VENUE_FEES updated IN PLACE + LEG_RATE). cost-authority.feeInfo(venue) = { maker, taker,
-  source, at, verified }. Fallback until a read succeeds: KRAKEN_* / OKX_* in .env, else the rates verified on this account 2026-10-04 (Kraken
+- **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken and OKX US ACCOUNT rates at boot + every 6 h (retry 10 min),
+  read-only, like coinbase-fees.js. Kraken: POST /0/private/TradeVolume for XBTUSD, ETHUSD, XBTUSDC, ETHUSDC (answer keys XXBTZUSD / XETHZUSD /
+  XBTUSDC / ETHUSDC); EVERY requested pair needs a valid maker + taker or the read fails and replaces nothing; claimed for those pairs only
+  ("other Kraken pairs assumed the same (unverified)"). OKX: fees are per FEE GROUP: okx-pairs keeps each book's groupId (public instruments)
+  and GET /api/v5/account/trade-fee { instType SPOT } lists feeGroup[] (the top-level maker / taker = one group only: never used); every routable
+  book (each live USD / USDC / USDT instrument) must map to a group in the answer, else the read fails; the venue rate = the highest of those
+  groups, per-book detail for BTC / ETH USDC + USDT. A good read -> cost-authority.setVenueFees (VENUE_FEES updated IN PLACE + LEG_RATE, with
+  source + coverage). cost-authority.feeInfo(venue) = { maker, taker, source, at, verified, coverage }. Fallback until a read succeeds: KRAKEN_* / OKX_* in .env, else the rates verified on this account 2026-10-04 (Kraken
   0.40 / 0.80%, OKX US Lv1 0.20 / 0.35%, Coinbase Intro 0.50 / 0.90%), labelled unverified; the old 0.25 / 0.40% and 0.08 / 0.10% were never
   verified and too low. A failed lookup is explicit (status error + time, a log warning; Settings > waterfall shows "Fees UNVERIFIED" or "last
   lookup failed" in amber). Fee-failure policy: the last verified rates stay in force for at most 24 h
-  (cost-authority.VERIFIED_MAX_AGE_MS) after the last good read; past that, while reads fail (or the keys are gone), expireStaleFees sets the
+  (cost-authority.VERIFIED_MAX_AGE_MS) after the last good read; past that, ENFORCED AT USE TIME by every public fee reader (legRate, venueFees,
+  feeInfo, coinbaseFees; break-even reads through venueFees) independent of the next lookup, expireStaleFees sets the
   HIGHER of the last verified and the fallback rates, labelled "stale" / unverified, so a lower cached tier never keeps passing new-entry cost
   checks; exits never consult fee verification (only their fee estimates use the rates in force). The same rule applies to Coinbase. OKX US lists NO BTC-USD / ETH-USD book: BTC-USD routes to BTC-USDC (settles
   in USD / USDC / USDG / RLUSD; only USD / USDC / USDT are counted as spendable), else BTC-USDT (USDT). Kit suites that test routing / cost
