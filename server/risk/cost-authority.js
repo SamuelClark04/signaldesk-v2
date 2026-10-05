@@ -96,6 +96,36 @@ function feeInfo(venue) {
   return { maker: c.maker, taker: c.taker, source: c.source, at: c.at, verified: c.at !== null };
 }
 
+// Phase 92 fee-failure policy: verified account rates are trusted for VERIFIED_MAX_AGE_MS after their last
+// successful read. Past that, while lookups keep failing, each venue's rates in force become the HIGHER of the
+// last verified ones and its fallback (.env, else the default above), labelled unverified, so a lower cached
+// tier never keeps passing new-entry cost checks (risk-engine cost gate, stop floors, the ticket) on its own.
+// Exits never consult fees to decide whether to run: stops / targets / closes continue unchanged; only their
+// fee estimates (P&L preview, the ratchet's break-even) use the rates in force. A later good read restores them.
+const VERIFIED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const FALLBACK = {
+  kraken: { ...VENUE_FEES.kraken, source: VENUE_META.kraken.source },
+  okx: { ...VENUE_FEES.okx, source: VENUE_META.okx.source },
+  coinbase: { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)' },
+};
+function expireStaleFees(venue, now = Date.now()) {
+  const f = feeInfo(venue);
+  const fb = FALLBACK[venue];
+  if (!fb || !f.verified || now - f.at <= VERIFIED_MAX_AGE_MS) return false;
+  const maker = Math.max(f.maker, fb.maker);
+  const taker = Math.max(f.taker, fb.taker);
+  const source = `stale: last verified ${new Date(f.at).toISOString()} (${f.source}); using the higher of it and ${fb.source}`;
+  if (VENUE_FEES[venue]) {
+    Object.assign(VENUE_FEES[venue], { maker: Math.min(maker, taker), taker });
+    VENUE_META[venue] = { source, at: null, lastVerifiedAt: f.at };
+    LEG_RATE[`crypto:${venue}`] = { maker: VENUE_FEES[venue].maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  } else {
+    cbFees = { maker: Math.min(maker, taker), taker, source, at: null, lastVerifiedAt: f.at };
+    LEG_RATE.crypto = { maker: cbFees.maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  }
+  return true;
+}
+
 function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
   const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
   if (!ok(maker) || !ok(taker) || !(taker > 0)) return false;
@@ -201,6 +231,8 @@ module.exports = {
   setCoinbaseFees,
   setVenueFees,
   feeInfo,
+  expireStaleFees,
+  VERIFIED_MAX_AGE_MS,
   feeKey,
   venueFees,
   feesOf,

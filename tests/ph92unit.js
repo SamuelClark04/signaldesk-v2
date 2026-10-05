@@ -114,6 +114,41 @@ console.warn = ((warn) => (...a) => { if (!/^\[(venue-fees|okx|kraken)\]/.test(S
     await orders.submitOrder({ id: 'T2', asset: 'BTC-USD', direction: 'long', invalidation: 60000 }, 0.001, 65000, { balances: { USDC: 100 } });
     return sent[0].body.instId === 'BTC-USDC' && !('tradeQuoteCcy' in sent[0].body); })());
 
+  // ---------- 7. Fee-failure policy: a lower verified rate is not trusted indefinitely for new entries ----------
+  const H = 3600 * 1000; const T0 = 1e12;
+  okx.request = async () => [{ level: 'Lv3', maker: '-0.001', taker: '-0.002' }]; // a cheaper tier than the fallback
+  await vf.refresh('okx', T0);
+  check('policy: a verified LOWER tier (0.10% / 0.20%) is used while fresh', near(cost.feeInfo('okx').taker, 0.002) && cost.feeInfo('okx').verified);
+  okx.request = async () => { throw new Error('OKX HTTP 503'); };
+  await vf.refresh('okx', T0 + 23 * H);
+  check('policy: a failed lookup within 24 h keeps the verified rates (still verified, failure shown)', near(cost.feeInfo('okx').taker, 0.002) && cost.feeInfo('okx').verified && vf.status('okx').ok === false);
+  await vf.refresh('okx', T0 + 24 * H + 1);
+  const st = cost.feeInfo('okx');
+  check('policy: past 24 h with lookups failing -> the HIGHER of verified and fallback (0.20% / 0.35%), labelled stale + unverified', near(st.maker, 0.002) && near(st.taker, 0.0035)
+    && !st.verified && /^stale: last verified/.test(st.source) && near(cost.legRate('crypto:okx', 'taker'), 0.0035 + cost.COINBASE_SPREAD_BUFFER), JSON.stringify(st));
+  const cand = (fk) => ({ market: 'crypto', venue: fk, positionSize: 1, entryPrice: 100, entryLiquidity: 'taker' });
+  check('policy: the new-entry cost gate now uses the stale-raised rate (blended round trip at 0.35% taker, not 0.20%)',
+    near(cost.evaluateCosts(cand('okx'), 10).estimatedFees, 100 * cost.blendedRoundTripRate('crypto:okx', 'taker')) && cost.blendedRoundTripRate('crypto:okx', 'taker') > 0.0055);
+  okx.request = async () => [{ level: 'Lv3', maker: '-0.001', taker: '-0.002' }];
+  await vf.refresh('okx', T0 + 25 * H);
+  check('policy: a later good read restores the verified rates', near(cost.feeInfo('okx').taker, 0.002) && cost.feeInfo('okx').verified);
+  process.env.OKX_API_KEY = '';
+  await vf.refresh('okx', T0 + 50 * H);
+  check('policy: keys removed also ages the cached rate out after 24 h', !cost.feeInfo('okx').verified && near(cost.feeInfo('okx').taker, 0.0035));
+  process.env.OKX_API_KEY = keep;
+  // Coinbase: the same rule; its fallback (.env / Intro 0.60% / 1.20% here) is higher than the 0.50% / 0.90% tier.
+  cost.setCoinbaseFees({ maker: 0.005, taker: 0.009, source: 'Coinbase account tier Intro', at: T0 });
+  const cbf = require(S + 'connectors/coinbase-fees');
+  await cbf.refresh(T0 + 24 * H + 1); // no Coinbase key in this test: the read fails
+  const cs = cost.feeInfo('coinbase');
+  check('policy (coinbase): a failed read past 24 h -> the higher fallback for new entries, labelled stale', !cs.verified && cs.taker >= 0.009 && /^stale/.test(cs.source)
+    && near(cost.legRate('crypto', 'taker'), cs.taker + cost.COINBASE_SPREAD_BUFFER), JSON.stringify(cs));
+  // Exits never gate on fee verification: no exit / close / reconcile module reads the verification state.
+  const exitMods = ['execution/exit-pass.js', 'execution/exit-monitor.js', 'execution/ratchet.js', 'execution/coinbase-exit.js', 'execution/bracket-ops.js',
+    'execution/reconciler.js', 'execution/external-close.js', 'execution/spread-exit.js', 'execution/time-exits.js'].filter((f) => fs.existsSync(S + f));
+  const reads = exitMods.filter((f) => /feeInfo|expireStaleFees|\.verified\b|venue-fees|coinbase-fees/.test(fs.readFileSync(S + f, 'utf8')));
+  check(`policy: exits continue: none of ${exitMods.length} exit modules reads fee verification`, exitMods.length >= 6 && reads.length === 0, reads.join(', '));
+
   vf.stop();
   console.log(`\nph92unit: ${fails ? `${fails} FAIL` : 'all passed'}`);
   process.exit(fails ? 1 : 0);

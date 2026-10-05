@@ -6,7 +6,8 @@
 // time, so cost gates, stop floors, break-even, paper fills and the waterfall use what the venue really charges.
 // Read-only (no orders), only for a venue whose keys are configured; at boot then every REFRESH_MS. A failed read is
 // EXPLICIT: status() keeps the error and time, the log warns once per failure, and the rates in force stay (the last
-// verified ones, else the .env / default entry tier, labelled unverified). Tests stub the two connectors.
+// verified ones, else the .env / default entry tier, labelled unverified) for at most cost-authority.VERIFIED_MAX_AGE_MS
+// (24 h) after the last good read; then expireStaleFees raises them to the higher of those and the fallback. Tests stub the two connectors.
 const cost = require('../risk/cost-authority');
 
 const REFRESH_MS = 6 * 60 * 60 * 1000;
@@ -51,7 +52,11 @@ const pct = (x) => `${(x * 100).toFixed(2)}%`;
 async function refresh(venue, now = Date.now()) {
   const R = READERS[venue];
   if (!R) throw new Error(`venue-fees: unknown venue ${venue}`);
-  if (!R.configured()) { last[venue] = { ok: false, at: now, error: 'no API keys configured', tier: null, pairs: [] }; return last[venue]; }
+  if (!R.configured()) { // keys removed: no read possible, so a cached verified rate also ages out (fee-failure policy)
+    last[venue] = { ok: false, at: now, error: 'no API keys configured', tier: null, pairs: [] };
+    cost.expireStaleFees(venue, now);
+    return last[venue];
+  }
   try {
     const { rows, tier } = await R.read();
     const maker = Math.max(...rows.map((x) => x.maker));
@@ -62,6 +67,7 @@ async function refresh(venue, now = Date.now()) {
     console.log(`[venue-fees] ${R.label} account fees${tier ? ` (${tier})` : ''}: maker ${pct(maker)} / taker ${pct(taker)}`);
   } catch (err) {
     last[venue] = { ok: false, at: now, error: String(err.message || err).slice(0, 200), tier: null, pairs: [] };
+    if (cost.expireStaleFees(venue, now)) console.warn(`[venue-fees] ${R.label}: last verified rates older than ${cost.VERIFIED_MAX_AGE_MS / 3600000} h; new entries now costed at the higher fallback`);
     const f = cost.feeInfo(venue);
     console.warn(`[venue-fees] ${R.label} fee lookup failed (${last[venue].error}); using ${pct(f.maker)} / ${pct(f.taker)} (${f.source})`);
   }

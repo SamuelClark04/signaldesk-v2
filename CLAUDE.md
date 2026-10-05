@@ -253,7 +253,10 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   source, at, verified }. Fallback until a read succeeds: KRAKEN_* / OKX_* in .env, else the rates verified on this account 2026-10-04 (Kraken
   0.40 / 0.80%, OKX US Lv1 0.20 / 0.35%, Coinbase Intro 0.50 / 0.90%), labelled unverified; the old 0.25 / 0.40% and 0.08 / 0.10% were never
   verified and too low. A failed lookup is explicit (status error + time, a log warning; Settings > waterfall shows "Fees UNVERIFIED" or "last
-  lookup failed" in amber); the last verified rates stay in force. OKX US lists NO BTC-USD / ETH-USD book: BTC-USD routes to BTC-USDC (settles
+  lookup failed" in amber). Fee-failure policy: the last verified rates stay in force for at most 24 h
+  (cost-authority.VERIFIED_MAX_AGE_MS) after the last good read; past that, while reads fail (or the keys are gone), expireStaleFees sets the
+  HIGHER of the last verified and the fallback rates, labelled "stale" / unverified, so a lower cached tier never keeps passing new-entry cost
+  checks; exits never consult fee verification (only their fee estimates use the rates in force). The same rule applies to Coinbase. OKX US lists NO BTC-USD / ETH-USD book: BTC-USD routes to BTC-USDC (settles
   in USD / USDC / USDG / RLUSD; only USD / USDC / USDT are counted as spendable), else BTC-USDT (USDT). Kit suites that test routing / cost
   arithmetic written for the old rates pin them via the .env overrides. Evidence: docs/research/phase92-fee-verification.md. Test: tests/ph92unit.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
