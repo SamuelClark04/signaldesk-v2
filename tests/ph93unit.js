@@ -111,6 +111,9 @@ const bars = (n, t0 = 1790000000, step = 60) => Array.from({ length: n }, (_, i)
   const out = require(S + 'research/decision-serialize').lines(huge, () => false, () => {});
   const sl = JSON.parse(out.lines[0]);
   check('a series line over 512 KB keeps its newest 500 rows, flagged truncated', out.truncated && sl.truncated && sl.rows.length === 500, `${sl.rows.length}`);
+  T.statusDue(); rec.record('STAGED', 'st-1', { candidate: cand('st-1') }); await rec.flush();
+  const stl = readLines().filter((x) => x.type === 'status').pop();
+  check('a status line (drops / errors / missing inputs) is written into the day file every 10 min, so the audit archive carries it', stl && Number.isFinite(stl.dropped) && Number.isFinite(stl.writeErrors) && Number.isFinite(stl.missingContext));
   rec.record('STAGED', 'off-1', { candidate: cand('off-1') });
   process.env.DECISIONS_RECORDER = 'off';
   check('DECISIONS_RECORDER=off disables recording (status says so)', rec.record('STAGED', 'off-2', { candidate: cand('off-2') }) === false && rec.status().enabled === false);

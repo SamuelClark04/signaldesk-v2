@@ -20,6 +20,7 @@ const MAX_QUEUE = 5000;
 const FLUSH_MS = 5000;
 const SLICE_MS = 10;
 const REPEAT_EVERY_MS = 15 * 60 * 1000;
+const STATUS_EVERY_MS = 10 * 60 * 1000; // a { type: 'status' } line in the day file: drops / errors reach the audit archive
 const MAX_SEEN = 20000;
 const KEEP_DAYS = 180;
 const LIFECYCLE = new Set(['STAGED', 'APPROVAL_HOLD', 'APPROVAL_REJECT', 'APPROVED', 'USER_REJECT', 'EXPIRED', 'OPENED', 'ROUTE_FAILED', 'FILLED', 'VOIDED', 'CLOSED']);
@@ -37,6 +38,7 @@ let seq = 0;
 const st = { recordedToday: 0, byPath: {}, dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, missingContext: 0, recordErrors: 0,
   lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null };
 let lastWarn = 0;
+let lastStatusAt = 0;
 
 const enabled = () => String(process.env.DECISIONS_RECORDER || '').toLowerCase() !== 'off';
 const dir = () => process.env.DECISIONS_DIR || path.dirname(process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json'));
@@ -103,6 +105,9 @@ const codeVersion = () => { if (code === null) { try { code = require('../versio
 
 // Serialize the batch in time slices (never one long synchronous loop), then ONE append per day file.
 async function flush() {
+  if (!writing && clock() - lastStatusAt >= STATUS_EVERY_MS && (queue.length || st.dropped || st.writeErrors || st.recordedToday)) {
+    lastStatusAt = clock(); push({ type: 'status', at: lastStatusAt, ...status() });
+  }
   if (writing || !queue.length) return;
   writing = true;
   const io = fsp; // one fs for the whole flush (a swap mid-flush never mixes writers)
@@ -156,8 +161,8 @@ const status = () => ({ enabled: enabled(), ...st, byPath: { ...st.byPath }, que
 
 // Tests only.
 const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => { fsp = f || fs.promises; }, reset: () => {
-  queue = []; seen = new Map(); day = null; seq = 0; writing = false; lastWarn = 0; ser.writtenSeries.clear();
+  queue = []; seen = new Map(); day = null; seq = 0; writing = false; lastWarn = 0; lastStatusAt = Infinity; ser.writtenSeries.clear();
   Object.assign(st, { recordedToday: 0, byPath: {}, dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, missingContext: 0, recordErrors: 0, lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null }); },
-  queue: () => queue };
+  queue: () => queue, statusDue: () => { lastStatusAt = 0; } };
 
 module.exports = { record, flush, start, stop, status, prune, LIFECYCLE, OBSERVED, MAX_QUEUE, REPEAT_EVERY_MS, _test };
