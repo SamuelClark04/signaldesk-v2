@@ -247,6 +247,19 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   strategy's test record, copied onto every staged setup (paper-ledger.stageOrder), in the email subject and on every card (components/evidence-badge.js).
   Quick Flips radar card: components/quickflip-card.js (contract, why, cost per contract, automatic exits, countdown to the entry deadline). Suites that
   test LIVE paths on mocks set require(S + 'risk/paper-lock').PAPER_ONLY = false first. Test: tests/ph91unit.js. Supersedes the Phase 89 / 89b notes on automatic Quick Flips paper execution (auto-paper) and on every scanner being off by default.
+- **Decision Review (Phase 93)**: spec docs/superpowers/specs/2026-10-05-decision-review-design.md. RECORD-ONLY on the server: research/decision-recorder.js
+  record(path, id, { reason, candidate, guard }) is SYNCHRONOUS, never throws / awaits (a bounded queue, 5,000; overflow drops the oldest, counted); a 5 s
+  unref timer serializes in 10 ms slices (setImmediate) and appends decisions-YYYY-MM-DD.jsonl next to the ledger (DECISIONS_DIR; DECISIONS_RECORDER=off;
+  180-day prune); each distinct bar series ONCE per day file (decision-serialize.js); status() in /api/version + Settings > Strategies footer + a status line
+  every 10 min in the file + vm-audit copies the files. Paths: STRATEGY_BLOCK / PIPELINE_REJECT (deduplicated per id + path + reason bucket: REPEATS
+  lines) and the lifecycle, NEVER deduplicated: STAGED APPROVAL_HOLD APPROVAL_REJECT APPROVED (the click passed every guard, recorded before routing)
+  ROUTE_FAILED USER_REJECT EXPIRED OPENED FILLED VOIDED CLOSED. research/decision-context.js: the four radar strategies hand ALL their inputs (full bar
+  series + signal values) to a bounded id-keyed store BESIDE the candidate (never on it: staged orders go to the ledger and the browser); post-detection
+  filters (ORB_FILTER, QUICKFLIPS_SIGNAL_SKIPPED) are strategy blocks; candidates byte-identical with capture on / off (tests). research/decision-guard.js:
+  the limits a pass decided with. ANALYSIS ON THE PC ONLY: tools/decision-review/run.js <archive folder(s)> writes reports/decision-review-<date>.html
+  (+ .json for a later in-app view; reports/ git-ignored: local and private): direction / timing on the UNDERLYING (fixed classes, spec 5), money apart
+  (LEDGER / FETCHED / ESTIMATE option prints / UNAVAILABLE), the opposite side, rule checks, evidence-only loss causes, pre-decision patterns (BH 10%,
+  n >= 20, provisional bins). Tests: tests/ph93unit.js (+ ph93hooks.js, ph93strategies.js), tests/ph93review.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
