@@ -856,6 +856,10 @@ Status: **implemented on `phase93-decision-review` (PR #2).**
 - **C1 (approved correction):** the decision is the STAGED record, else the rejection that ENDED the setup (ids repeat per symbol per
   day); a later lifecycle event is never the decision, and without a recoverable stagedAt the decision time is MISSING. Checkpoint
   prices use bars completed by the checkpoint;
+- **C1-B (pre-merge fix, 2026-10-06):** the decision's setup, levels, direction, option and chart / signal context come from the SAME
+  record as the decision time (`load.bind`; the report names it: "levels / chart from ..."). A STAGED decision never keeps an earlier
+  rejection's evidence. Without a decision record, the setup comes from the order's own lifecycle record or the LEDGER record, and the
+  chart / signal context is labelled MISSING, never borrowed;
 - **regression checks** for each fix (tests that fail on the PR #2 code and pass after);
 - **a regenerated report** from the same Oct 4 archive + harness file, with a "what changed and why" section: the before / after
   counts, and per setup the fix behind each changed class, label or result;

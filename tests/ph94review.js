@@ -102,6 +102,47 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   const qs = load(tq).decisions; const q1 = qs.find((x) => x.id === 'q1'); const q2 = qs.find((x) => x.id === 'q2');
   check_('C1 (nit): STAGED line lost, opened later -> the recovered setup stagedAt wins over the earlier rejection', q1.t0 === t1030 && /stagedAt/.test(q1.t0Source), `${q1.t0} ${q1.t0Source}`);
   check_('C1 (nit): ... or the LEDGER stagedAt when the events carry none', q2.t0 === t1030 && q2.p0 === null && /LEDGER stagedAt/.test(q2.t0Source), `${q2.t0} ${q2.t0Source}`);
+  // ---------- C1-B: the selected decision's evidence (setup, levels, direction, option, chart / signal context) comes from THAT event ----------
+  const tb = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94b-'));
+  const sA = { ...setup, direction: 'long', setupType: 'ORB', entryPrice: 28, invalidation: 27, targets: [{ price: 30 }], optionsData: { contract: 'A-CALL', debit: 1.1 } };
+  const sB = { ...setup, direction: 'short', setupType: 'BREAKDOWN', entryPrice: 29.5, invalidation: 30.5, targets: [{ price: 27 }], optionsData: { contract: 'B-PUT', debit: 0.9 } };
+  const ctxA = { capturedAt: t8, values: { orbHigh: 28 }, series: [{ key: 'b2:AAPL|1m|bars|aaaa', symbol: 'AAPL', tf: '1m' }] };
+  const ctxB = { capturedAt: t1030, values: { orbLow: 29.6 }, series: [{ key: 'b2:AAPL|1m|bars|bbbb', symbol: 'AAPL', tf: '1m' }] };
+  const ser = (key, close) => ({ type: 'series', key, rows: [[t8, close, close, close, close, 1]] });
+  jsonl(tb, '2026-09-14', [ser('b2:AAPL|1m|bars|aaaa', 28), ser('b2:AAPL|1m|bars|bbbb', 29.5),
+    { type: 'decision', v: 1, id: 'b1', setup: sA, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b1', setup: sB, context: ctxB, at: t1030, path: 'STAGED', price: { last: 29.5 } },
+    { type: 'decision', v: 1, id: 'b2', setup: sA, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b2', setup: sB, at: t1030, path: 'STAGED', price: { last: 29.5 } },
+    { type: 'decision', v: 1, id: 'b3', setup: sA, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b3', setup: { ...sB, stagedAt: t1030 }, at: t1030 + 60000, path: 'OPENED' },
+    { type: 'decision', v: 1, id: 'b4', setup: sA, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b4', setup: sB, at: t1030 + 60000, path: 'OPENED' },
+    { type: 'decision', v: 1, id: 'b5', setup: sA, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b5', setup: sB, context: ctxB, at: t1030, path: 'PIPELINE_REJECT', reason: 'Cost ceiling exceeded', price: { last: 29.5 } }]);
+  fs.writeFileSync(path.join(tb, 'ledger-snapshot.json'), JSON.stringify({ tradeJournal: [{ id: 'b4', asset: 'AAPL', market: 'stocks', strategyId: 'equity-day', direction: 'short',
+    entryPrice: 29.5, invalidation: 30.5, targets: [{ price: 27 }], optionsData: { contract: 'B-PUT', debit: 0.9 }, stagedAt: t1030, approvedAt: t1030 + 30000, openedAt: t1030 + 60000,
+    closedAt: t1030 + 3600000, netPnl: 1, dollarRisk: 10 }], activePositions: [], discardedOrders: [] }));
+  const bs = load(tb).decisions; const B = (id) => bs.find((x) => x.id === id);
+  const ev = (d) => `${d.direction} ${d.setupType} ${d.levels && d.levels.entry} ${d.option && d.option.contract} ${d.context && d.context.capturedAt} [${d.evidenceFrom && d.evidenceFrom.path}]`;
+  const b1 = B('b1');
+  check_('C1-B: STAGED chosen -> direction / setup type / levels / option all from the STAGED record, not the earlier rejection',
+    b1.direction === 'short' && b1.d === -1 && b1.setupType === 'BREAKDOWN' && b1.levels.entry === 29.5 && b1.levels.stop === 30.5 && b1.levels.t1 === 27 && b1.option.contract === 'B-PUT', ev(b1));
+  check_('C1-B: ... and the chart / signal context is the STAGED one (its own series)', b1.context && b1.context.capturedAt === t1030 && b1.context.values.orbLow === 29.6
+    && b1.context.series.length === 1 && b1.context.series[0].key === 'b2:AAPL|1m|bars|bbbb' && b1.context.series[0].data.rows[0][4] === 29.5 && b1.evidenceFrom.path === 'STAGED', ev(b1));
+  const b2 = B('b2');
+  check_('C1-B: STAGED without its own context -> context MISSING (the earlier rejection\'s chart is never borrowed)', b2.context === null && b2.levels.entry === 29.5
+    && b2.missing.some((x) => /decision inputs.*STAGED/.test(x)), `${ev(b2)} | ${b2.missing.join(' / ')}`);
+  const b3 = B('b3');
+  check_('C1-B: STAGED line lost, stagedAt recovered from the opened order -> that order\'s setup, context MISSING', b3.t0 === t1030 && b3.direction === 'short' && b3.levels.entry === 29.5
+    && b3.option.contract === 'B-PUT' && b3.context === null && b3.missing.some((x) => /decision inputs/.test(x)), `${ev(b3)} | ${b3.missing.join(' / ')}`);
+  const b4 = B('b4');
+  check_('C1-B: LEDGER stagedAt recovered -> setup / levels / option from the ledger record, the rejection\'s context dropped', b4.t0 === t1030 && b4.direction === 'short'
+    && b4.levels.entry === 29.5 && b4.option.contract === 'B-PUT' && b4.context === null && b4.evidenceFrom.path === 'LEDGER' && b4.missing.some((x) => /decision inputs/.test(x))
+    && !b4.missing.some((x) => /^decision chart stored|32-bit/.test(x)), `${ev(b4)} | ${b4.missing.join(' / ')}`);
+  const b5 = B('b5');
+  check_('C1-B: never staged -> the ENDING rejection\'s own setup and context, not the first rejection\'s', b5.t0 === t1030 && b5.direction === 'short' && b5.levels.entry === 29.5
+    && b5.context.capturedAt === t1030 && b5.evidenceFrom.path === 'PIPELINE_REJECT' && b5.evidenceFrom.at === t1030, ev(b5));
   const lg = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94l-'));
   const jr = (id, extra) => ({ id, asset: 'AAPL', market: 'stocks', strategyId: 'equity-swing', direction: 'long', entryPrice: 100, invalidation: 95, targets: [{ price: 110 }],
     approvedAt: t0 + 60000, openedAt: t0 + 120000, closedAt: t0 + 86400000, netPnl: 1, dollarRisk: 10, ...extra });
