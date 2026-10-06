@@ -74,7 +74,7 @@ H0="$(sha256sum "$L" | cut -c1-64)"; cp -p "$L" "$OUT/ledger-snapshot.json"; H1=
 for f in paper-runs.json external-holdings.json; do [ -f "server/data/$f" ] && cp -p "server/data/$f" "$OUT/$f"; done
 # Phase 93: the decision recorder's files (last 35 days; read-only copies) + its log warnings, for tools/decision-review on the PC.
 DD="${DECISIONS_DIR:-server/data}"; mkdir -p "$OUT/decisions"
-find "$DD" -maxdepth 1 -name 'decisions-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" ; 2>/dev/null
+find "$DD" -maxdepth 1 -name 'decisions-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" \; 2>/dev/null
 [ -n "$APP" ] && pm2 logs "$APP" --lines 5000 --nostream 2>/dev/null | grep 'decision-recorder' > "$OUT/decisions/recorder-log.txt"
 echo "decision recorder files: $(ls "$OUT/decisions"/decisions-*.jsonl 2>/dev/null | wc -l) day(s), $(cat "$OUT/decisions"/decisions-*.jsonl 2>/dev/null | wc -l) lines; warnings logged: $(wc -l < "$OUT/decisions/recorder-log.txt" 2>/dev/null || echo 0)"
 { echo "original before copy $H0"; echo "original after copy  $H1"; echo "copy                 $(sha256sum "$OUT/ledger-snapshot.json" | cut -c1-64)"
