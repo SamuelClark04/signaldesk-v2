@@ -1,0 +1,69 @@
+# Phase 94 Stage 1: record-only event capture (pilot P1): deploy notes
+
+**Status:** implemented on branch `phase94-capture`, NOT deployed. A deploy needs the user's separate approval.
+Expanding from pilot P1 to universe-v1 needs the user's approval too.
+
+## What it records
+
+Files: `events-YYYY-MM-DD.jsonl` (New York date), next to the ledger (or `EVENTS_DIR`), kept 60 days. The PC archive is the system of
+record. `news-cursor.json` holds the news poll's cursor.
+
+| Kind | What | Source |
+|---|---|---|
+| NEWS | each news document VERSION (id + updated_at) with OUR receipt time `t_recv`, `seenVia` stream / poll, `versionCoverage: OBSERVED_ONLY`, `receipt: POLL_RECEIPT / STREAM_RECEIPT`, `catchUp` after a restart | a tap on the existing news socket (subscription unchanged) + a REST poll for the 24 pilot symbols, every 2 min in market hours (10 min otherwise) |
+| NEWS_GAP | restart gaps: covered (caught up from the saved cursor, at most 24 h) or uncovered | the news poll at start |
+| MACRO_SNAPSHOT | the weekly Forex Factory feed's USD rows with forecast / previous, on each daily refresh | a tap in `macro-calendar.refresh` |
+| EARNINGS_SNAPSHOT | Finnhub earnings calendar (30 days ahead) rows for the pilot symbols with their estimates | one call a day after 07:00 ET |
+| OPTION_MARK | bid / ask, quote age, IV, Greeks + source, DTE, feed (indicative) of contracts the app already quotes, at most once per contract per minute | a tap in `options-data.refreshQuotes` |
+| POLL_STATUS | every news poll (ok / error, cursor, marketOpen) and every failed source (finnhub-earnings, macro-feed) | |
+| STATUS | every 10 min: counters, stall state, and process health (CPU %, RSS / heap MB, event-loop p99 beyond the 20 ms sampling) | the event recorder |
+
+## What it never does
+
+- It never changes the news subscription. `equity-day` reads that stream, so changing it would be a trading change.
+- Nothing in trading reads these files. No strategy input, gate, sizing, exit or approval changes.
+- No network request inside a pipeline pass. The poll and the earnings call run on their own unref'd timers, through net-guard
+  (a slow host fails fast).
+- No key in a URL, and no personal data in any request.
+- A failed or hanging disk write never blocks trading. The queue is bounded, a stall shows in the Settings footer
+  ("write STALLED"), and a retry never duplicates a written file.
+
+## Switches
+
+- `EVENTS_RECORDER=off` starts nothing and records nothing.
+- `EVENTS_DIR` sets another folder.
+
+## After a deploy (when approved)
+
+1. The `[version] running <commit>` line.
+2. `/api/version`: `eventRecorder.enabled: true`, `queued` small, `dropped 0`, `stalled false`.
+3. Settings > Strategies footer: "Event capture: N today · 0 dropped · 0 write errors · last write HH:MM".
+4. After one session: run the pinned vm-audit (Phase 94 copies `events-*.jsonl`, `news-cursor.json` and `watchlist.json`). Then, on the
+   PC: `node tools/event-research/inspect.js <archive>/decisions`.
+
+## Pilot health (correction C4)
+
+A session is HEALTHY only if all of these hold:
+- >= 90% of the expected market-hours polls are present and >= 95% of them ok, with no gap over 10 min;
+- the earnings and macro snapshots were recorded;
+- STATUS lines cover >= 6 of the 7 market hours;
+- no drop, error or stall was added that day;
+- CPU p95, RSS max and event-loop p99 are within `tools/event-research/budget.json` (measured in Task 16).
+
+A quiet day with zero headlines is still healthy. The pilot qualifies after >= 10 sessions, with the LAST 10 all healthy. Expansion
+then still needs the user's approval.
+
+## Rollback
+
+`EVENTS_RECORDER=off` and a restart, or the previous commit via `scripts/rollback-vm.sh`. Event files are separate from the ledger and
+can be left in place.
+
+## Also fixed in vm-audit.sh (found while building this)
+
+The Phase 93 line copying `decisions-*.jsonl` lacked the `\;` that terminates `find -exec`, so `find` failed ("missing argument to
+-exec") and NO decision-recorder file was ever copied into an audit archive. Both copy lines now terminate correctly, verified in a
+temporary folder.
+
+## Measured budget
+
+Filled in by Task 16 from a harness run.

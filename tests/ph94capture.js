@@ -100,9 +100,10 @@ const wipeEvents = () => { const d = process.env.EVENTS_DIR; if (fs.existsSync(d
     && !fs.existsSync(path.join(process.env.EVENTS_DIR, 'events-2026-01-02.jsonl')));
   check('C4 (review): event-loop delay is reported BEYOND the 20 ms sampling interval (an idle loop is not 20 ms of delay)', stl.health.loopP99Ms < 20 && /sampling interval/.test(stl.health.loopNote));
 
-  // (Tasks 11-13 sections follow.)
+  // (Tasks 11-13 sections follow, in tests/ph94capture-news.js, -taps.js and -pilot.js.)
   require('./ph94capture-news')({ S, DIR, DEAD, check, readEvents, wipeEvents, ev })
     .then(() => require('./ph94capture-taps')({ S, DIR, DEAD, check, readEvents, wipeEvents, ev }))
+    .then(() => require('./ph94capture-pilot')({ check }))
     .then(() => { console.log(`\nph94capture: ${fails ? `${fails} FAIL` : 'all passed'}`); process.exit(fails ? 1 : 0); })
     .catch((e) => { console.error(e); process.exit(1); });
 })().catch((e) => { console.error(e); process.exit(1); });
