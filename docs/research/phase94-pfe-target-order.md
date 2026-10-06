@@ -3,7 +3,17 @@
 Status: OPEN, separate from Phase 94. No trading rule is changed by Phase 94.
 
 ## What was seen
-PFE Equity Swing setups showed T1 28.95 and T2 28.05: T2 BELOW T1 for a long.
+
+PFE Equity Swing setups showed T1 28.95 and T2 28.05: T2 BELOW T1 for a long. The cause is GENERAL, not PFE-specific: the Stage 0
+Decision Review flags five Swing setups in the 2026-10-04 archive:
+
+| Setup | T1 | T2 |
+|---|---|---|
+| PFE 10-01 | 28.95 | 28.54 |
+| PFE 10-02 | 28.95 | 28.05 |
+| COIN 09-30 | 208.07 | 190.50 |
+| DIS 10-01 | 107.59 | 106.55 |
+| MU 10-01 | 1108.57 | 1035.81 |
 
 ## Where the levels come from
 - `server/strategies/3-equity-swing.js:102`: `t1 = cents(Math.max(recentHigh, entryMax + risk))` (the prior high, at least 1R).

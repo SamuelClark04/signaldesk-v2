@@ -5,6 +5,7 @@
 const fs = require('fs');
 
 const endOf = (s) => ((s.horizons || []).find((h) => h.key === 'H') || {}).label || null;
+const interimOf = (s) => (s.horizons || []).filter((h) => h.key !== 'H').map((h) => `${h.key} ${h.label}`).join(', ') || null;
 const fmt = (x) => (x === null || x === undefined ? '-' : typeof x === 'number' ? x.toFixed(2) : String(x));
 const tally = (list) => list.reduce((a, s) => { const k = (s.class && s.class.cls) || 'NONE'; a[k] = (a[k] || 0) + 1; return a; }, {});
 
@@ -17,7 +18,7 @@ function compare(oldJ, newJ) {
     if (!o) { changes.push({ id: s.id, origin: s.origin, fields: { added: 'new in this report' }, notes: s.notes || {} }); continue; }
     const f = {};
     const pair = (k, a, b) => { if (fmt(a) !== fmt(b)) f[k] = `${fmt(a)} -> ${fmt(b)}`; };
-    pair('class', o.class && o.class.cls, s.class && s.class.cls); pair('end', endOf(o), endOf(s));
+    pair('class', o.class && o.class.cls, s.class && s.class.cls); pair('end', endOf(o), endOf(s)); pair('interim', interimOf(o), interimOf(s));
     pair('money', o.money && o.money.rNet, s.money && s.money.rNet); pair('opposite', o.opposite && o.opposite.label, s.opposite && s.opposite.label);
     pair('rule', o.rule && o.rule.verdict, s.rule && s.rule.verdict); pair('t0', o.t0, s.t0);
     if (Object.keys(f).length) changes.push({ id: s.id, origin: s.origin, fields: f, notes: s.notes || {} });

@@ -62,9 +62,11 @@ function readRecorded(files) {
   }
   for (const d of out.values()) {
     d.events.sort((a, b) => a.at - b.at);
-    const decision = d.events.find((e) => DECISION_PATHS.includes(e.path));
+    // C1 (review): ids repeat per symbol per day, so an EARLIER rejection (pre-market MARKET_CLOSED, a morning block) is not this decision.
+    // The decision is the STAGED event when there is one, else the LAST strategy block / pipeline rejection (the one that ended it).
+    const decision = d.events.find((e) => e.path === 'STAGED') || [...d.events].reverse().find((e) => DECISION_PATHS.includes(e.path));
     const staged = d.events.map((e) => msOf(e.setup && e.setup.stagedAt)).find(Number.isFinite);
-    if (decision) { d.t0 = decision.at; d.p0 = decision.price; d.t0Source = 'RECORDED (first decision record)'; }
+    if (decision) { d.t0 = decision.at; d.p0 = decision.price; d.t0Source = decision.path === 'STAGED' ? 'RECORDED (the STAGED record)' : `RECORDED (the ${decision.path} that ended it)`; }
     else if (staged) { d.t0 = staged; d.t0Source = 'RECORDED setup stagedAt (the decision record itself was not captured)'; }
     else { d.t0 = null; d.t0Source = MISSING_T0; }
     const firstAt = (paths) => { const e = d.events.find((x) => paths.includes(x.path)); return e ? e.at : null; };

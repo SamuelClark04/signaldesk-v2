@@ -70,7 +70,7 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   const v = check(g1);
   check_('S0-3: the rule check uses the REJECTING event\'s own guard (macro active at the approval), not the first event\'s', v && v.verdict === 'CONSISTENT', JSON.stringify(v));
   check_('S0-3: recorded events keep their guard', g1.events.every((e) => e.guard && Number.isFinite(e.guard.at)));
-  check_('S0-3: recorded times: decision = the STAGED record, approval / entry / close separate', g1.t0 === t0 && g1.times.decision === t0 && g1.t0Source === 'RECORDED (first decision record)');
+  check_('S0-3: recorded times: decision = the STAGED record, approval / entry / close separate', g1.t0 === t0 && g1.times.decision === t0 && g1.t0Source === 'RECORDED (the STAGED record)');
   // ---------- C1: a later lifecycle event is never the decision ----------
   const tc = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94c1-'));
   jsonl(tc, '2026-09-15', [{ type: 'decision', v: 1, id: 'c1', setup: { ...setup, stagedAt: t0 - 3600000 }, at: t0 + 86400000, path: 'CLOSED', reason: 'STOP_LOSS' },
@@ -80,6 +80,16 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   check_('C1: only a CLOSED event recorded -> the decision time is recovered from the setup\'s own stagedAt, never the close', c1.t0 === t0 - 3600000 && /stagedAt/.test(c1.t0Source) && c1.times.close === t0 + 86400000, `${c1.t0} ${c1.t0Source}`);
   check_('C1: only a CLOSED event and no stagedAt -> decision time MISSING (not the close time)', c2.t0 === null && /^MISSING/.test(c2.t0Source), `${c2.t0} ${c2.t0Source}`);
   check_('C1: only an APPROVED event -> MISSING too (an approval is not the decision)', c3.t0 === null && /^MISSING/.test(c3.t0Source) && c3.times.approved === t0 + 3000);
+  // C1 (review): an EARLIER rejection of the same id (pre-market MARKET_CLOSED, a morning block) is not the decision when it was STAGED later.
+  const tr = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94e-'));
+  const t8 = T.at('2026-09-14', 8 * 60); const t1030 = T.at('2026-09-14', 10 * 60 + 30);
+  jsonl(tr, '2026-09-14', [{ type: 'decision', v: 1, id: 'e1', setup, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'e1', setup, at: t1030, path: 'STAGED', price: { last: 29.5 } }, { type: 'decision', v: 1, id: 'e1', setup, at: t1030 + 60000, path: 'OPENED' },
+    { type: 'decision', v: 1, id: 'e2', setup, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'e2', setup, at: t1030, path: 'PIPELINE_REJECT', reason: 'Cost ceiling exceeded', price: { last: 29.5 } }]);
+  const es = load(tr).decisions; const e1 = es.find((x) => x.id === 'e1'); const e2 = es.find((x) => x.id === 'e2');
+  check_('C1: staged later -> the STAGED event is the decision (not the 08:00 pre-market rejection)', e1.t0 === t1030 && e1.p0 === 29.5 && /STAGED/.test(e1.t0Source), `${e1.t0} ${e1.p0} ${e1.t0Source}`);
+  check_('C1: never staged -> the decision is the rejection that ENDED it (the last one), not the first', e2.t0 === t1030 && e2.p0 === 29.5, `${e2.t0} ${e2.p0} ${e2.t0Source}`);
   const lg = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94l-'));
   const jr = (id, extra) => ({ id, asset: 'AAPL', market: 'stocks', strategyId: 'equity-swing', direction: 'long', entryPrice: 100, invalidation: 95, targets: [{ price: 110 }],
     approvedAt: t0 + 60000, openedAt: t0 + 120000, closedAt: t0 + 86400000, netPnl: 1, dollarRisk: 10, ...extra });

@@ -99,7 +99,7 @@ async function one(d, macro) {
   bars.setCache(path.join(outDir, '.cache'));
   const all = new Map(); const metas = [];
   for (const [list, origin] of [[dirs, 'ACCOUNT'], [harnessDirs, 'HARNESS']]) for (const dir of list) { // keyed by origin: the two sets never merge
-    const L = load(dir, { origin }); metas.push(L);
+    const L = load(dir, { origin }); metas.push({ ...L, origin });
     for (const d of L.decisions) { const k = `${origin}|${d.id}`; if (!all.has(k) || all.get(k).source !== 'RECORDED') all.set(k, d); }
   }
   let macro = [];
@@ -119,9 +119,11 @@ async function one(d, macro) {
       : done ? ['CORRECT_DIRECTION', 'EARLY_ENTRY'].includes(r.cls.cls) : null;
     return { id: r.d.id, feat: r.feat || {}, wrong: decisive, missed };
   }));
-  const st = metas.map((x) => x.recorder.lastStatus).filter(Boolean).sort((a, b) => b.at - a.at)[0];
+  const acctMetas = metas.filter((x) => x.origin === 'ACCOUNT'); const harnessMetas = metas.filter((x) => x.origin === 'HARNESS'); // S0-5 (review)
+  const st = acctMetas.map((x) => x.recorder.lastStatus).filter(Boolean).sort((a, b) => b.at - a.at)[0];
   const meta = { counts: { account: account.length, harness: harness.length }, generated: new Date().toISOString(), archive: dirs.map((x) => path.basename(x)).join(' + '), bars: bars.stats,
-    recorder: { files: metas.reduce((s, x) => s + x.recorder.files, 0), missingRecords: metas.flatMap((x) => x.recorder.missingRecords) },
+    recorder: { files: acctMetas.reduce((s, x) => s + x.recorder.files, 0), missingRecords: acctMetas.flatMap((x) => x.recorder.missingRecords) },
+    harnessRecorder: { files: harnessMetas.reduce((s, x) => s + x.recorder.files, 0) },
     recorderStatus: st ? `${new Date(st.at).toISOString()}: ${st.recordedToday} recorded, ${st.dropped} dropped, ${st.writeErrors + st.serializeErrors} write errors, ${st.missingContext} without inputs` : null };
   const stamp = T.ymd(Date.now());
   const html = path.join(outDir, `decision-review-${stamp}.html`);

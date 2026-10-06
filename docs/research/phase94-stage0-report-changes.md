@@ -43,7 +43,8 @@ The 16 harness examples now appear only in their own report section, outside eve
 1. **One class change (C1: a later event is never the decision).**
    - `adopt:ETH-USD:1790346495832` is an adopted position with no stored decision time. Phase 93 used a later time in its place.
    - Its decision time is now MISSING, so the setup is NOT_MEASURABLE instead of UNCLEAR.
-2. **Interim checkpoint labels on 19 setups (S0-2 / C1).**
+2. **Interim checkpoint labels on 19 setups (S0-2 / C1).** This count comes from the same-data re-run (run 2). A raw Oct 5 vs Oct 6 diff
+   (`compare.js`, which now also diffs the interim labels) finds 20, because one extra change there is data drift.
    - The 5 / 15 / 30 / 60-minute and session-close labels changed: 11 Moonshots, 1 manual crypto, 2 Equity Swing (PFE, COIN) and 5
      Options Spreads (on the underlying).
    - P0 (when no live price was recorded) and every checkpoint price now come from the last bar that FINISHED by that time. Phase
@@ -70,8 +71,19 @@ The 16 harness examples now appear only in their own report section, outside eve
   unfinished-day bars, refetched minutes apart.
 - These numbers are interim by definition: a PENDING setup has no completed result.
 
+## Stage 0 review fixes (end-of-branch review)
+
+- **C1:** ids repeat per symbol per day. A setup rejected earlier (e.g. MARKET_CLOSED before the open) and STAGED later now takes the
+  STAGED record as its decision; a never-staged setup takes the rejection that ENDED it. No account setup in this archive had
+  recorded events, so the counts above are unchanged; recorded data from now on is affected.
+- **S0-5:** the report header and the JSON meta count the ACCOUNT recorder files only (harness files: `meta.harnessRecorder`).
+
 ## Not changed by Stage 0, as agreed
 
 - The crypto 90% coverage rule. 28 crypto trades stay UNCLEAR (coverage), pending a separately specified amendment.
-- PFE's target order: flagged on its cards (`TARGET_ORDER`) and investigated separately (`docs/research/phase94-pfe-target-order.md`).
+- The Swing target order is flagged on its cards (`TARGET_ORDER`) and investigated separately (`docs/research/phase94-pfe-target-order.md`).
+  The report flags FIVE Equity Swing setups, not only PFE: PFE 10-01 and 10-02, COIN 09-30, DIS 10-01 and MU 10-01. The cause is general
+  (the prior high more than 2R above the entry).
+- Option trade-print estimates: 4 market-data requests answered HTTP 403 "OPRA agreement is not signed". Those contracts stay
+  "unavailable" (no quote or print source), as in Phase 93.
 - No trading rule, safeguard or automation change.
