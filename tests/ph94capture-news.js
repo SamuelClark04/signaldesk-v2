@@ -41,8 +41,11 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
     p1.ok && p1.pages === 2 && p1.unreadPagesLeft === true && nc._test.cursor() === Date.parse('2026-10-06T13:53:00Z'), JSON.stringify(p1));
   const p2 = await nc.poll({ now: NOW + 120000 });
   const second = new URL(calls[calls.length - 1].u).searchParams;
-  check('C3: the next poll continues from that cursor (minus the overlap) and reads the article it had not reached (14)',
-    p2.ok && p2.new === 1 && second.get('start') === new Date(Date.parse('2026-10-06T13:53:00Z') - 5 * 60000).toISOString(), JSON.stringify(p2));
+  check('C3: the next poll CONTINUES the unfinished query (same start, the carried page token) and reads the article it had not reached (14)',
+    p2.ok && p2.new === 1 && second.get('page_token') === 'p3' && second.get('start') === new Date(Date.parse('2026-10-06T13:50:00Z') - 5 * 60000).toISOString(), JSON.stringify(p2));
+  const p3 = await nc.poll({ now: NOW + 180000 }); const third = new URL(calls[calls.length - 1].u).searchParams;
+  check('C3: once the carried query is finished, the next poll starts from the cursor minus the overlap', p3.ok && !third.get('page_token')
+    && third.get('start') === new Date(Date.parse('2026-10-06T13:54:00Z') - 5 * 60000).toISOString(), third.get('start'));
   check('news poll: oldest first (sort=asc), the pilot symbols in one request, content included; keys in headers, not the URL', /symbols=SPY%2CQQQ/.test(calls[0].u) && /sort=asc/.test(calls[0].u)
     && /include_content=true/.test(calls[0].u) && !/AKTEST|sec\b/.test(calls[0].u) && calls[0].h['APCA-API-KEY-ID'] === 'AKTEST');
   const saved = JSON.parse(fs.readFileSync(path.join(process.env.EVENTS_DIR, 'news-cursor.json'), 'utf8'));
@@ -57,10 +60,30 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
   check('news lines carry their limits: versionCoverage OBSERVED_ONLY; receipt POLL_RECEIPT / STREAM_RECEIPT (our receipt, not immediate awareness)',
     NE.every((x) => x.versionCoverage === 'OBSERVED_ONLY' && x.receipt === (x.seenVia === 'poll' ? 'POLL_RECEIPT' : 'STREAM_RECEIPT')));
   const PS = readEvents().filter((x) => x.kind === 'POLL_STATUS');
-  check('POLL_STATUS lines: one per poll, ok and error, with the cursor and marketOpen', PS.length === 3 && PS.some((x) => x.ok === false) && PS.every((x) => 'cursor' in x && 'marketOpen' in x));
+  check('POLL_STATUS lines: one per poll, ok and error, with the cursor and marketOpen', PS.length === 4 && PS.some((x) => x.ok === false) && PS.every((x) => 'cursor' in x && 'marketOpen' in x));
+
+  // C3 (review): more than 2 pages inside the overlap must not stall the cursor: the unread page token is carried to the next poll.
+  await ev.flush(); nc._test.reset(); wipeEvents();
+  fs.writeFileSync(path.join(process.env.EVENTS_DIR, 'news-cursor.json'), JSON.stringify({ cursor: Date.parse('2026-10-06T14:00:00Z'), savedAt: Date.parse('2026-10-06T14:00:00Z') }));
+  const crowd = [...Array.from({ length: 120 }, (_, i) => art(1000 + i, '2026-10-06T13:58:00Z')), ...Array.from({ length: 10 }, (_, i) => art(2000 + i, `2026-10-06T14:0${i}:30Z`))];
+  global.fetch = async (u) => { const q = new URL(String(u)).searchParams; const from = Number(q.get('page_token') || 0);
+    const list = crowd.filter((n) => Date.parse(n.updated_at) >= Date.parse(q.get('start'))); const page = list.slice(from, from + 50);
+    return { ok: true, status: 200, json: async () => ({ news: page, next_page_token: from + 50 < list.length ? String(from + 50) : null }) }; };
+  process.env.ALPACA_API_KEY = 'AKTEST'; process.env.ALPACA_API_SECRET = 'sec'; process.env.ALPACA_DATA_BASE_URL = 'http://data.test';
+  let got = 0; for (let k = 0; k < 4; k += 1) { const r = await nc.poll({ now: Date.parse('2026-10-06T14:20:00Z') + k * 120000 }); got += r.new || 0; }
+  check('C3 (review): 120 articles in the overlap + 10 newer: every one is read within 4 polls (the page token is carried, no stall)', got === 130 && nc._test.cursor() === Date.parse('2026-10-06T14:09:30Z'), `${got} ${new Date(nc._test.cursor()).toISOString()}`);
+  // C3 (review): a future time never pushes the cursor ahead of now.
+  nc._test.reset();
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ news: [art(3001, '2030-01-01T00:00:00Z')], next_page_token: null }) });
+  await nc.poll({ now: Date.parse('2026-10-06T14:30:00Z') });
+  check('C3 (review): an article stamped in the future does not move the cursor past now', nc._test.cursor() <= Date.now() + 1000);
+  fs.writeFileSync(path.join(process.env.EVENTS_DIR, 'news-cursor.json'), JSON.stringify({ cursor: Date.parse('2030-01-01T00:00:00Z'), savedAt: Date.now() }));
+  nc._test.reset(); nc._test.resume(Date.parse('2026-10-06T14:30:00Z'));
+  check('C3 (review): a saved cursor in the future is clamped to the start time', nc._test.cursor() === Date.parse('2026-10-06T14:30:00Z'));
+  global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
 
   // C3 restart gaps.
-  wipeEvents(); nc._test.reset();
+  await ev.flush(); wipeEvents(); nc._test.reset();
   const cf = path.join(process.env.EVENTS_DIR, 'news-cursor.json');
   fs.mkdirSync(process.env.EVENTS_DIR, { recursive: true });
   fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 2 * 3600000, savedAt: NOW - 2 * 3600000 }));

@@ -4,10 +4,12 @@
 // LIMITS (kept on every line): a poll sees only the versions that exist when it runs: a revision replaced between two polls is never
 // seen (versionCoverage OBSERVED_ONLY); t_recv is when OUR system received it (receipt POLL_RECEIPT / STREAM_RECEIPT), not when the
 // headline appeared.
-// C3: pagination is never skipped. The cursor advances only to the last article actually READ, so a page limit leaves the rest for the
-// next poll. The cursor persists in <EVENTS_DIR>/news-cursor.json. At start, the gap since the saved cursor is recorded (NEWS_GAP) and
+// C3: pagination is never skipped. A page limit carries the query (its start + page token) to the next poll, which continues it
+// before starting a new one, so a crowd of articles inside the overlap can never stall the poll; the cursor advances only to the
+// newest article actually READ, and never past now. Alpaca's `start` filters on updated_at (checked against the live data API
+// 2026-10-06), so a revised older article is returned by the poll after its revision. The cursor persists in <EVENTS_DIR>/news-cursor.json. At start, the gap since the saved cursor is recorded (NEWS_GAP) and
 // caught up (at most MAX_CATCHUP_MS back; older = an explicit uncovered gap); articles read in catch-up carry catchUp: true. A version
-// is cached as seen ONLY after the recorder accepted it (a refused record is retried by the next poll).
+// is cached as seen ONLY after the recorder accepted it (a refused record is offered again while it is still inside the 5-minute overlap).
 // Timers are unref'd and never run inside a pipeline pass; fetches go through net-guard (a slow host fails fast).
 const fs = require('fs');
 const path = require('path');
@@ -25,6 +27,7 @@ const TIMEOUT_MS = 8000;
 
 let versions = new Map(); // `${id}|${updated_at}` -> true (insertion-ordered: oldest evicted)
 let cursor = null;        // ms: the newest article time READ so far (polls continue from here)
+let carried = null;       // { since, token }: a query whose later pages are still unread (continued by the next poll)
 let startedAt = Date.now();
 let polling = false; let timer = null;
 const st = { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 };
@@ -80,7 +83,7 @@ function resume(now = Date.now()) {
   if (saved.cursor < oldest) {
     rec.record('NEWS_GAP', { reason: 'restart: gap longer than the catch-up limit', from: saved.cursor, to: oldest, covered: false });
     cursor = oldest;
-  } else cursor = saved.cursor;
+  } else cursor = Math.min(saved.cursor, now); // a saved cursor in the future never blanks the polls
   rec.record('NEWS_GAP', { reason: 'restart: catching up from the saved cursor', from: cursor, to: now, covered: true, lastSavedAt: saved.savedAt || null });
 }
 
@@ -91,20 +94,21 @@ async function poll({ now = Date.now() } = {}) {
     if (cursor === null) resume(now);
     const keys = require('../connectors/alpaca-api').dataKeys();
     if (!keys) throw new Error('no Alpaca data keys');
-    const since = new Date(cursor - OVERLAP_MS).toISOString();
-    let token = null; let pages = 0; let fresh = 0; let newest = cursor;
+    const since = carried ? carried.since : new Date(cursor - OVERLAP_MS).toISOString();
+    let token = carried ? carried.token : null; let pages = 0; let fresh = 0; let newest = cursor;
     do {
       const q = new URLSearchParams({ symbols: universe.symbols().join(','), start: since, sort: 'asc', limit: '50', include_content: 'true' });
       if (token) q.set('page_token', token);
       const res = await require('../connectors/net-guard').guardedFetch(`${base()}/v1beta1/news?${q}`,
         { headers: { 'APCA-API-KEY-ID': keys.key, 'APCA-API-SECRET-KEY': keys.secret }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) { if (carried && [400, 422].includes(res.status)) carried = null; throw new Error(`HTTP ${res.status}`); } // an expired page token: restart from the cursor
       const body = await res.json(); const tRecv = Date.now();
       for (const n of body.news || []) { if (observe(n, 'poll', tRecv)) fresh += 1; const t = tOf(n); if (t !== null && t > newest) newest = t; }
       token = body.next_page_token || null; pages += 1;
     } while (token && pages < MAX_PAGES);
-    // C3: the cursor moves only to the newest article READ. With a page limit hit, the unread rest is still after it.
-    cursor = newest;
+    // C3: the cursor moves only to the newest article READ (never past now); unread pages are carried to the next poll.
+    cursor = Math.min(newest, Date.now());
+    carried = token ? { since, token } : null;
     if (token) st.truncatedPolls += 1;
     st.polls += 1; st.lastPollAt = now; st.lastNew = fresh;
     rec.record('POLL_STATUS', { source: 'alpaca-news', ok: true, new: fresh, pages, unreadPagesLeft: !!token, since, cursor, marketOpen: marketOpen(), symbols: universe.VERSION });
@@ -125,7 +129,7 @@ function start() {
 }
 function stop() { if (timer) clearTimeout(timer); timer = null; }
 const status = () => ({ ...st, cursor, versionsKnown: versions.size });
-const _test = { reset: () => { versions = new Map(); cursor = null; startedAt = Date.now(); polling = false;
+const _test = { reset: () => { versions = new Map(); cursor = null; carried = null; startedAt = Date.now(); polling = false;
   Object.assign(st, { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 }); },
   resume: (now) => resume(now), cursor: () => cursor, setStartedAt: (t) => { startedAt = t; } };
 
