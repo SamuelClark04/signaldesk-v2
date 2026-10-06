@@ -72,7 +72,8 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
     } catch (err) {
       fail('writeErrors', err);
       // Only the files NOT written go back on the queue (their entries re-serialize next time); written files are never re-sent.
-      queue = pending.flatMap(([, s]) => s.entries).concat(batch.slice(reached), queue);
+      // every file not written (whether or not its append was attempted) + the entries the loop never reached
+      queue = [...byFile.entries()].filter(([file]) => !written.has(file)).flatMap(([, s]) => s.entries).concat(batch.slice(reached), queue);
       if (queue.length > maxQueue) { st.dropped += queue.length - maxQueue; queue.splice(0, queue.length - maxQueue); }
     } finally {
       try { onCommitted(state, written); } catch (err) { fail('serializeErrors', err); }

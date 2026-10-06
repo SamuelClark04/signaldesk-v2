@@ -121,7 +121,7 @@ const prune = (now = clock()) => sink.prune(now);
 function start() {
   if (timer || !enabled()) return;
   prune();
-  timer = setInterval(() => { flush().catch((err) => { st.flushErrors += 1; warn(`flush failed: ${String(err && err.message).slice(0, 200)}`); }); }, FLUSH_MS);
+  timer = setInterval(() => { flush().catch((err) => { st.flushErrors += 1; st.lastError = `flushErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); }); }, FLUSH_MS);
   if (timer.unref) timer.unref();
 }
 function stop() { if (timer) clearInterval(timer); timer = null; }
