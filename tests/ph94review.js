@@ -90,6 +90,18 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   const es = load(tr).decisions; const e1 = es.find((x) => x.id === 'e1'); const e2 = es.find((x) => x.id === 'e2');
   check_('C1: staged later -> the STAGED event is the decision (not the 08:00 pre-market rejection)', e1.t0 === t1030 && e1.p0 === 29.5 && /STAGED/.test(e1.t0Source), `${e1.t0} ${e1.p0} ${e1.t0Source}`);
   check_('C1: never staged -> the decision is the rejection that ENDED it (the last one), not the first', e2.t0 === t1030 && e2.p0 === 29.5, `${e2.t0} ${e2.p0} ${e2.t0Source}`);
+  // C1 (review nit): the STAGED line was lost (e.g. a queue drop) but the setup was later opened: a recovered stagedAt AFTER the earlier
+  // rejection wins over that rejection (event setup.stagedAt, or the LEDGER's stagedAt).
+  const tq = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94q-'));
+  jsonl(tq, '2026-09-14', [{ type: 'decision', v: 1, id: 'q1', setup, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'q1', setup: { ...setup, stagedAt: t1030 }, at: t1030 + 60000, path: 'OPENED' },
+    { type: 'decision', v: 1, id: 'q2', setup, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'q2', setup, at: t1030 + 60000, path: 'OPENED' }]);
+  fs.writeFileSync(path.join(tq, 'ledger-snapshot.json'), JSON.stringify({ tradeJournal: [{ id: 'q2', asset: 'AAPL', market: 'stocks', strategyId: 'equity-day', direction: 'long', entryPrice: 100,
+    invalidation: 99, targets: [{ price: 102 }], stagedAt: t1030, approvedAt: t1030 + 30000, openedAt: t1030 + 60000, closedAt: t1030 + 3600000, netPnl: 1, dollarRisk: 10 }], activePositions: [], discardedOrders: [] }));
+  const qs = load(tq).decisions; const q1 = qs.find((x) => x.id === 'q1'); const q2 = qs.find((x) => x.id === 'q2');
+  check_('C1 (nit): STAGED line lost, opened later -> the recovered setup stagedAt wins over the earlier rejection', q1.t0 === t1030 && /stagedAt/.test(q1.t0Source), `${q1.t0} ${q1.t0Source}`);
+  check_('C1 (nit): ... or the LEDGER stagedAt when the events carry none', q2.t0 === t1030 && q2.p0 === null && /LEDGER stagedAt/.test(q2.t0Source), `${q2.t0} ${q2.t0Source}`);
   const lg = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94l-'));
   const jr = (id, extra) => ({ id, asset: 'AAPL', market: 'stocks', strategyId: 'equity-swing', direction: 'long', entryPrice: 100, invalidation: 95, targets: [{ price: 110 }],
     approvedAt: t0 + 60000, openedAt: t0 + 120000, closedAt: t0 + 86400000, netPnl: 1, dollarRisk: 10, ...extra });
