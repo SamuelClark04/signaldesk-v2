@@ -43,8 +43,8 @@ function oppositeBlock(r) {
   const parts = [];
   if (od) parts.push(`direction ${pill(od.label, LABEL_TONE[od.label])} at the planned end`);
   if (o && o.unavailable) parts.push(esc(o.unavailable));
-  else if (o && o.filled === false) parts.push(`trade not filled: ${esc(o.why)}`);
-  else if (o && o.filled) parts.push(`${pill(o.tier, 'src')} net ${n2(o.rNet)}R${o.contract ? ` · contract P&amp;L: ${esc(o.contract)}` : ''}`);
+  else if (o && o.filled === false) parts.push(`mirrored trade not filled: ${esc(o.why)}`);
+  else if (o && o.filled) parts.push(`mirrored entry ${n2(o.rawFill, 4)} · ${pill(o.tier, 'src')} net ${n2(o.rNet)}R${o.contract ? ` · contract P&amp;L: ${esc(o.contract)}` : ''}`);
   return `<div><b>Opposite side</b> ${parts.join(' · ')}</div>`;
 }
 

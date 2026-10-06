@@ -52,7 +52,8 @@ function measures(R) {
     ['Options: underlying proxy (not an option result)', money(R.filter((r) => r.d.market === 'options'), (r) => r.money && r.money.rNet)]];
   const oppRows = groups.map(([g, f]) => { const xs = R.filter(f); const od = xs.map((r) => r.oppDir && r.oppDir.label).filter(Boolean);
     const both = xs.filter((r) => r.money && r.money.filled && r.opp && r.opp.filled); // the SAME setups on both sides (options: underlying proxies)
-    return [g, od.filter((x) => x === 'CORRECT').length, od.filter((x) => x === 'WRONG').length, money(both, (r) => r.money.rNet), money(both, (r) => r.opp.rNet)]; });
+    const unfilled = (k) => xs.filter((r) => r[k] && r[k].filled === false).length; // S0-4: unfilled sides are counted, never dropped
+    return [g, od.filter((x) => x === 'CORRECT').length, od.filter((x) => x === 'WRONG').length, money(both, (r) => r.money.rNet), money(both, (r) => r.opp.rNet), `${unfilled('money')} / ${unfilled('opp')}`]; });
   const rules = new Map();
   for (const r of R.filter((x) => x.guard)) { const k = `${r.guard.rule}|${r.guard.verdict}`; const e = rules.get(k) || { n: 0, avoided: 0, missed: 0 }; e.n += 1;
     const end = r.endLabel; if (end === 'WRONG') e.avoided += 1; if (end === 'CORRECT') e.missed += 1; rules.set(k, e); }
@@ -61,7 +62,7 @@ function measures(R) {
   return `<section><h2>Direction accuracy (underlying only)</h2>${table(['Group', 'Horizon', 'Correct', 'Wrong', 'Flat', 'No data / pending', 'Correct of decisive [95%]'], dirRows)}`
     + `<h2>Completed outcome classes</h2>${table(['Class', 'Accepted', 'Rejected', 'Definition'], clsRows)}`
     + `<h2>Trade profitability (kept apart from direction)</h2>${table(['Result', 'n · mean · total'], profRows)}`
-    + `<h2>Opposite side (fixed rules, the same costs)</h2>${table(['Group', 'Opposite direction correct', 'Opposite wrong', 'Original trade (simulated, same setups)', 'Opposite trade (simulated, same setups)'], oppRows)}`
+    + `<h2>Opposite side (the same entry opportunity: mirrored levels, the same window, costs and allocation)</h2>${table(['Group', 'Opposite direction correct', 'Opposite wrong', 'Original trade (simulated, both filled)', 'Opposite trade (simulated, both filled)', 'Unfilled (original / opposite)'], oppRows)}`
     + `<h2>Did each rejection follow its rule?</h2>${ruleRows.length ? table(['Rule', 'Verdict', 'Setups', 'Went against the call (avoided)', 'Went the called way (missed)'], ruleRows) : '<p class="sub">No rejections in this data.</p>'}`
     + `<h2>Direction correct but the trade lost: causes the records support</h2>${causes.size ? table(['Cause', 'Setups'], [...causes].map(([c, n]) => [pill(c, c === 'UNATTRIBUTED' ? 'muted' : 'warn'), n])) : '<p class="sub">None.</p>'}</section>`;
 }
