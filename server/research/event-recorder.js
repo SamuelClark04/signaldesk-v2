@@ -12,6 +12,7 @@ const FLUSH_MS = 5000;
 const KEEP_DAYS = 60;
 const MAX_TEXT = 64 * 1024;
 const STATUS_EVERY_MS = 10 * 60 * 1000;
+const LOOP_RESOLUTION_MS = 20; // the event-loop monitor's sampling interval: an idle loop reads about this much
 
 let clock = () => Date.now();
 let timer = null;
@@ -35,7 +36,9 @@ function record(kind, data) {
     if (!enabled() || !KINDS.has(kind)) return false;
     const now = clock(); const d = nyDay(now);
     if (st.day !== d) { st.day = d; st.recordedToday = 0; st.byKind = {}; sink.resetDay(); }
-    sink.push({ v: 1, kind, at: now, ...(data && typeof data === 'object' ? data : {}) });
+    // review: the recorder's own v / kind / at always win (data cannot re-file a line under another kind or day); a source time
+    // belongs in its own field (t_recv, created_at, ...).
+    sink.push({ ...(data && typeof data === 'object' ? data : {}), v: 1, kind, at: now });
     st.recordedToday += 1; st.byKind[kind] = (st.byKind[kind] || 0) + 1;
     return true;
   } catch (err) { st.recordErrors += 1; st.lastError = `recordErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); return false; }
@@ -55,12 +58,16 @@ function health() {
   if (cpuMark && now > cpuMark.at) cpuPct = Math.round(((usage.user - cpuMark.usage.user + usage.system - cpuMark.usage.system) / 1000 / (now - cpuMark.at)) * 1000) / 10;
   cpuMark = { at: now, usage };
   let loopP99Ms = null; let loopMaxMs = null;
-  if (loopHist) { loopP99Ms = Math.round(loopHist.percentile(99) / 1e4) / 100; loopMaxMs = Math.round(loopHist.max / 1e4) / 100; loopHist.reset(); }
-  return { scope: 'whole server process', cpuPct, rssMb: Math.round(mem.rss / 1e5) / 10, heapMb: Math.round(mem.heapUsed / 1e5) / 10, loopP99Ms, loopMaxMs };
+  // review: reported as delay BEYOND the sampling interval (an idle loop reads ~LOOP_RESOLUTION_MS), floored at 0
+  const excess = (ns) => Math.max(0, Math.round(ns / 1e4) / 100 - LOOP_RESOLUTION_MS);
+  if (loopHist) { loopP99Ms = excess(loopHist.percentile(99)); loopMaxMs = excess(loopHist.max); loopHist.reset(); }
+  return { scope: 'whole server process', cpuPct, rssMb: Math.round(mem.rss / 1e5) / 10, heapMb: Math.round(mem.heapUsed / 1e5) / 10, loopP99Ms, loopMaxMs,
+    loopNote: `event-loop delay beyond the ${LOOP_RESOLUTION_MS} ms sampling interval; the first moments after each STATUS line are not sampled` };
 }
 
 async function flush() {
-  if (clock() - lastStatusAt >= STATUS_EVERY_MS) { lastStatusAt = clock(); sink.push({ v: 1, kind: 'STATUS', at: lastStatusAt, ...status(), health: health() }); }
+  if (enabled() && clock() - lastStatusAt >= STATUS_EVERY_MS) { // review: no STATUS line while recording is off
+    lastStatusAt = clock(); sink.push({ v: 1, kind: 'STATUS', at: lastStatusAt, ...status(), health: health() }); }
   return sink.flush();
 }
 function start() {
@@ -74,6 +81,6 @@ function start() {
 function stop() { if (timer) clearInterval(timer); timer = null; if (loopHist) { loopHist.disable(); loopHist = null; } }
 
 const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => sink.setFs(f), statusDue: () => { lastStatusAt = 0; }, reset: () => {
-  sink.reset(); lastWarn = 0; lastStatusAt = Infinity; Object.assign(st, { recordedToday: 0, byKind: {}, recordErrors: 0, lastError: null, lastErrorAt: null, day: null }); } };
+  sink.reset(); lastWarn = 0; lastStallWarn = 0; cpuMark = null; lastStatusAt = Infinity; Object.assign(st, { recordedToday: 0, byKind: {}, recordErrors: 0, lastError: null, lastErrorAt: null, day: null }); } };
 
 module.exports = { record, flush, start, stop, status, health, text, KINDS, KEEP_DAYS, _test };

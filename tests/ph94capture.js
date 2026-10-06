@@ -91,7 +91,14 @@ const wipeEvents = () => { const d = process.env.EVENTS_DIR; if (fs.existsSync(d
     && Number.isFinite(stl.health.rssMb) && Number.isFinite(stl.health.heapMb) && 'loopP99Ms' in stl.health && 'cpuPct' in stl.health && 'stalled' in stl, JSON.stringify(stl && stl.health));
   const ver = require(S + 'version').report({});
   check('/api/version carries the event recorder status', ver.eventRecorder && Number.isFinite(ver.eventRecorder.dropped) && ver.eventRecorder.recordedToday >= 2001);
-  process.env.EVENTS_RECORDER = 'off'; check('EVENTS_RECORDER=off disables recording', ev.record('NEWS', {}) === false); delete process.env.EVENTS_RECORDER;
+  process.env.EVENTS_RECORDER = 'off'; check('EVENTS_RECORDER=off disables recording', ev.record('NEWS', {}) === false);
+  const before10 = readEvents().filter((x) => x.kind === 'STATUS').length; ev._test.statusDue(); await ev.flush();
+  check('event recorder (review): no STATUS line is written while recording is off', readEvents().filter((x) => x.kind === 'STATUS').length === before10);
+  delete process.env.EVENTS_RECORDER;
+  ev.record('NEWS', { kind: 'BOGUS', at: Date.parse('2026-01-02T12:00:00Z'), v: 9, headline: 'x' }); await ev.flush();
+  check('event recorder (review): data cannot override kind / at / v (no BOGUS line, no other day file)', !readEvents().some((x) => x.kind === 'BOGUS' || x.v === 9)
+    && !fs.existsSync(path.join(process.env.EVENTS_DIR, 'events-2026-01-02.jsonl')));
+  check('C4 (review): event-loop delay is reported BEYOND the 20 ms sampling interval (an idle loop is not 20 ms of delay)', stl.health.loopP99Ms < 20 && /sampling interval/.test(stl.health.loopNote));
 
   // (Tasks 11-13 sections follow.)
   require('./ph94capture-news')({ S, DIR, DEAD, check, readEvents, wipeEvents, ev })
