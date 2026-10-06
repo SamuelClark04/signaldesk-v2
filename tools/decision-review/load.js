@@ -48,9 +48,15 @@ function bind(d, ev, what, series) {
   const old = boundNotes.get(d) || []; d.missing = d.missing.filter((m) => !old.includes(m));
   const notes = []; const s = ev.setup; const c = ev.context;
   d.evidenceFrom = { path: ev.path, at: Number.isFinite(ev.at) ? ev.at : null, record: what };
-  if (s) Object.assign(d, { strategyId: s.strategyId || d.strategyId, symbol: s.asset || d.symbol, market: s.market || d.market, d: dirOf(s.direction), direction: s.direction || 'long',
-    setupType: s.setupType, timeframe: s.timeframe, expectedDuration: s.expectedDuration, thesis: s.thesis, levels: levelsOf(s), option: s.optionsData || null, evidence: s.evidence });
-  else { Object.assign(d, { d: null, direction: null, levels: null, option: null }); notes.push(`setup / levels / direction / option at the decision: not recorded with ${what}`); }
+  if (s) {
+    const dir = s.direction === 'long' || s.direction === 'short' ? s.direction : null; // never defaulted: an absent direction is MISSING
+    Object.assign(d, { strategyId: s.strategyId || d.strategyId, symbol: s.asset || d.symbol, market: s.market || d.market, d: dir ? dirOf(dir) : null, direction: dir,
+      setupType: s.setupType, timeframe: s.timeframe, expectedDuration: s.expectedDuration, thesis: s.thesis, levels: levelsOf(s), option: s.optionsData || null, evidence: s.evidence });
+    if (!dir) notes.push(`direction at the decision: not recorded with ${what}`);
+  } else {
+    Object.assign(d, { d: null, direction: null, levels: null, option: null, setupType: null, timeframe: null, expectedDuration: null, thesis: null, evidence: null });
+    notes.push(`setup / levels / direction / option at the decision: not recorded with ${what}`);
+  }
   d.context = c ? { capturedAt: c.capturedAt, values: c.values, refs: c.series || [] } : null;
   if (d.context) {
     d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
@@ -87,10 +93,10 @@ function readRecorded(files) {
     // The decision is the STAGED event when there is one, else the LAST strategy block / pipeline rejection (the one that ended it).
     let decision = d.events.find((e) => e.path === 'STAGED') || [...d.events].reverse().find((e) => DECISION_PATHS.includes(e.path));
     const staged = d.events.map((e) => msOf(e.setup && e.setup.stagedAt)).find(Number.isFinite);
-    // The STAGED line was lost (e.g. a queue drop) but the setup went on to be approved / opened: a stagedAt AFTER the chosen rejection
-    // is the real decision; the rejection was an earlier, separate one (review nit).
+    // The STAGED line was lost (e.g. a queue drop) but the setup went on (approved / opened, or expired / rejected at approval / by
+    // you): a stagedAt AFTER the chosen rejection is the real decision; the rejection was an earlier, separate one (review nit, C1-B review).
     d.acceptedAfterReject = !!decision && decision.path !== 'STAGED' && d.events.some((e) => ['APPROVED', 'OPENED', 'FILLED', 'CLOSED'].includes(e.path) && e.at > decision.at);
-    if (d.acceptedAfterReject && staged && staged > decision.at) decision = null;
+    if (decision && decision.path !== 'STAGED' && staged && staged > decision.at) decision = null;
     // C1-B: the evidence comes from the same record as the decision time. Without a decision record, the order's own lifecycle record
     // carries the staged setup (never a chart / signal context: those ride only on the decision records).
     if (decision) {

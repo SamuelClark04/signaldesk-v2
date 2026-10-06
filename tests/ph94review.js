@@ -143,6 +143,26 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   const b5 = B('b5');
   check_('C1-B: never staged -> the ENDING rejection\'s own setup and context, not the first rejection\'s', b5.t0 === t1030 && b5.direction === 'short' && b5.levels.entry === 29.5
     && b5.context.capturedAt === t1030 && b5.evidenceFrom.path === 'PIPELINE_REJECT' && b5.evidenceFrom.at === t1030, ev(b5));
+  // C1-B (review): a lost STAGED line followed by ANY later record of the staged order (here EXPIRED) recovers the decision from that
+  // record's stagedAt; a selected record without a setup, or without a direction, leaves nothing from an earlier record behind.
+  const tb2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94b2-'));
+  jsonl(tb2, '2026-09-14', [
+    { type: 'decision', v: 1, id: 'b6', setup: { ...sA, thesis: 'morning thesis' }, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED', price: { last: 28 } },
+    { type: 'decision', v: 1, id: 'b6', setup: { ...sB, stagedAt: t1030 }, at: t1030 + 900000, path: 'EXPIRED' },
+    { type: 'decision', v: 1, id: 'b7', setup: { ...sA, thesis: 'morning thesis', timeframe: '5m', evidence: { label: 'A-EVID' } }, context: ctxA, at: t8, path: 'PIPELINE_REJECT', reason: 'MARKET_CLOSED' },
+    { type: 'decision', v: 1, id: 'b7', setup: null, at: t1030, path: 'STAGED' },
+    { type: 'decision', v: 1, id: 'b8', setup: {}, at: t1030, path: 'STAGED' }]);
+  const bs2 = load(tb2).decisions; const B2 = (id) => bs2.find((x) => x.id === id);
+  const b6 = B2('b6');
+  check_('C1-B (review): STAGED line lost, the order later EXPIRED -> decision = its stagedAt, evidence from the EXPIRED record, not the 08:00 rejection',
+    b6.t0 === t1030 && /stagedAt/.test(b6.t0Source) && b6.direction === 'short' && b6.levels.entry === 29.5 && b6.evidenceFrom.path === 'EXPIRED' && b6.context === null, `${b6.t0} ${b6.t0Source} ${ev(b6)}`);
+  const b7 = B2('b7');
+  check_('C1-B (review): the selected STAGED record has no setup -> setup type / thesis / timeframe / evidence cleared and labelled MISSING, not the rejection\'s',
+    b7.t0 === t1030 && b7.setupType == null && b7.thesis == null && b7.timeframe == null && b7.evidence == null && b7.direction === null && b7.levels === null
+    && b7.missing.some((x) => /setup .* not recorded with the selected STAGED/.test(x)), `${ev(b7)} ${b7.thesis} | ${b7.missing.join(' / ')}`);
+  const b8 = B2('b8');
+  check_('C1-B (review): a setup without a direction -> direction MISSING (never defaulted to long)', b8.direction === null && b8.d === null
+    && b8.missing.some((x) => /direction/.test(x)), `${b8.direction} ${b8.d} | ${b8.missing.join(' / ')}`);
   const lg = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94l-'));
   const jr = (id, extra) => ({ id, asset: 'AAPL', market: 'stocks', strategyId: 'equity-swing', direction: 'long', entryPrice: 100, invalidation: 95, targets: [{ price: 110 }],
     approvedAt: t0 + 60000, openedAt: t0 + 120000, closedAt: t0 + 86400000, netPnl: 1, dollarRisk: 10, ...extra });
