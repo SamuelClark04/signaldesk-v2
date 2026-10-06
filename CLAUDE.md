@@ -260,6 +260,21 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   (+ .json for a later in-app view; reports/ git-ignored: local and private): direction / timing on the UNDERLYING (fixed classes, spec 5), money apart
   (LEDGER / FETCHED / ESTIMATE option prints / UNAVAILABLE), the opposite side, rule checks, evidence-only loss causes, pre-decision patterns (BH 10%,
   n >= 20, provisional bins). Tests: tests/ph93unit.js (+ ph93hooks.js, ph93strategies.js), tests/ph93review.js.
+- **Phase 94 Stage 0 (PR #2 accuracy fixes; spec docs/superpowers/specs/2026-10-05-event-research-layer-design.md 16.1, plan
+  docs/superpowers/plans/2026-10-06-phase94-stage0-1.md)**:
+  - Evidence: decision-context copies bars into FROZEN objects (unchanged bars reused across captures for memory); series are keyed by a
+    sha256 of the stored body (b2: / r2:; legacy b: / r: labelled).
+  - Pre-decision values and checkpoint prices use bars that ENDED by that time (measure.closeBefore); recorded strategy inputs come first.
+  - Every staged / rejection / approval-time event records its OWN guard (decision-guard.snapshot; the pass guard is set before
+    strategy blocks; dc.block filters are guard-exempt).
+  - The decision is the STAGED record, else the rejection that ended the setup; a later lifecycle event is never the decision (stagedAt
+    recovered, else MISSING); decision / approved / entry / close times are kept separate.
+  - The opposite side is MIRRORED on the same entry opportunity; unfilled sides are counted.
+  - `--harness` folders never enter account statistics; the crypto coverage rule is unchanged; Swing T2-below-T1 is flagged
+    (docs/research/phase94-pfe-target-order.md).
+  - Change report: tools/decision-review/compare.js + docs/research/phase94-stage0-report-changes.md.
+  - vm-audit.sh: find -exec needs `\;` (the Phase 93 line copied NO decision file).
+  - Tests: tests/ph94unit.js, tests/ph94review.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.

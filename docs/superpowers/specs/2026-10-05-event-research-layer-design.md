@@ -215,6 +215,12 @@ For each universe company, a reviewed file lists its relationships. Each entry c
     fees.
   - None is called an achieved fill.
 - **Option trade prints stay ESTIMATES** (Phase 93), and are never mixed into quote-based results.
+- **Checked 2026-10-06** (read-only, docs/research/phase94-entitlements.md):
+  - news `start` filters on updated_at (the news cursor relies on it);
+  - option trade bars exist before Feb 2024 for at least one contract (coverage is checked per contract);
+  - Finnhub's all-US earnings calendar answer was capped at 1,500 rows, so the snapshot queries each capture symbol;
+  - OPRA is not available (agreement not signed);
+  - there are no historical option quotes.
 
 ## 5. Time, availability and real-time entry timing
 
@@ -826,14 +832,16 @@ Each stage gets its own plan and your approval before code. VM stages also need 
 | 8 | PC | V run (optional) + forward evaluation of frozen proposals in the daily report | pre-stated criteria only |
 | 9 | VM + PC | crypto adapter | as Stages 1-8 |
 
-### 16.1 Stage 0: the PR #2 accuracy fixes (your list): PLANNED, NOT YET IMPLEMENTED
+### 16.1 Stage 0: the PR #2 accuracy fixes (your list): IMPLEMENTED 2026-10-06, regression checks passing
 
-Status as of 2026-10-06: **planned.**
-- The problems below were found by reading the PR #2 code. The PR #2 code still behaves as described in the right-hand column.
-- A fix counts as done only when it is implemented AND its regression checks (tests that fail on the current code) pass. The PR and
-  this table will then say so.
+Status: **implemented on `phase93-decision-review` (PR #2).**
+- Each fix has regression checks that failed on the Phase 93 code and pass now: tests/ph94unit.js (S0-1) and tests/ph93hooks.js (S0-3
+  server); tests/ph94review.js (S0-2, S0-3, S0-4, S0-5, C1).
+- Each server change was approved by an independent reviewer, and the analyzer changes by an end-of-branch review.
+- The regenerated report and its attributed changes: docs/research/phase94-stage0-report-changes.md.
+- Not merged, not deployed.
 
-| # | Planned fix | Where in PR #2 (found while planning) |
+| # | Fix (implemented) | Where in PR #2 (found while planning) |
 |---|---|---|
 | S0-1 | **Captured chart evidence is immutable, and deduplicated by its complete stored contents.** | `decision-context.capture` copies the bar ARRAY but keeps the bar OBJECTS by reference, so a bar the stream later updates changes the evidence before it is written. `decision-serialize.seriesLine` keys a series by name / count / first and last time / last close / volume, so two different series with the same endpoints share one stored copy. Fix: copy each bar into a fresh frozen row at capture; key = sha256 of the stored series body (`b2:` / `r2:`). The analyzer labels legacy `b:` keys "EVIDENCE_KEY_V1: may be ambiguous". |
 | S0-2 | **No future price in pre-decision calculations; recorded inputs first.** | `measure.priceAt` (P0 fallback), `atrBefore`, `dailyAtr`, `patterns.features` (session / SPY VWAP, gap) and the chart's pre-decision part use bars whose START is before t0. That includes the unfinished t0 minute bar and the decision day's daily bar, which hold later prices. Fix: a bar is usable only if its END is at or before t0. Pre-decision values come first from the RECORDED strategy inputs, then from FETCHED complete bars, labelled. |
@@ -842,6 +850,12 @@ Status as of 2026-10-06: **planned.**
 | S0-5 | **Harness examples are separate from account statistics. Crypto coverage stays UNCLEAR. PFE target order is investigated separately.** | `run.js` merges every input folder into one set. Fix: an input is ACCOUNT (vm-audit archive) or HARNESS (`--harness <dir>`), decided by the command, not guessed. HARNESS records are excluded from every count, statistic and pattern, and shown in their own "harness examples" section. The crypto 90% coverage rule is unchanged (a test pins it). PFE's T2-below-T1 becomes a report flag + a separate investigation note; no trading change. |
 
 **Also in Stage 0:**
+- **guard exemption:** strategy-internal post-detection filters recorded through `decision-context.block` (ORB_FILTER,
+  QUICKFLIPS_SIGNAL_SKIPPED) carry no guard snapshot; their rule checks use their own recorded signal values. Every other decision event
+  carries its own snapshot, the pipeline's taken before any rejection of the pass is recorded;
+- **C1 (approved correction):** the decision is the STAGED record, else the rejection that ENDED the setup (ids repeat per symbol per
+  day); a later lifecycle event is never the decision, and without a recoverable stagedAt the decision time is MISSING. Checkpoint
+  prices use bars completed by the checkpoint;
 - **regression checks** for each fix (tests that fail on the PR #2 code and pass after);
 - **a regenerated report** from the same Oct 4 archive + harness file, with a "what changed and why" section: the before / after
   counts, and per setup the fix behind each changed class, label or result;
