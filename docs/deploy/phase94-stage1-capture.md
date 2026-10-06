@@ -64,6 +64,24 @@ The Phase 93 line copying `decisions-*.jsonl` lacked the `\;` that terminates `f
 -exec") and NO decision-recorder file was ever copied into an audit archive. Both copy lines now terminate correctly, verified in a
 temporary folder.
 
-## Measured budget
+## Measured budget (Task 16, 2026-10-06)
 
-Filled in by Task 16 from a harness run.
+Browser harness on the PC, 15 minutes in market hours, pilot P1, the same code (7284967), sampled every 30 s:
+
+| Measure | Value |
+|---|---|
+| Whole-process CPU (one core) | p95 4.1%, mean 2.6% |
+| RSS (whole process) | max 333 MB |
+| Event-loop p99 beyond the 20 ms sampling | ~14 ms (STATUS lines) |
+| Recorders | 0 drops, 0 write errors, 0 stalls; no event-loop warning in the log |
+| Written | ~100 KB in 15 min: 152 option marks (12 open paper contracts), 12 news versions, 9 polls, 1 macro snapshot, 1 news gap |
+
+**Projected size:**
+- Per market day: marks ~700 B x open contracts x 390 min (12 contracts: ~3.3 MB) + news ~3.5 KB per version (pilot: ~1 MB) = about
+  **4-5 MB / day**.
+- The full universe roughly multiplies the news part by 5: about **7-9 MB / day**.
+- 60-day retention on the VM: under ~0.6 GB.
+
+**Health limits:** `tools/event-research/budget.json`, PROVISIONAL: CPU p95 80% of one core, RSS 600 MB, event-loop p99 200 ms.
+- They are sized for the e2-micro, NOT measured on it.
+- Re-set them from the first VM pilot sessions; `inspect.js` prints the measured values.

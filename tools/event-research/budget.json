@@ -1,0 +1,8 @@
+{
+ "cpuPctP95Max": 80,
+ "rssMbMax": 600,
+ "loopP99MsMax": 200,
+ "status": "PROVISIONAL",
+ "measured": "2026-10-06 browser harness on the PC (15 min, market hours, pilot P1): whole-process CPU p95 4.1% (mean 2.6%), RSS max 333 MB, event-loop p99 ~14 ms beyond the 20 ms sampling; recorders 0 drops / 0 write errors / 0 stalls; ~100 KB written in 15 min",
+ "rationale": "The PC is not the VM (e2-micro: 0.25 vCPU sustained, 1 GB RAM). The limits flag saturation on the VM: CPU p95 at 80% of one core, RSS at 600 MB (well below swapping on 1 GB), event-loop p99 at 200 ms beyond sampling. Re-set them from the first VM pilot sessions (inspect.js prints the measured values); a change is committed with its reason."
+}
