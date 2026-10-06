@@ -11,12 +11,13 @@ const path = require('path');
 
 const STALL_MS = 30 * 1000;
 
-function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, maxQueue = 5000, sliceMs = 10, keepDays = 180, stallMs = STALL_MS, clock = () => Date.now(), warn = () => {} }) {
+function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, maxQueue = 5000, sliceMs = 10, keepDays = 180, stallMs = STALL_MS, clock = () => Date.now(), warn = () => {}, warnStall = warn }) {
   let queue = [];
   let writing = false;
   let writingSince = null;
   let stallEpisode = false;
   let fsp = fs.promises;
+  const truncCounted = new WeakSet(); // an entry re-serialized after a failed write is not counted as truncated twice
   const st = { dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, stalls: 0, lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null };
   const fail = (kind, err) => { st[kind] += 1; st.lastError = `${kind}: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); };
   const fileOf = (at) => path.join(dir(), `${prefix}-${dayOf(at)}.jsonl`);
@@ -31,7 +32,7 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
     const ms = stalledFor();
     if (ms > stallMs) {
       if (!stallEpisode) { stallEpisode = true; st.stalls += 1; }
-      warn(`write STALLED for ${Math.round(ms / 1000)} s (${queue.length} record(s) queued; recording continues in memory, capped at ${maxQueue})`);
+      warnStall(`write STALLED for ${Math.round(ms / 1000)} s (${queue.length} record(s) queued; recording continues in memory, capped at ${maxQueue})`);
     }
   }
 
@@ -45,14 +46,19 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
     const state = {};
     const written = new Set();
     let pending = [];
+    let reached = 0; // entries the serialize loop got to (the rest go back on the queue if anything throws)
     try {
       let since = Date.now();
       for (const e of batch) {
         if (Date.now() - since > sliceMs) { await new Promise((r) => setImmediate(r)); since = Date.now(); }
-        const file = fileOf(e.at || clock());
-        if (!byFile.has(file)) byFile.set(file, { lines: [], entries: [] });
-        const slot = byFile.get(file);
-        try { const out = serialize(e, file, state); if (out.truncated) st.truncated += 1; slot.lines.push(...out.lines); slot.entries.push(e); } catch (err) { fail('serializeErrors', err); }
+        reached += 1;
+        try { // review: a bad entry (an unformattable time, an unserializable value) costs only THAT entry
+          const file = fileOf(e.at || clock());
+          if (!byFile.has(file)) byFile.set(file, { lines: [], entries: [] });
+          const out = serialize(e, file, state);
+          if (out.truncated && !truncCounted.has(e)) { st.truncated += 1; truncCounted.add(e); }
+          byFile.get(file).lines.push(...out.lines); byFile.get(file).entries.push(e);
+        } catch (err) { fail('serializeErrors', err); }
       }
       pending = [...byFile.entries()].filter(([, s]) => s.lines.length);
       await io.mkdir(dir(), { recursive: true });
@@ -66,7 +72,7 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
     } catch (err) {
       fail('writeErrors', err);
       // Only the files NOT written go back on the queue (their entries re-serialize next time); written files are never re-sent.
-      queue = pending.flatMap(([, s]) => s.entries).concat(queue);
+      queue = pending.flatMap(([, s]) => s.entries).concat(batch.slice(reached), queue);
       if (queue.length > maxQueue) { st.dropped += queue.length - maxQueue; queue.splice(0, queue.length - maxQueue); }
     } finally {
       try { onCommitted(state, written); } catch (err) { fail('serializeErrors', err); }

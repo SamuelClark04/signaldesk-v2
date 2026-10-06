@@ -32,7 +32,7 @@ let seen = new Map(); // key -> { id, path, bucket, count, emitted, firstAt, las
 let day = null;
 let timer = null;
 let seq = 0;
-const st = { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, lastError: null, lastErrorAt: null };
+const st = { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, flushErrors: 0, lastError: null, lastErrorAt: null };
 let lastWarn = 0;
 let lastStatusAt = 0;
 
@@ -41,14 +41,19 @@ const dir = () => process.env.DECISIONS_DIR || path.dirname(process.env.LEDGER_S
 const nyDay = (ms) => { try { return require('../services/et-time').ymd(ms); } catch { return new Date(ms).toISOString().slice(0, 10); } };
 const bucketOf = (reason) => { try { return reason ? require('../execution/rejection-stats').bucket(String(reason)) : null; } catch { return null; } };
 const warn = (msg) => { const n = clock(); if (n - lastWarn >= 5 * 60 * 1000) { lastWarn = n; console.warn(`[decision-recorder] ${msg}`); } };
+let lastStallWarn = 0; // its own limiter: a queue-full or write-error warning never hides a STALL
+const warnStall = (msg) => { const n = clock(); if (n - lastStallWarn >= 5 * 60 * 1000) { lastStallWarn = n; console.warn(`[decision-recorder] ${msg}`); } };
 function fail(err) { st.recordErrors += 1; st.lastError = `recordErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); }
 
 // Each distinct bar series ONCE per day file: the keys are committed only for the files actually written (C2).
-const sink = createSink({ prefix: 'decisions', dir, dayOf: nyDay, maxQueue: MAX_QUEUE, keepDays: KEEP_DAYS, clock: () => clock(), warn,
+const sink = createSink({ prefix: 'decisions', dir, dayOf: nyDay, maxQueue: MAX_QUEUE, keepDays: KEEP_DAYS, clock: () => clock(), warn, warnStall,
   serialize: (e, file, state) => {
     state.byFile = state.byFile || new Map(); if (!state.byFile.has(file)) state.byFile.set(file, new Set());
     const fresh = state.byFile.get(file);
-    return ser.lines(e, (k) => ser.writtenSeries.has(`${file}|${k}`) || fresh.has(k), (k) => fresh.add(k)); },
+    // review: keys are marked written only once the WHOLE entry serialized (a decision line that throws leaves no dangling key)
+    const added = []; const out = ser.lines(e, (k) => ser.writtenSeries.has(`${file}|${k}`) || fresh.has(k) || added.includes(k), (k) => added.push(k));
+    for (const k of added) fresh.add(k);
+    return out; },
   onCommitted: (state, written) => { for (const [file, keys] of state.byFile || []) if (written.has(file)) for (const k of keys) ser.markWritten(`${file}|${k}`); } });
 function push(entry) { sink.push(entry); }
 
@@ -116,20 +121,20 @@ const prune = (now = clock()) => sink.prune(now);
 function start() {
   if (timer || !enabled()) return;
   prune();
-  timer = setInterval(() => { flush().catch((err) => fail(err)); }, FLUSH_MS);
+  timer = setInterval(() => { flush().catch((err) => { st.flushErrors += 1; warn(`flush failed: ${String(err && err.message).slice(0, 200)}`); }); }, FLUSH_MS);
   if (timer.unref) timer.unref();
 }
 function stop() { if (timer) clearInterval(timer); timer = null; }
 function status() {
   const s = sink.status();
   const mineNewer = (st.lastErrorAt || 0) > (s.lastErrorAt || 0);
-  return { enabled: enabled(), ...s, ...st, byPath: { ...st.byPath }, lastError: mineNewer ? st.lastError : s.lastError, lastErrorAt: mineNewer ? st.lastErrorAt : s.lastErrorAt, dir: dir() };
+  return { enabled: enabled(), ...s, ...st, writeErrors: s.writeErrors + st.flushErrors, byPath: { ...st.byPath }, lastError: mineNewer ? st.lastError : s.lastError, lastErrorAt: mineNewer ? st.lastErrorAt : s.lastErrorAt, dir: dir() };
 }
 
 // Tests only.
 const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => sink.setFs(f), reset: () => {
   sink.reset(); seen = new Map(); day = null; seq = 0; lastWarn = 0; lastStatusAt = Infinity; ser.writtenSeries.clear();
-  Object.assign(st, { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, lastError: null, lastErrorAt: null }); },
+  lastStallWarn = 0; Object.assign(st, { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, flushErrors: 0, lastError: null, lastErrorAt: null }); },
   queue: () => sink.queue(), statusDue: () => { lastStatusAt = 0; } };
 
 module.exports = { record, flush, start, stop, status, prune, LIFECYCLE, OBSERVED, MAX_QUEUE, REPEAT_EVERY_MS, _test };
