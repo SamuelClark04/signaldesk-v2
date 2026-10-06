@@ -66,9 +66,10 @@ function card(r) {
     d.option ? `<div><b>Contract</b> ${esc(d.option.label || d.option.contract || '')}${d.option.bid ? ` · recorded bid / ask ${d.option.bid} / ${d.option.ask}` : ''}${d.option.delta != null ? ` · delta ${d.option.delta}` : ''}</div>` : ''].join('');
   const rule = r.guard ? `<div><b>Rule check</b> ${pill(r.guard.verdict, r.guard.verdict === 'INCONSISTENT' ? 'bad' : r.guard.verdict === 'CONSISTENT' ? 'good' : 'muted')} ${esc(r.guard.rule)}: ${esc(r.guard.evidence)}</div>` : '';
   const att = r.attr ? `<div><b>Why it lost anyway</b> ${r.attr.causes.map((c) => `${pill(c.cause, c.cause === 'UNATTRIBUTED' ? 'muted' : 'warn')} ${esc(c.evidence)}`).join('<br>')}</div>` : '';
+  const flags = (r.flags || []).map((f) => `<div class="missing"><b>Flag:</b> ${esc(f)}</div>`).join(''); // Phase 94 S0-5
   const missing = d.missing.length ? `<div class="missing"><b>Not recorded:</b> ${d.missing.map(esc).join(' · ')}</div>` : '';
   const chart = svg({ pre: r.chart.pre, post: r.chart.post, t0: d.t0, levels: d.levels, p0: m && m.p0, d: d.d, preLabel, postLabel: r.chart.postSource });
-  return `<article class="card ${tone}">${head}<div class="badges">${badges}</div>${why}<p class="sub">${esc(r.cls.why)}</p>${horizonTable(m)}${moneyBlock(r)}${oppositeBlock(r)}${rule}${att}${missing}${chart}</article>`;
+  return `<article class="card ${tone}">${head}<div class="badges">${badges}</div>${why}${flags}<p class="sub">${esc(r.cls.why)}</p>${horizonTable(m)}${moneyBlock(r)}${oppositeBlock(r)}${rule}${att}${missing}${chart}</article>`;
 }
 
 module.exports = { card, when, n2, pill, CLS_TONE, LABEL_TONE };

@@ -80,9 +80,9 @@ svg.chart{width:100%;height:auto;margin-top:8px}.wick{stroke-width:1}.wick.pre,.
 .lvl{stroke-dasharray:4 3;stroke-width:1}.lvl.entry{stroke:var(--src)}.lvl.stop{stroke:var(--bad)}.lvl.t1,.lvl.t2{stroke:var(--good)}.lvl-t{font-size:10px}.lvl-t.entry{fill:var(--src)}.lvl-t.stop{fill:var(--bad)}.lvl-t.t1,.lvl-t.t2{fill:var(--good)}
 .t0{stroke:var(--fg);stroke-width:1;stroke-dasharray:2 2}.ax{font-size:10px;fill:var(--muted)}a{color:var(--src)}`;
 
-function render(R, P, meta) {
+function render(R, P, meta, { harness = [] } = {}) {
   const by = (f) => R.filter(f).length;
-  const head = `<h1>Decision Review</h1><p class="sub">Generated ${esc(meta.generated)} from ${esc(meta.archive)} · local and private (not published) · ${R.length} setups:`
+  const head = `<h1>Decision Review</h1><p class="sub">Generated ${esc(meta.generated)} from ${esc(meta.archive)} · local and private (not published) · ${R.length} setups (account data only; ${harness.length} harness example(s) listed separately at the end):`
     + ` ${by((r) => r.d.source === 'RECORDED')} RECORDED, ${by((r) => r.d.source === 'LEDGER')} LEDGER, ${by((r) => r.d.source === 'RECONSTRUCTED')} RECONSTRUCTED.`
     + ` Direction and timing are judged on the underlying chart; money results are kept separate and labelled by price source.</p>`
     + `<p class="sub">Recorder: ${meta.recorder.files ? `${meta.recorder.files} day file(s); latest status: ${esc(meta.recorderStatus || 'none')}` : 'no recorder files in this archive (all setups are reconstructed from the ledger and logs)'}`
@@ -94,7 +94,8 @@ function render(R, P, meta) {
   const cards = [...R].sort((a, b) => (order[a.d.outcome.group] - order[b.d.outcome.group]) || ((b.d.t0 || 0) - (a.d.t0 || 0))).map(card).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Decision Review</title><style>${CSS}</style></head><body>`
     + `${head}${questions(R, P)}${measures(R)}<section><h2>Incomplete setups (a direction, no executable levels): horizon labels only</h2>${incTable}</section>`
-    + `<section><h2>Every setup</h2>${cards}</section></body></html>`;
+    + `<section><h2>Every setup</h2>${cards}</section>`
+    + `<section><h2>Harness examples (test environment, NOT account data): ${harness.length}</h2><p class="sub">Shown only to illustrate the recorder; excluded from every count, statistic and pattern above.</p>${harness.map(card).join('') || '<p class="sub">None.</p>'}</section></body></html>`;
 }
 
 module.exports = { render };

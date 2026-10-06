@@ -18,8 +18,9 @@ const { render } = require('./render');
 
 const args = process.argv.slice(2);
 const outDir = args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(ROOT, 'reports');
-const dirs = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--out');
-if (!dirs.length) { console.log('usage: node tools/decision-review/run.js <extracted archive folder> [...] [--out reports]'); process.exit(2); }
+const harnessDirs = args.flatMap((a, i) => (args[i - 1] === '--harness' ? [a] : [])); // Phase 94 S0-5: test-harness examples, never account data
+const dirs = args.filter((a, i) => !a.startsWith('--') && !['--out', '--harness'].includes(args[i - 1]));
+if (!dirs.length) { console.log('usage: node tools/decision-review/run.js <extracted archive folder> [...] [--harness <folder>] [--out reports]'); process.exit(2); }
 const today = T.ymd(Date.now());
 const daysAround = (t0, before, after) => { const d0 = T.ymd(t0); const back = []; let t = T.at(d0, 12 * 60); while (back.length < before) { t -= T.DAY; const wd = new Date(t).getUTCDay(); if (wd > 0 && wd < 6) back.unshift(T.ymd(t)); } return [...back, d0, ...T.nextWeekdays(d0, after)].filter((d) => d <= today); };
 const isIntraday = (d) => d.market === 'crypto' || ['equity-day', 'options-quickflips'].includes(d.strategyId) || tfMinutes(d.timeframe) < 390;
@@ -78,6 +79,7 @@ async function one(d, macro) {
   r.overlay = r.cls.cls === 'CORRECT_DIRECTION' && contract && contract.rNet < 0;
   r.attr = attribute(d, r.m, r.cls.cls, contract);
   r.guard = check(d);
+  r.flags = [require('./origin').targetOrderFlag(d)].filter(Boolean);
   r.feat = pat.features(d, r.m, { minute: rin.minute || minute, daily: rin.daily || daily, spyMinute, spyDaily, macro });
   // The chart: BEFORE the decision as the app saw it (RECORDED when captured), AFTER it to the planned end (FETCHED).
   const intraday = isIntraday(d);
@@ -96,7 +98,10 @@ async function one(d, macro) {
   fs.mkdirSync(outDir, { recursive: true });
   bars.setCache(path.join(outDir, '.cache'));
   const all = new Map(); const metas = [];
-  for (const dir of dirs) { const L = load(dir); metas.push(L); for (const d of L.decisions) if (!all.has(d.id) || all.get(d.id).source !== 'RECORDED') all.set(d.id, d); }
+  for (const [list, origin] of [[dirs, 'ACCOUNT'], [harnessDirs, 'HARNESS']]) for (const dir of list) { // keyed by origin: the two sets never merge
+    const L = load(dir, { origin }); metas.push(L);
+    for (const d of L.decisions) { const k = `${origin}|${d.id}`; if (!all.has(k) || all.get(k).source !== 'RECORDED') all.set(k, d); }
+  }
   let macro = [];
   try { macro = require(path.join(ROOT, 'server/services/macro-calendar')).events().map((e) => e.releaseTime).filter(Number.isFinite); } catch { macro = []; }
   const list = [...all.values()];
@@ -106,7 +111,8 @@ async function one(d, macro) {
     R.push(await one(d, macro));
     if ((i + 1) % 10 === 0) console.log(`  ${i + 1} / ${list.length}`);
   }
-  const P = pat.analyze(R.map((r) => {
+  const { account, harness } = require('./origin').partition(R); // S0-5: statistics from ACCOUNT data only
+  const P = pat.analyze(account.map((r) => {
     const done = !['UNCLEAR', 'PENDING', 'NOT_MEASURABLE'].includes(r.cls.cls);
     const decisive = r.cls.cls === 'INCOMPLETE' ? (['CORRECT', 'WRONG'].includes(r.endLabel) ? r.endLabel === 'WRONG' : null) : done ? ['WRONG_DIRECTION', 'LATE_ENTRY'].includes(r.cls.cls) : null;
     const missed = r.d.outcome.group !== 'REJECTED' ? null : r.cls.cls === 'INCOMPLETE' ? (['CORRECT', 'WRONG'].includes(r.endLabel) ? r.endLabel === 'CORRECT' : null)
@@ -114,17 +120,18 @@ async function one(d, macro) {
     return { id: r.d.id, feat: r.feat || {}, wrong: decisive, missed };
   }));
   const st = metas.map((x) => x.recorder.lastStatus).filter(Boolean).sort((a, b) => b.at - a.at)[0];
-  const meta = { generated: new Date().toISOString(), archive: dirs.map((x) => path.basename(x)).join(' + '), bars: bars.stats,
+  const meta = { counts: { account: account.length, harness: harness.length }, generated: new Date().toISOString(), archive: dirs.map((x) => path.basename(x)).join(' + '), bars: bars.stats,
     recorder: { files: metas.reduce((s, x) => s + x.recorder.files, 0), missingRecords: metas.flatMap((x) => x.recorder.missingRecords) },
     recorderStatus: st ? `${new Date(st.at).toISOString()}: ${st.recordedToday} recorded, ${st.dropped} dropped, ${st.writeErrors + st.serializeErrors} write errors, ${st.missingContext} without inputs` : null };
   const stamp = T.ymd(Date.now());
   const html = path.join(outDir, `decision-review-${stamp}.html`);
-  fs.writeFileSync(html, render(R, P, meta));
+  fs.writeFileSync(html, render(account, P, meta, { harness }));
   fs.writeFileSync(path.join(outDir, `decision-review-${stamp}.json`), JSON.stringify({ meta, patterns: { ...P, tests: P.tests.map(({ ids, ...t }) => t) },
-    setups: R.map((r) => ({ id: r.d.id, source: r.d.source, strategy: r.d.strategyId, symbol: r.d.symbol, direction: r.d.direction, t0: r.d.t0, outcome: r.d.outcome, class: r.cls, overlay: !!r.overlay,
-      horizons: r.m && r.m.horizons ? r.m.horizons.map((h) => ({ key: h.key, label: h.label, m: h.m })) : null, money: r.money ? { tier: r.money.tier, rNet: r.money.rNet, filled: r.money.filled } : null,
+    setups: [...account, ...harness].map((r) => ({ id: r.d.id, origin: r.d.origin, flags: r.flags || [], notes: { p0Source: r.m && r.m.p0Source, inputsSource: r.m && r.m.inputsSource,
+        t0Source: r.d.t0Source, oppRule: r.opp && r.opp.rule, legacyEvidenceKeys: !!(r.d.context && r.d.context.legacyKeys) }, source: r.d.source, strategy: r.d.strategyId, symbol: r.d.symbol, direction: r.d.direction, t0: r.d.t0, outcome: r.d.outcome, class: r.cls, overlay: !!r.overlay,
+      horizons: r.m && r.m.horizons ? r.m.horizons.map((h) => ({ key: h.key, label: h.label, m: h.m })) : null, money: r.money ? { tier: r.money.tier, rNet: r.money.rNet, filled: r.money.filled } : null, oppTrade: r.opp ? { rule: r.opp.rule, rNet: r.opp.rNet, filled: r.opp.filled } : null,
       realized: r.d.realized ? { rNet: r.d.realized.rNet, netPnl: r.d.realized.netPnl } : null, opposite: r.oppDir, rule: r.guard, causes: r.attr, missing: r.d.missing })) }, null, 1));
-  const c = (k) => R.filter((r) => r.cls.cls === k).length;
-  console.log(`done: ${html}\n  classes: correct ${c('CORRECT_DIRECTION')}, wrong ${c('WRONG_DIRECTION')}, early ${c('EARLY_ENTRY')}, late ${c('LATE_ENTRY')}, reversal ${c('REVERSAL_AFTER_ENTRY')}, unclear ${c('UNCLEAR')}, incomplete ${c('INCOMPLETE')}, pending ${c('PENDING')}, not measurable ${c('NOT_MEASURABLE')}`);
+  const c = (k) => account.filter((r) => r.cls.cls === k).length;
+  console.log(`done: ${html}\n  account setups ${account.length} (harness examples ${harness.length}, listed separately)\n  classes: correct ${c('CORRECT_DIRECTION')}, wrong ${c('WRONG_DIRECTION')}, early ${c('EARLY_ENTRY')}, late ${c('LATE_ENTRY')}, reversal ${c('REVERSAL_AFTER_ENTRY')}, unclear ${c('UNCLEAR')}, incomplete ${c('INCOMPLETE')}, pending ${c('PENDING')}, not measurable ${c('NOT_MEASURABLE')}`);
   console.log(`  market data: ${bars.stats.requests} requests, ${bars.stats.cacheHits} cached, ${bars.stats.errors} errors`);
 })().catch((e) => { console.error('decision review failed:', e.message); process.exit(1); });

@@ -93,7 +93,7 @@ function finish(d) {
   return d;
 }
 
-function load(dir) {
+function load(dir, { origin = 'ACCOUNT' } = {}) { // Phase 94 S0-5: ACCOUNT (vm-audit archive) or HARNESS (--harness)
   const files = walk(dir);
   const find = (name) => files.find((f) => path.basename(f) === name);
   const rec = readRecorded(files.filter((f) => /^decisions-\d{4}-\d{2}-\d{2}\.jsonl$/.test(path.basename(f))));
@@ -152,6 +152,7 @@ function load(dir) {
     if (!d.levels) d.incomplete = true;
     if (d.events.some((e) => e.path === 'DISCARDED') && d.outcome.group === 'UNKNOWN') d.outcome = { group: 'REJECTED', path: 'DISCARDED', label: 'Discarded (reason not stored)' };
   }
+  for (const d of decisions.values()) d.origin = origin;
   return { decisions: [...decisions.values()], recorder: { ...rec.recorder, missingRecords }, sources: { journal: journal.length, open: (ledger.activePositions || []).length,
     discarded: (ledger.discardedOrders || []).length, savedAt: ledger.savedAt || null } };
 }
