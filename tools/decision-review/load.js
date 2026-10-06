@@ -64,8 +64,12 @@ function readRecorded(files) {
     d.events.sort((a, b) => a.at - b.at);
     // C1 (review): ids repeat per symbol per day, so an EARLIER rejection (pre-market MARKET_CLOSED, a morning block) is not this decision.
     // The decision is the STAGED event when there is one, else the LAST strategy block / pipeline rejection (the one that ended it).
-    const decision = d.events.find((e) => e.path === 'STAGED') || [...d.events].reverse().find((e) => DECISION_PATHS.includes(e.path));
+    let decision = d.events.find((e) => e.path === 'STAGED') || [...d.events].reverse().find((e) => DECISION_PATHS.includes(e.path));
     const staged = d.events.map((e) => msOf(e.setup && e.setup.stagedAt)).find(Number.isFinite);
+    // The STAGED line was lost (e.g. a queue drop) but the setup went on to be approved / opened: a stagedAt AFTER the chosen rejection
+    // is the real decision; the rejection was an earlier, separate one (review nit).
+    d.acceptedAfterReject = !!decision && decision.path !== 'STAGED' && d.events.some((e) => ['APPROVED', 'OPENED', 'FILLED', 'CLOSED'].includes(e.path) && e.at > decision.at);
+    if (d.acceptedAfterReject && staged && staged > decision.at) decision = null;
     if (decision) { d.t0 = decision.at; d.p0 = decision.price; d.t0Source = decision.path === 'STAGED' ? 'RECORDED (the STAGED record)' : `RECORDED (the ${decision.path} that ended it)`; }
     else if (staged) { d.t0 = staged; d.t0Source = 'RECORDED setup stagedAt (the decision record itself was not captured)'; }
     else { d.t0 = null; d.t0Source = MISSING_T0; }
@@ -114,7 +118,7 @@ function load(dir, { origin = 'ACCOUNT' } = {}) { // Phase 94 S0-5: ACCOUNT (vm-
     const d = add(rootId, first, 'LEDGER');
     const tmj = timesOf(first, parts);
     if (d.source !== 'RECORDED') { d.times = tmj.times; d.t0 = tmj.t0; d.t0Source = tmj.source; d.levels = d.levels || levelsOf(first); }
-    else if (d.t0 === null && tmj.t0) { d.t0 = tmj.t0; d.times.decision = tmj.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; } // C1: recovered
+    else if ((d.t0 === null || (d.acceptedAfterReject && tmj.t0 > d.t0)) && tmj.t0) { d.t0 = tmj.t0; d.p0 = null; d.times.decision = tmj.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; } // C1: recovered
     if (d.source !== 'RECORDED' && afterRecorder(d.t0)) missingRecords.push({ id: rootId, kind: 'closed trade' });
     const net = parts.reduce((s, p) => s + (p.netPnl || 0), 0); const risk = parts.reduce((s, p) => s + (p.dollarRisk || 0), 0);
     d.realized = { status: 'closed', source: 'LEDGER', fillPrice: first.fillPrice, openedAt: first.openedAt, approvedAt: first.approvedAt, execution: first.execution, run: first.run || null,
@@ -125,7 +129,7 @@ function load(dir, { origin = 'ACCOUNT' } = {}) { // Phase 94 S0-5: ACCOUNT (vm-
     const d = add(p.id, p, 'LEDGER');
     const tmp = timesOf(p);
     if (d.source !== 'RECORDED') { d.times = tmp.times; d.t0 = tmp.t0; d.t0Source = tmp.source; d.levels = d.levels || levelsOf(p); }
-    else if (d.t0 === null && tmp.t0) { d.t0 = tmp.t0; d.times.decision = tmp.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; }
+    else if ((d.t0 === null || (d.acceptedAfterReject && tmp.t0 > d.t0)) && tmp.t0) { d.t0 = tmp.t0; d.p0 = null; d.times.decision = tmp.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; }
     d.realized = d.realized || { status: 'open', source: 'LEDGER', fillPrice: p.fillPrice, openedAt: p.openedAt, execution: p.execution, netPnl: null, rNet: null, debit: p.optionsData ? p.optionsData.debit : null };
   }
   for (const o of ledger.discardedOrders || []) {
