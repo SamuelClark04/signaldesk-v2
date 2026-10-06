@@ -2,8 +2,9 @@
 // it: staged orders are saved in the ledger and broadcast to the browser), in a bounded in-memory store keyed by setup id.
 // The decision recorder attaches the entry to the setup's records; the analyzer reads them as RECORDED evidence.
 //   capture(id, { strategyId, symbol, values, series: [{ name, symbol, tf, bars }] })
-//       SYNCHRONOUS, never throws: each bars array is slice()d (the newest MAX_BARS; longer ones flagged truncated), values are
-//       shallow-copied numbers / strings. No serialization here (the recorder's flush does it, time-sliced).
+//       SYNCHRONOUS, never throws: each series (the newest MAX_BARS; longer ones flagged truncated) is copied into FROZEN bars /
+//       values (Phase 94 S0-1: a bar the stream later updates in place never changes the evidence); values are bounded copies.
+//       No serialization here (the recorder's flush does it, time-sliced).
 //   block(id, reason, candidate, inputs)   a strategy-internal skip AFTER a signal fired (e.g. an ORB breakout filtered out):
 //       capture + decision-recorder STRATEGY_BLOCK in one call.
 // Observational: nothing here feeds a trading decision, and a failure is counted, never raised.
@@ -23,6 +24,22 @@ function copyValues(v, depth = 0) {
   return out;
 }
 
+const timeOf = (b) => (b.time ?? b.t ?? b.start ?? b.min ?? b.minute ?? b.date ?? null);
+const num = (x) => (x === undefined || x === null || x === '' ? null : Number(x));
+const isBar = (b) => b && typeof b === 'object' && ('close' in b || 'c' in b) && ('high' in b || 'h' in b);
+// Phase 94 S0-1: a DETACHED, frozen copy: a bar the stream later updates in place (the live last bar) never changes the evidence.
+const barCopy = (b) => (b && typeof b === 'object' ? Object.freeze({ time: timeOf(b), open: num(b.open ?? b.o), high: num(b.high ?? b.h), low: num(b.low ?? b.l),
+  close: num(b.close ?? b.c), volume: num(b.volume ?? b.v) }) : null);
+function rawCopy(v, depth = 0) { // non-bar series data (e.g. Quick Flips' prior sessions): plain arrays / objects of scalars, 4 levels
+  if (v === null || typeof v !== 'object') return v;
+  if (depth >= 4) return null;
+  return Object.freeze(Array.isArray(v) ? v.map((x) => rawCopy(x, depth + 1)) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rawCopy(x, depth + 1)])));
+}
+function seriesCopy(src) {
+  const first = src.find((b) => b != null);
+  return Object.freeze(isBar(first) ? src.map(barCopy) : src.map((x) => rawCopy(x)));
+}
+
 function capture(id, { strategyId = null, symbol = null, values = null, series = [] } = {}) {
   try {
     if (!id) return false;
@@ -30,7 +47,7 @@ function capture(id, { strategyId = null, symbol = null, values = null, series =
     for (const s of series || []) {
       if (!s || !s.name) continue;
       const src = Array.isArray(s.bars) ? s.bars : null;
-      list.push({ name: s.name, symbol: s.symbol || symbol, tf: s.tf || null, bars: src ? src.slice(-MAX_BARS) : null, data: src ? undefined : s.data,
+      list.push({ name: s.name, symbol: s.symbol || symbol, tf: s.tf || null, bars: src ? seriesCopy(src.slice(-MAX_BARS)) : null, data: src ? undefined : rawCopy(s.data),
         truncated: !!(src && src.length > MAX_BARS) });
     }
     if (store.has(id)) store.delete(id);

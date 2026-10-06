@@ -53,7 +53,11 @@ function readRecorded(files) {
   for (const d of out.values()) {
     d.events.sort((a, b) => a.at - b.at);
     for (const [k, r] of repeats) if (k.startsWith(`${d.id}|`)) { const e = d.events.find((ev) => ev.path === r.path); if (e) e.repeats = r.count; }
-    if (d.context) d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null }));
+    if (d.context) {
+      d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
+      d.context.legacyKeys = d.context.series.some((s) => s.legacyKey);
+      if (d.context.legacyKeys) d.missing.push('decision chart stored under an endpoint-only key (before Phase 94): another series with the same first / last bar may have been stored in its place');
+    }
     if (!d.context) d.missing.push('decision inputs (chart / signal values): not captured');
   }
   return { decisions: out, series, recorder: { firstAt, lastAt, files: files.length, unreadableLines: bad, lastStatus } };

@@ -1,11 +1,15 @@
 // Decision recorder serialization (Phase 93). pick() runs IN the trading path (a shallow copy of a setup's fields, no JSON);
 // lines() runs only in the recorder's flush (time-sliced): it turns one queued entry into JSONL lines, writing each distinct
-// bar series ONCE per day file and referencing it by key from the decision line.
+// bar series ONCE per day file and referencing it by key from the decision line (Phase 94: the key is a sha256 of the stored series).
 // Series kinds: 'bars' (bar-like objects -> [t, o, h, l, c, v] rows; null slots kept, e.g. Quick Flips' minute slots) and
 // 'raw' (anything else, e.g. Quick Flips' prior sessions { ymd, closes5m, vols5m }), each capped at MAX_SERIES_BYTES.
 const MAX_ROWS_KEEP = 500; // a series line over the byte cap keeps its newest rows only (flagged truncated)
 const MAX_SERIES_BYTES = 512 * 1024;
 const MAX_WRITTEN = 20000;
+const crypto = require('crypto');
+// Phase 94 S0-1: a series is identified by its COMPLETE stored contents (b2: / r2: + sha256 of the stored body; flush only, never in
+// the trading path). The Phase 93 endpoint-only keys (b: / r:) could give two different series one stored copy.
+const digest = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 32);
 
 const SETUP_FIELDS = ['id', 'asset', 'market', 'strategyId', 'setupType', 'direction', 'timeframe', 'tradeType', 'expectedDuration', 'entryPrice', 'invalidation',
   'initialStop', 'positionSize', 'dollarRisk', 'notional', 'riskPct', 'fillPrice', 'openedAt', 'timestamp', 'thesis', 'execution', 'venue', 'sizingBasis', 'broker',
@@ -43,9 +47,6 @@ const timeOf = (b) => (b.time ?? b.t ?? b.start ?? b.min ?? b.minute ?? b.date ?
 const isBar = (b) => b && typeof b === 'object' && ('close' in b || 'c' in b) && ('high' in b || 'h' in b);
 const rowOf = (b) => (b ? [timeOf(b), num(b.open ?? b.o), num(b.high ?? b.h), num(b.low ?? b.l), num(b.close ?? b.c), num(b.volume ?? b.v)] : null);
 
-// FNV-1a over a string (flush only): the key of a raw series.
-function hash(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); }
-
 function seriesLine(s) {
   const bars = Array.isArray(s.bars) ? s.bars : [];
   const first = bars.find((b) => b != null);
@@ -55,15 +56,13 @@ function seriesLine(s) {
     let rows = bars.map(rowOf);
     let json = JSON.stringify(rows);
     if (json.length > MAX_SERIES_BYTES) { rows = rows.slice(-MAX_ROWS_KEEP); json = JSON.stringify(rows); truncated = true; }
-    const done = rows.filter(Boolean);
-    const a = done[0] || []; const z = done[done.length - 1] || [];
-    key = `b:${s.symbol}|${s.tf}|${s.name}|${rows.length}|${a[0]}|${z[0]}|${z[4]}|${z[5]}`;
+    key = `b2:${s.symbol}|${s.tf}|${s.name}|${digest(`${truncated}|${json}`)}`;
     body = { kind: 'bars', cols: ['t', 'o', 'h', 'l', 'c', 'v'], rows: JSON.parse(json) };
   } else {
     let data = bars.length ? bars : (s.data ?? null);
     let json = JSON.stringify(data);
     if (json && json.length > MAX_SERIES_BYTES && Array.isArray(data)) { data = data.slice(-Math.max(1, Math.floor(data.length / 4))); json = JSON.stringify(data); truncated = true; }
-    key = `r:${s.symbol}|${s.tf}|${s.name}|${hash(json || '')}`;
+    key = `r2:${s.symbol}|${s.tf}|${s.name}|${digest(`${truncated}|${json || ''}`)}`;
     body = { kind: 'raw', data: json ? JSON.parse(json) : null };
   }
   return { key, line: { type: 'series', key, name: s.name, symbol: s.symbol || null, tf: s.tf || null, truncated, ...body }, truncated };
