@@ -24,20 +24,37 @@ function copyValues(v, depth = 0) {
   return out;
 }
 
-const timeOf = (b) => (b.time ?? b.t ?? b.start ?? b.min ?? b.minute ?? b.date ?? null);
+const iso = (x) => (x instanceof Date ? x.toISOString() : x);
+const timeOf = (b) => iso(b.time ?? b.t ?? b.start ?? b.min ?? b.minute ?? b.date ?? null);
 const num = (x) => (x === undefined || x === null || x === '' ? null : Number(x));
 const isBar = (b) => b && typeof b === 'object' && ('close' in b || 'c' in b) && ('high' in b || 'h' in b);
-// Phase 94 S0-1: a DETACHED, frozen copy: a bar the stream later updates in place (the live last bar) never changes the evidence.
+// Phase 94 S0-1: DETACHED, frozen bars: a bar the stream later updates in place (the live last bar) never changes the evidence.
+// Memory (review): a series re-captured every pass REUSES the previous capture's frozen bar when all six fields are unchanged, so
+// 500 ids sharing SPY / daily bars hold one frozen copy each, not 500 (one Map lookup + compare per bar; a changed bar is re-copied).
+const frozenBySeries = new Map(); // `symbol|tf|name` -> Map(time -> frozen bar) of the latest capture
+const MAX_SERIES_KEYS = 400;
+const same = (f, b) => f.open === num(b.open ?? b.o) && f.high === num(b.high ?? b.h) && f.low === num(b.low ?? b.l) && f.close === num(b.close ?? b.c) && f.volume === num(b.volume ?? b.v);
 const barCopy = (b) => (b && typeof b === 'object' ? Object.freeze({ time: timeOf(b), open: num(b.open ?? b.o), high: num(b.high ?? b.h), low: num(b.low ?? b.l),
   close: num(b.close ?? b.c), volume: num(b.volume ?? b.v) }) : null);
 function rawCopy(v, depth = 0) { // non-bar series data (e.g. Quick Flips' prior sessions): plain arrays / objects of scalars, 4 levels
+  if (v instanceof Date) return v.toISOString();
   if (v === null || typeof v !== 'object') return v;
   if (depth >= 4) return null;
   return Object.freeze(Array.isArray(v) ? v.map((x) => rawCopy(x, depth + 1)) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rawCopy(x, depth + 1)])));
 }
-function seriesCopy(src) {
+function seriesCopy(src, key) {
   const first = src.find((b) => b != null);
-  return Object.freeze(isBar(first) ? src.map(barCopy) : src.map((x) => rawCopy(x)));
+  if (!isBar(first)) return Object.freeze(src.map((x) => rawCopy(x)));
+  const prev = frozenBySeries.get(key); const next = new Map();
+  const out = src.map((b) => {
+    if (!b || typeof b !== 'object') return null;
+    const t = timeOf(b); const f = prev && prev.get(t);
+    const c = f && same(f, b) ? f : barCopy(b);
+    next.set(t, c); return c;
+  });
+  frozenBySeries.delete(key); frozenBySeries.set(key, next);
+  if (frozenBySeries.size > MAX_SERIES_KEYS) frozenBySeries.delete(frozenBySeries.keys().next().value);
+  return Object.freeze(out);
 }
 
 function capture(id, { strategyId = null, symbol = null, values = null, series = [] } = {}) {
@@ -47,7 +64,7 @@ function capture(id, { strategyId = null, symbol = null, values = null, series =
     for (const s of series || []) {
       if (!s || !s.name) continue;
       const src = Array.isArray(s.bars) ? s.bars : null;
-      list.push({ name: s.name, symbol: s.symbol || symbol, tf: s.tf || null, bars: src ? seriesCopy(src.slice(-MAX_BARS)) : null, data: src ? undefined : rawCopy(s.data),
+      list.push({ name: s.name, symbol: s.symbol || symbol, tf: s.tf || null, bars: src ? seriesCopy(src.slice(-MAX_BARS), `${s.symbol || symbol}|${s.tf || ''}|${s.name}`) : null, data: src ? undefined : rawCopy(s.data),
         truncated: !!(src && src.length > MAX_BARS) });
     }
     if (store.has(id)) store.delete(id);
@@ -66,6 +83,6 @@ function block(id, reason, candidate, inputs) {
 
 const get = (id) => store.get(id) || null;
 const stats = () => ({ ids: store.size, errors });
-const clear = () => { store.clear(); errors = 0; };
+const clear = () => { store.clear(); frozenBySeries.clear(); errors = 0; };
 
 module.exports = { capture, block, get, stats, clear, MAX_IDS, MAX_BARS };

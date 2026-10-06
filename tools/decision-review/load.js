@@ -56,7 +56,8 @@ function readRecorded(files) {
     if (d.context) {
       d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
       d.context.legacyKeys = d.context.series.some((s) => s.legacyKey);
-      if (d.context.legacyKeys) d.missing.push('decision chart stored under an endpoint-only key (before Phase 94): another series with the same first / last bar may have been stored in its place');
+      if (d.context.series.some((s) => /^b:/.test(s.key || ''))) d.missing.push('decision chart stored under an endpoint-only key (b:, before Phase 94): another bar series with the same first / last bar may have been stored in its place');
+      if (d.context.series.some((s) => /^r:/.test(s.key || ''))) d.missing.push('decision inputs stored under a 32-bit content hash (r:, before Phase 94): a hash collision is unlikely but not excluded');
     }
     if (!d.context) d.missing.push('decision inputs (chart / signal values): not captured');
   }

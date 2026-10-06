@@ -36,6 +36,29 @@ const readLines = () => { const d = process.env.DECISIONS_DIR; if (!fs.existsSyn
   dc.capture('imm:3', { strategyId: 'options-quickflips', symbol: 'SPY', series: [{ name: 'todaySlots1m', tf: '1m', bars: slots }] });
   check('S0-1: null minute slots are kept as null', dc.get('imm:3').series[0].bars[0] === null && dc.get('imm:3').series[0].bars.length === 3);
 
+  // ---------- S0-1 review: memory, shapes, failures ----------
+  const shared = bars(800);
+  dc.capture('mem:1', { strategyId: 'equity-day', symbol: 'SPY', series: [{ name: 'spy1m', tf: '1m', bars: shared }] });
+  dc.capture('mem:2', { strategyId: 'equity-day', symbol: 'SPY', series: [{ name: 'spy1m', tf: '1m', bars: shared }] });
+  const m1 = dc.get('mem:1').series[0].bars; const m2 = dc.get('mem:2').series[0].bars;
+  check('S0-1 (review): a re-captured series REUSES unchanged frozen bars (memory), but never a changed one', m1[10] === m2[10] && m1 !== m2);
+  shared[799] = { ...shared[799], close: 555 };
+  dc.capture('mem:3', { strategyId: 'equity-day', symbol: 'SPY', series: [{ name: 'spy1m', tf: '1m', bars: shared }] });
+  const m3 = dc.get('mem:3').series[0].bars;
+  check('S0-1 (review): a bar that changed gets a fresh frozen copy; the earlier capture keeps its old value', m3[799].close === 555 && m2[799].close !== 555 && m3[10] === m2[10]);
+  const tc = [{ t: 1790000000, o: 1, h: 2, l: 0.5, c: 1.5, v: 10 }]; const qf = [{ min: 571, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }];
+  dc.capture('shape:1', { symbol: 'X', series: [{ name: 'a', tf: '1m', bars: tc }, { name: 'b', tf: '1m', bars: qf }] });
+  const sa = dc.get('shape:1').series;
+  check('S0-1 (review): stored rows are identical to the original bars for t/o/h/l/c/v and min/open/... shapes',
+    JSON.stringify(sa[0].bars.map(ser.rowOf)) === JSON.stringify(tc.map(ser.rowOf)) && JSON.stringify(sa[1].bars.map(ser.rowOf)) === JSON.stringify(qf.map(ser.rowOf)));
+  const dt = new Date('2026-10-06T14:00:00Z');
+  dc.capture('shape:2', { symbol: 'X', series: [{ name: 'd', tf: '1D', bars: [{ date: dt, open: 1, high: 2, low: 0.5, close: 1.5, volume: 1 }] }, { name: 'r', tf: '1D', bars: [{ when: dt }] }] });
+  const sd = dc.get('shape:2').series;
+  check('S0-1 (review): a Date time is stored as its ISO string (immutable), in bars and raw data', sd[0].bars[0].time === dt.toISOString() && sd[1].bars[0].when === dt.toISOString());
+  const errs = dc.stats().errors;
+  const bad = { get close() { throw new Error('boom'); }, high: 1 };
+  check('S0-1 (review): a throwing bar makes capture() return false and is counted, never thrown', dc.capture('bad:1', { symbol: 'X', series: [{ name: 'z', tf: '1m', bars: [bad] }] }) === false && dc.stats().errors === errs + 1);
+
   // ---------- S0-1: series are keyed by their COMPLETE stored contents ----------
   const a = bars(10); const b = bars(10); b[5] = { ...b[5], close: b[5].close + 1 }; // same count, same first / last bar, a different middle bar
   const la = ser.seriesLine({ name: 'session1m', symbol: 'AAPL', tf: '1m', bars: a });

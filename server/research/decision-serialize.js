@@ -57,15 +57,16 @@ function seriesLine(s) {
     let json = JSON.stringify(rows);
     if (json.length > MAX_SERIES_BYTES) { rows = rows.slice(-MAX_ROWS_KEEP); json = JSON.stringify(rows); truncated = true; }
     key = `b2:${s.symbol}|${s.tf}|${s.name}|${digest(`${truncated}|${json}`)}`;
-    body = { kind: 'bars', cols: ['t', 'o', 'h', 'l', 'c', 'v'], rows: JSON.parse(json) };
+    body = () => ({ kind: 'bars', cols: ['t', 'o', 'h', 'l', 'c', 'v'], rows: JSON.parse(json) });
   } else {
     let data = bars.length ? bars : (s.data ?? null);
     let json = JSON.stringify(data);
     if (json && json.length > MAX_SERIES_BYTES && Array.isArray(data)) { data = data.slice(-Math.max(1, Math.floor(data.length / 4))); json = JSON.stringify(data); truncated = true; }
     key = `r2:${s.symbol}|${s.tf}|${s.name}|${digest(`${truncated}|${json || ''}`)}`;
-    body = { kind: 'raw', data: json ? JSON.parse(json) : null };
+    body = () => ({ kind: 'raw', data: json ? JSON.parse(json) : null });
   }
-  return { key, line: { type: 'series', key, name: s.name, symbol: s.symbol || null, tf: s.tf || null, truncated, ...body }, truncated };
+  // The stored line is built lazily (review): a series already written to this day file costs only its key.
+  return { key, truncated, get line() { return { type: 'series', key, name: s.name, symbol: s.symbol || null, tf: s.tf || null, truncated, ...body() }; } };
 }
 
 // One queued entry -> { lines: [json...], truncated }. has(key) / add(key): the day file's written-series set.
@@ -81,7 +82,7 @@ function lines(e, has, add) {
         const sl = seriesLine(s);
         truncated = truncated || sl.truncated;
         if (!has(sl.key)) { out.push(JSON.stringify(sl.line)); add(sl.key); }
-        refs.push({ name: s.name, symbol: s.symbol || null, tf: s.tf || null, key: sl.key, truncated: sl.line.truncated });
+        refs.push({ name: s.name, symbol: s.symbol || null, tf: s.tf || null, key: sl.key, truncated: sl.truncated });
       } catch (err) { refs.push({ name: s.name, error: String(err.message || err).slice(0, 120) }); }
     }
     context = { strategyId: c.strategyId || null, capturedAt: c.at || null, values: c.values || null, series: refs };
