@@ -56,7 +56,10 @@ function card(r) {
   const head = `<h3 id="${esc(r.anchor)}">${esc(d.symbol || '?')} · ${esc(d.strategyId)} · ${esc(d.setupType || '')} · ${d.direction === 'short' ? 'DOWN (short / put)' : d.direction ? 'UP (long / call)' : 'direction unknown'}</h3>`;
   const badges = [pill(d.source, 'src'), pill(d.outcome.label, rej ? 'warn' : d.outcome.group === 'ACCEPTED' ? 'good' : 'muted'), pill(r.cls.cls.replace(/_/g, ' '), tone),
     ...(r.overlay ? [pill('DIRECTION CORRECT, TRADE LOST', 'warn')] : []), ...(d.evidence && d.evidence.label ? [pill(d.evidence.label, 'muted')] : [])].join(' ');
-  const why = [`<div><b>Decided</b> ${when(d.t0)}${d.outcome.reason ? ` · <b>${rej ? 'rejected' : 'reason'}:</b> ${esc(d.outcome.reason)}` : ''}</div>`,
+  const times = d.times || {};
+  const why = [`<div><b>Decided</b> ${when(d.t0)} <span class="sub">(${esc(d.t0Source || 'MISSING')})</span>${times.approved ? ` · <b>approved</b> ${when(times.approved)}` : ''}`
+    + `${times.entry ? ` · <b>entered</b> ${when(times.entry)}` : ''}${times.close ? ` · <b>closed</b> ${when(times.close)}` : ''}`
+    + `${d.outcome.reason ? ` · <b>${rej ? 'rejected' : 'reason'}:</b> ${esc(d.outcome.reason)}` : ''}</div>`,
     d.thesis ? `<div><b>Why it called ${d.d < 0 ? 'down' : 'up'}</b> ${esc(d.thesis)}</div>` : '',
     r.signals ? `<div class="sub"><b>Recorded signal values</b> ${esc(r.signals)}</div>` : '',
     d.levels ? `<div><b>Levels</b> entry ${n2(d.levels.entry, 4)} · stop ${n2(d.levels.stop, 4)} · T1 ${n2(d.levels.t1, 4)}${d.levels.t2 ? ` · T2 ${n2(d.levels.t2, 4)}` : ''}</div>` : '<div><b>Levels</b> none (incomplete setup)</div>',

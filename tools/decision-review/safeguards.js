@@ -27,12 +27,14 @@ const RULES = [
 function check(d) {
   if (d.outcome.group !== 'REJECTED') return null;
   const reason = d.outcome.reason || '';
-  const ev = d.events.find((e) => e.reason === d.outcome.reason) || {};
+  // Phase 94 S0-3: the REJECTING event (the last one with this path + reason) and ITS OWN guard snapshot.
+  const ev = [...d.events].reverse().find((e) => e.reason === d.outcome.reason && e.path === d.outcome.path)
+    || [...d.events].reverse().find((e) => e.reason === d.outcome.reason) || {};
   const rule = RULES.find((x) => x.test.test(reason));
   if (!rule) return { verdict: 'NOT_VERIFIABLE', rule: reason ? (d.outcome.reasonBucket || reason.split(':')[0]) : 'reason not stored', evidence: reason ? 'no rule check defined for this reason yet' : 'the rejection reason was not stored (discarded before the recorder)' };
   if (rule.na) return { verdict: 'NOT_A_SAFEGUARD', rule: rule.name, evidence: 'a data gap, not a judgement on the setup' };
-  const r = rule.check(reason, { ...d, setup: ev.setup }, d.guard);
-  if (!r) return { verdict: 'NOT_VERIFIABLE', rule: rule.name, evidence: d.source === 'RECORDED' ? 'the inputs this rule used are not in the record' : 'decided before the recorder: inputs not recorded' };
+  const r = rule.check(reason, { ...d, setup: ev.setup }, ev.guard || null);
+  if (!r) return { verdict: 'NOT_VERIFIABLE', rule: rule.name, evidence: d.source === 'RECORDED' ? 'the inputs this rule used are not in the rejecting event\'s record (events recorded before Phase 94 carry no approval-time guard)' : 'decided before the recorder: inputs not recorded' };
   return { verdict: r.ok ? 'CONSISTENT' : 'INCONSISTENT', rule: rule.name, evidence: r.evidence };
 }
 

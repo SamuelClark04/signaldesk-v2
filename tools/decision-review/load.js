@@ -12,6 +12,16 @@ const REJECTS = { STRATEGY_BLOCK: 'Strategy block', PIPELINE_REJECT: 'Pipeline r
 // The root setup of a journal record (T1 partials / trims are "<id>:part:..." / "<id>:trim:...").
 const rootOf = (t) => t.parentId || String(t.id).replace(/:(part|trim):\d+(:\d+)?$/, '');
 const dirOf = (d) => (d === 'short' ? -1 : 1);
+// Phase 94 C1: only these paths ARE the decision; a later lifecycle event (approval, fill, close, ...) never stands in for it.
+const DECISION_PATHS = ['STRATEGY_BLOCK', 'PIPELINE_REJECT', 'STAGED'];
+const MISSING_T0 = 'MISSING (no decision time recorded; approval / entry / close times are kept separately and never substituted)';
+const msOf = (x) => (Number.isFinite(x) ? x : typeof x === 'string' && Number.isFinite(Date.parse(x)) ? Date.parse(x) : null);
+// Phase 94 S0-3 / C1: the decision, approval, entry and close times stay separate. t0 is the DECISION time (stagedAt) or MISSING.
+function timesOf(r, parts = [r]) {
+  const closes = parts.map((p) => msOf(p.closedAt)).filter(Number.isFinite);
+  const times = { decision: msOf(r.stagedAt), approved: msOf(r.approvedAt), entry: msOf(r.openedAt), close: closes.length ? Math.max(...closes) : null };
+  return times.decision ? { times, t0: times.decision, source: 'LEDGER stagedAt' } : { times, t0: null, source: MISSING_T0 };
+}
 
 function levelsOf(s) {
   if (!s) return null;
@@ -25,7 +35,8 @@ function levelsOf(s) {
 function base(id, s, source) {
   return { id, source, strategyId: (s && s.strategyId) || 'manual', symbol: s && s.asset, market: s && s.market, d: dirOf(s && s.direction), direction: (s && s.direction) || 'long',
     setupType: s && s.setupType, timeframe: s && s.timeframe, expectedDuration: s && s.expectedDuration, thesis: s && s.thesis, levels: levelsOf(s),
-    option: s && s.optionsData ? s.optionsData : null, t0: null, p0: null, events: [], outcome: null, realized: null, context: null, guard: null, missing: [], evidence: s && s.evidence };
+    option: s && s.optionsData ? s.optionsData : null, t0: null, t0Source: MISSING_T0, times: { decision: null, approved: null, entry: null, close: null }, p0: null, events: [], outcome: null,
+    realized: null, context: null, missing: [], evidence: s && s.evidence };
 }
 
 // Recorded lines -> { decisions: Map(id -> decision), series: Map(key -> series), recorder: { firstAt, lastAt, files } }.
@@ -42,16 +53,23 @@ function readRecorded(files) {
       if (x.type !== 'decision') continue;
       firstAt = firstAt === null ? x.at : Math.min(firstAt, x.at); lastAt = Math.max(lastAt || 0, x.at);
       let d = out.get(x.id);
-      if (!d) { d = base(x.id, x.setup, 'RECORDED'); d.t0 = x.at; d.p0 = x.price && x.price.last; out.set(x.id, d); }
+      if (!d) { d = base(x.id, x.setup, 'RECORDED'); out.set(x.id, d); } // t0: the first DECISION event, set below (C1)
       if (!d.levels && x.setup) d.levels = levelsOf(x.setup);
       if (!d.option && x.setup && x.setup.optionsData) d.option = x.setup.optionsData;
       if (x.context && !d.context) d.context = { capturedAt: x.context.capturedAt, values: x.context.values, refs: x.context.series || [] };
-      if (x.guard && !d.guard) d.guard = x.guard;
-      d.events.push({ path: x.path, at: x.at, reason: x.reason, reasonBucket: x.reasonBucket, setup: x.setup, extra: x.extra });
+      d.events.push({ path: x.path, at: x.at, reason: x.reason, reasonBucket: x.reasonBucket, setup: x.setup, extra: x.extra, guard: x.guard || null, price: x.price ? x.price.last : null });
     }
   }
   for (const d of out.values()) {
     d.events.sort((a, b) => a.at - b.at);
+    const decision = d.events.find((e) => DECISION_PATHS.includes(e.path));
+    const staged = d.events.map((e) => msOf(e.setup && e.setup.stagedAt)).find(Number.isFinite);
+    if (decision) { d.t0 = decision.at; d.p0 = decision.price; d.t0Source = 'RECORDED (first decision record)'; }
+    else if (staged) { d.t0 = staged; d.t0Source = 'RECORDED setup stagedAt (the decision record itself was not captured)'; }
+    else { d.t0 = null; d.t0Source = MISSING_T0; }
+    const firstAt = (paths) => { const e = d.events.find((x) => paths.includes(x.path)); return e ? e.at : null; };
+    const closed = [...d.events].reverse().find((x) => x.path === 'CLOSED');
+    d.times = { decision: d.t0, approved: firstAt(['APPROVED']), entry: firstAt(['OPENED', 'FILLED']), close: closed ? closed.at : null };
     for (const [k, r] of repeats) if (k.startsWith(`${d.id}|`)) { const e = d.events.find((ev) => ev.path === r.path); if (e) e.repeats = r.count; }
     if (d.context) {
       d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
@@ -92,7 +110,9 @@ function load(dir) {
   for (const [rootId, parts] of groups) {
     const first = parts.reduce((a, b) => ((a.openedAt || 0) <= (b.openedAt || 0) ? a : b));
     const d = add(rootId, first, 'LEDGER');
-    if (d.source !== 'RECORDED') { d.t0 = first.stagedAt || first.approvedAt || first.openedAt || null; d.levels = d.levels || levelsOf(first); }
+    const tmj = timesOf(first, parts);
+    if (d.source !== 'RECORDED') { d.times = tmj.times; d.t0 = tmj.t0; d.t0Source = tmj.source; d.levels = d.levels || levelsOf(first); }
+    else if (d.t0 === null && tmj.t0) { d.t0 = tmj.t0; d.times.decision = tmj.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; } // C1: recovered
     if (d.source !== 'RECORDED' && afterRecorder(d.t0)) missingRecords.push({ id: rootId, kind: 'closed trade' });
     const net = parts.reduce((s, p) => s + (p.netPnl || 0), 0); const risk = parts.reduce((s, p) => s + (p.dollarRisk || 0), 0);
     d.realized = { status: 'closed', source: 'LEDGER', fillPrice: first.fillPrice, openedAt: first.openedAt, approvedAt: first.approvedAt, execution: first.execution, run: first.run || null,
@@ -101,13 +121,15 @@ function load(dir) {
   }
   for (const p of ledger.activePositions || []) {
     const d = add(p.id, p, 'LEDGER');
-    if (d.source !== 'RECORDED') { d.t0 = p.stagedAt || p.openedAt || null; d.levels = d.levels || levelsOf(p); }
+    const tmp = timesOf(p);
+    if (d.source !== 'RECORDED') { d.times = tmp.times; d.t0 = tmp.t0; d.t0Source = tmp.source; d.levels = d.levels || levelsOf(p); }
+    else if (d.t0 === null && tmp.t0) { d.t0 = tmp.t0; d.times.decision = tmp.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; }
     d.realized = d.realized || { status: 'open', source: 'LEDGER', fillPrice: p.fillPrice, openedAt: p.openedAt, execution: p.execution, netPnl: null, rNet: null, debit: p.optionsData ? p.optionsData.debit : null };
   }
   for (const o of ledger.discardedOrders || []) {
     const d = add(o.id, o, 'LEDGER');
     if (d.source !== 'RECORDED') {
-      d.t0 = o.stagedAt || o.discardedAt || o.voidedAt || null; d.levels = d.levels || levelsOf(o);
+      const tmo = timesOf(o); d.times = tmo.times; d.t0 = tmo.t0; d.t0Source = tmo.source; d.levels = d.levels || levelsOf(o);
       d.events.push({ path: o.status === 'void' ? 'VOIDED' : 'DISCARDED', at: o.discardedAt || o.voidedAt, reason: o.voidReason || null });
       if (!o.voidReason) d.missing.push('why it was discarded (expired / rejected by you / refused at approval): not stored on discarded setups');
       if (afterRecorder(d.t0)) missingRecords.push({ id: o.id, kind: 'discarded setup' });
@@ -134,4 +156,4 @@ function load(dir) {
     discarded: (ledger.discardedOrders || []).length, savedAt: ledger.savedAt || null } };
 }
 
-module.exports = { load, levelsOf, rootOf, readRecorded, REJECTS };
+module.exports = { load, levelsOf, rootOf, readRecorded, timesOf, REJECTS, DECISION_PATHS };

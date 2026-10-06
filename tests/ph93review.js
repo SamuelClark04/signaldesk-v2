@@ -90,7 +90,8 @@ const at = (i) => i - 420; // minutes after t0 (index 0 = 9:30 the Friday before
   check_('prints: too few prints -> UNAVAILABLE, never guessed', o.tier === 'UNAVAILABLE');
 
   // ---------- 5. Rule checks ----------
-  const rej = (reason, more = {}) => ({ outcome: { group: 'REJECTED', reason }, events: [{ path: 'PIPELINE_REJECT', reason, setup: { execution: 'PAPER' } }], source: 'RECORDED', ...more });
+  // Phase 94 S0-3: the guard lives on the rejecting EVENT (its own snapshot), not on the setup.
+  const rej = (reason, { guard = null, ...more } = {}) => ({ outcome: { group: 'REJECTED', path: 'PIPELINE_REJECT', reason }, events: [{ path: 'PIPELINE_REJECT', reason, setup: { execution: 'PAPER' }, guard }], source: 'RECORDED', ...more });
   check_('daily loss: recorded kill switch ON -> CONSISTENT; OFF -> INCONSISTENT; no record -> NOT_VERIFIABLE',
     check(rej('DAILY_LOSS_LIMIT_REACHED: x', { guard: { kill: { paper: { active: true } } } })).verdict === 'CONSISTENT'
     && check(rej('DAILY_LOSS_LIMIT_REACHED: x', { guard: { kill: { paper: { active: false } } } })).verdict === 'INCONSISTENT'
@@ -142,7 +143,7 @@ const at = (i) => i - 420; // minutes after t0 (index 0 = 9:30 the Friday before
   const g = (id) => L.decisions.find((d) => d.id === id);
   const aaa = g('equity-day:ORB:AAA:2026-10-06');
   check_('loader: a RECORDED setup keeps its snapshot (t0, P0, inputs, guard) and gets the LEDGER result: T1 part + runner = one trade (+$15, +0.75R)', aaa.source === 'RECORDED' && aaa.p0 === 10.05
-    && aaa.context.series[0].data.rows.length === 1 && aaa.guard && near(aaa.realized.netPnl, 15) && near(aaa.realized.rNet, 0.75) && aaa.outcome.group === 'ACCEPTED');
+    && aaa.context.series[0].data.rows.length === 1 && aaa.events[0].guard && near(aaa.realized.netPnl, 15) && near(aaa.realized.rNet, 0.75) && aaa.outcome.group === 'ACCEPTED');
   check_('loader: a ledger trade AFTER the recorder started with no recorded decision is a MISSING record', L.recorder.missingRecords.some((r) => r.id === 'equity-swing:PULLBACK:BBB:2026-10-07'));
   const ccc = g('options-system:TREND:CALL:CCC:2026-09-30');
   check_('loader: a discarded setup says its reason was not stored', ccc.outcome.path === 'DISCARDED' && ccc.missing.some((m) => /not stored/.test(m)));

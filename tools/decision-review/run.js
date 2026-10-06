@@ -42,7 +42,7 @@ function recordedInputs(d) {
 
 async function one(d, macro) {
   const r = { d, anchor: `s-${String(d.id).replace(/[^A-Za-z0-9]+/g, '-')}`.slice(0, 120), chart: {} };
-  if (!Number.isFinite(d.t0) || !d.symbol) { r.m = { error: !d.symbol ? 'symbol unknown' : 'decision time not recorded' }; r.cls = classify(d, r.m); r.guard = check(d); r.feat = pat.features(d, null, {}); return r; }
+  if (!Number.isFinite(d.t0) || !d.symbol) { r.m = { error: !d.symbol ? 'symbol unknown' : `decision time ${d.t0Source || 'MISSING'}` }; r.cls = classify(d, r.m); r.guard = check(d); r.feat = pat.features(d, null, {}); return r; }
   const crypto = d.market === 'crypto';
   const sym = crypto ? d.symbol : (d.option && d.option.underlying) || d.symbol;
   const days = crypto ? daysAround(d.t0, 1, 2) : daysAround(d.t0, 6, d.strategyId === 'options-system' ? 24 : d.strategyId === 'equity-day' || d.strategyId === 'options-quickflips' ? 3 : 16);
