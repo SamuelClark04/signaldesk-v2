@@ -82,21 +82,64 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
   check('C3 (review): a saved cursor in the future is clamped to the start time', nc._test.cursor() === Date.parse('2026-10-06T14:30:00Z'));
   global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
 
-  // C3 restart gaps.
+  // C3 restart gaps + pre-merge fix 3: a gap is PENDING until a catch-up query has read every page; only then a NEWS_RECOVERY COMPLETE.
   await ev.flush(); wipeEvents(); nc._test.reset();
   const cf = path.join(process.env.EVENTS_DIR, 'news-cursor.json');
+  const kinds = async (k) => { await ev.flush(); return readEvents().filter((x) => x.kind === k); };
   fs.mkdirSync(process.env.EVENTS_DIR, { recursive: true });
   fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 2 * 3600000, savedAt: NOW - 2 * 3600000 }));
   nc._test.resume(NOW);
-  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 30 * 3600000, savedAt: NOW - 30 * 3600000 }));
+  let G = await kinds('NEWS_GAP');
+  check('fix 3: restart within 24 h -> a NEWS_GAP PENDING (never "covered" before the catch-up ran)', G.length === 1 && G[0].recovery === 'PENDING' && G[0].covered === false
+    && G[0].from === NOW - 2 * 3600000 && G[0].to === NOW && G[0].gapId && nc.status().recoveryPending === 1, JSON.stringify(G));
+  check('fix 3: the pending gap is persisted with the cursor at once (a second restart keeps it)', (JSON.parse(fs.readFileSync(cf, 'utf8')).pending || []).some((g) => g.gapId === G[0].gapId));
+  // 3 pages; MAX_PAGES 2: the first poll leaves unread pages, the second fails, the third finishes the query.
+  const gp = { '': { news: [art(31, '2026-10-06T12:10:00Z'), art(32, '2026-10-06T12:20:00Z')], next_page_token: 'g2' }, g2: { news: [art(33, '2026-10-06T12:30:00Z')], next_page_token: 'g3' },
+    g3: { news: [art(34, '2026-10-06T12:40:00Z')], next_page_token: null } };
+  let failNext = false;
+  global.fetch = async (u) => { if (failNext) { failNext = false; return { ok: false, status: 503, json: async () => ({}) }; } const tok = new URL(String(u)).searchParams.get('page_token') || ''; return { ok: true, status: 200, json: async () => gp[tok] }; };
+  process.env.ALPACA_API_KEY = 'AKTEST'; process.env.ALPACA_API_SECRET = 'sec'; process.env.ALPACA_DATA_BASE_URL = 'http://data.test';
+  await nc.poll({ now: NOW + 60000 });
+  check('fix 3: an HTTP-ok poll that leaves unread pages does NOT recover the gap', (await kinds('NEWS_RECOVERY')).length === 0 && nc.status().recoveryPending === 1);
+  failNext = true; await nc.poll({ now: NOW + 180000 });
+  check('fix 3: a failed poll leaves the recovery pending', (await kinds('NEWS_RECOVERY')).length === 0 && nc.status().recoveryPending === 1);
+  await nc.poll({ now: NOW + 300000 });
+  let RC = await kinds('NEWS_RECOVERY');
+  check('fix 3: the poll that reads the LAST page records NEWS_RECOVERY COMPLETE for the gap (its query started at or before the gap)', RC.length === 1 && RC[0].status === 'COMPLETE'
+    && RC[0].gapIds.join() === G[0].gapId && Date.parse(RC[0].since) <= G[0].from && nc.status().recoveryPending === 0
+    && (JSON.parse(fs.readFileSync(cf, 'utf8')).pending || []).length === 0, JSON.stringify(RC));
+  // A second restart before the catch-up finished: the first gap stays pending and is closed by the same recovery as the new one.
+  await ev.flush(); wipeEvents(); nc._test.reset();
+  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 3600000, savedAt: NOW - 3600000 }));
+  nc._test.resume(NOW); const firstGap = (await kinds('NEWS_GAP'))[0];
+  nc._test.reset(); nc._test.resume(NOW + 600000);
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ news: [], next_page_token: null }) });
+  await nc.poll({ now: NOW + 660000 });
+  RC = await kinds('NEWS_RECOVERY');
+  check('fix 3: a restart before recovery carries the earlier pending gap; one completed catch-up recovers both', RC.length === 1 && RC[0].gapIds.length === 2 && RC[0].gapIds.includes(firstGap.gapId), JSON.stringify(RC));
+  // Restart after 30 h with a pending gap saved: the part older than 24 h is lost -> UNRECOVERABLE + that pending gap INCOMPLETE.
+  await ev.flush(); wipeEvents(); nc._test.reset();
+  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 30 * 3600000, savedAt: NOW - 30 * 3600000, pending: [{ gapId: 'old-gap', from: NOW - 31 * 3600000, to: NOW - 30 * 3600000 }] }));
   nc._test.resume(NOW);
-  fs.unlinkSync(cf); nc._test.resume(NOW);
-  await ev.flush();
-  const G = readEvents().filter((x) => x.kind === 'NEWS_GAP');
-  check('C3: restart within 24 h -> one NEWS_GAP covered (catch-up from the saved cursor)', G[0] && G[0].covered === true && G[0].from === NOW - 2 * 3600000 && G[0].to === NOW);
-  check('C3: restart after 30 h -> an UNCOVERED gap (saved cursor .. now-24h) + a covered catch-up from now-24h', G[1] && G[1].covered === false && G[1].from === NOW - 30 * 3600000
-    && G[1].to === NOW - 24 * 3600000 && G[2] && G[2].covered === true && G[2].from === NOW - 24 * 3600000);
-  check('C3: no saved cursor -> an explicit uncovered gap (first start / lost file)', G[3] && G[3].covered === false && /no saved cursor/.test(G[3].reason));
+  G = await kinds('NEWS_GAP'); RC = await kinds('NEWS_RECOVERY');
+  check('fix 3: restart after 30 h -> an UNRECOVERABLE gap (saved cursor .. now-24h) + a PENDING catch-up from now-24h', G.length === 2 && G[0].recovery === 'UNRECOVERABLE' && G[0].covered === false
+    && G[0].from === NOW - 30 * 3600000 && G[0].to === NOW - 24 * 3600000 && G[1].recovery === 'PENDING' && G[1].from === NOW - 24 * 3600000, JSON.stringify(G));
+  check('fix 3: ... and the earlier pending gap is closed as INCOMPLETE (its recovery can no longer finish)', RC.length === 1 && RC[0].status === 'INCOMPLETE' && RC[0].gapIds.join() === 'old-gap', JSON.stringify(RC));
+  await ev.flush(); wipeEvents(); nc._test.reset(); fs.rmSync(cf, { force: true }); nc._test.resume(NOW);
+  G = await kinds('NEWS_GAP');
+  check('fix 3: no saved cursor -> an UNRECOVERABLE gap (first start / lost file) + the first-hour catch-up PENDING', G.length === 2 && G[0].recovery === 'UNRECOVERABLE' && G[0].from === null
+    && /no saved cursor/.test(G[0].reason) && G[1].recovery === 'PENDING' && G[1].from === NOW - 3600000, JSON.stringify(G));
+  // Persistent unread-page backlog: pages carried for more than 10 minutes -> one NEWS_BACKLOG PERSISTENT line, then CLEARED.
+  await ev.flush(); wipeEvents(); nc._test.reset(); nc._test.resume(NOW);
+  let tk = 0; global.fetch = async (u) => { const tok = new URL(String(u)).searchParams.get('page_token'); tk += 1;
+    return { ok: true, status: 200, json: async () => ({ news: [art(5000 + tk, '2026-10-06T13:00:00Z')], next_page_token: tk < 18 ? `b${tk}` : null }) }; };
+  for (let k = 0; k < 8; k += 1) await nc.poll({ now: NOW + k * 120000 });
+  const BL = await kinds('NEWS_BACKLOG'); const lastPs = (await kinds('POLL_STATUS')).slice(-1)[0];
+  check('fix 3: unread pages carried > 10 min -> ONE NEWS_BACKLOG PERSISTENT line; POLL_STATUS carries the backlog age', BL.length === 1 && BL[0].state === 'PERSISTENT'
+    && BL[0].since === NOW && lastPs.backlog && lastPs.backlog.polls === 8 && nc.status().backlog && nc.status().backlog.since === NOW, JSON.stringify(BL) + JSON.stringify(lastPs.backlog));
+  await nc.poll({ now: NOW + 8 * 120000 });
+  const BL2 = await kinds('NEWS_BACKLOG');
+  check('fix 3: when the last page is read the backlog is recorded CLEARED with its length', BL2.length === 2 && BL2[1].state === 'CLEARED' && BL2[1].minutes === 16 && nc.status().backlog === null, JSON.stringify(BL2));
   nc._test.reset(); nc._test.setStartedAt(NOW);
   global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ news: [art(21, '2026-10-06T13:40:00Z')], next_page_token: null }) });
   wipeEvents(); await nc.poll({ now: NOW }); await ev.flush();

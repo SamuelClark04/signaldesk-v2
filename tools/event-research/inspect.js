@@ -1,18 +1,23 @@
 // Phase 94 Stage 1 pilot health check (PC, read-only; correction C4): summarize the events-*.jsonl files of a vm-audit archive.
 // Run: node tools/event-research/inspect.js <folder with events-*.jsonl> [--budget tools/event-research/budget.json] [--through YYYY-MM-DD]
-// (--through = the audit date, default today: sessions after the last file count as missing)
+//   [--now <ISO time>]
+// (--now = when the archive was taken, default now; --through = the last date to report, default the --now date: sessions after the
+// last file count as missing; a session that had not closed by --now is NOT JUDGED, neither healthy nor missing)
 // A SESSION is an NYSE trading day (weekdays minus the NYSE holidays below) between the first and last events file: a session with NO file
 // (the server was down) is NOT HEALTHY. Session length = 09:30 to 16:00, or 13:00 on NYSE's listed early closes. HEALTHY needs every check:
 //   collection   >= 90% of the expected session polls present (one every 2 min), >= 95% of them ok, no gap > 10 min between OK polls
 //   sources      the day's earnings snapshot (complete: every capture symbol answered) and macro snapshot both recorded
 //   recorder     STATUS lines in all but one of the session's hours; no drop / write / serialize / record error added that day (counters
 //                restart from 0 with a new bootId); no stall; no unreadable line
+//   news         coverage COMPLETE: no restart gap still pending at the end of the day, none unrecoverable or incompletely recovered,
+//                no unread-page backlog > 10 min of the session (news-coverage.js; HTTP-ok polls alone never establish coverage)
 //   process      CPU % p95, RSS max and event-loop p99 max within the measured budget (budget.json; none = not healthy)
 // NEWS counts are reported, never required: a quiet day with zero headlines is not a failure.
 // The pilot criteria (spec 3.1): >= 10 sessions and the LAST 10 all healthy. Expansion still needs the user's approval.
 const fs = require('fs');
 const path = require('path');
 const T = require('../decision-review/time');
+const { assess } = require('./news-coverage');
 
 // NYSE full closures and 1 PM early closes, from nyse.com/markets/hours-calendars (checked 2026-10-06). Extend yearly.
 const NYSE_HOLIDAYS = new Set(['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
@@ -35,7 +40,7 @@ function added(statuses, field, base) {
   return { sum, last: { value: prev, bootId: boot } };
 }
 
-function summarize(dir, { budget = null, through = null } = {}) {
+function summarize(dir, { budget = null, through = null, now = null } = {}) {
   if (!fs.existsSync(dir)) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
   const files = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
   if (!files.length) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
@@ -46,9 +51,15 @@ function summarize(dir, { budget = null, through = null } = {}) {
   const range = daysBetween(files[0].slice(7, 17), last);
   const years = [...new Set(range.map((d) => Number(d.slice(0, 4))))].filter((y) => !CALENDAR_YEARS.includes(y));
   const warnings = years.length ? [`the NYSE calendar here covers ${CALENDAR_YEARS.join(' / ')} only: holidays in ${years.join(', ')} count as sessions (extend NYSE_HOLIDAYS)`] : [];
+  const linesByDay = new Map([...byDay].map(([d, f]) => [d, read(path.join(dir, f))]));
+  // Fix 3: news coverage needs every file (a gap's recovery may be recorded on a later day); HTTP-ok polls alone never establish it.
+  const newsGaps = assess(linesByDay, range.filter(isSessionDay), { openAt: (d) => T.at(d, T.OPEN_MIN), closeAt: (d) => T.at(d, closeMinOf(d)), firstDay: files[0].slice(7, 17) });
   const days = range.map((day) => {
+    // A session that had not closed at the audit time (`now`) is not judged: its file is partial, and no file yet is not an outage.
+    if (now !== null && isSessionDay(day) && now < T.at(day, closeMinOf(day))) return { day, session: true, inProgress: true, healthy: null, byKind: {}, news: 0,
+      reasons: [now < T.at(day, T.OPEN_MIN) ? 'session not yet started at the audit time: not judged' : 'session in progress at the audit time: not judged'] };
     if (!byDay.has(day)) return isSessionDay(day) ? { day, session: true, healthy: false, byKind: {}, news: 0, reasons: ['no events file for this NYSE session (the server was down, or the file was not archived)'] } : { day, session: false, healthy: null, byKind: {}, news: 0, reasons: [] };
-    const f = byDay.get(day); const L = read(path.join(dir, f));
+    const L = linesByDay.get(day);
     const open = T.at(day, T.OPEN_MIN); const close = T.at(day, closeMinOf(day));
     const inMkt = (x) => x.at >= open && x.at < close;
     const byKind = {}; for (const x of L) byKind[x.kind] = (byKind[x.kind] || 0) + 1;
@@ -68,6 +79,9 @@ function summarize(dir, { budget = null, through = null } = {}) {
     if (polls.length / expected < MIN_PRESENT) out.reasons.push(`collection: ${polls.length} of ${expected} expected polls present (< 90%)`);
     if (polls.length && ok / polls.length < MIN_OK) out.reasons.push(`collection: ${ok} of ${polls.length} polls ok (< 95%)`);
     if (maxGapMin > MAX_GAP_MIN) out.reasons.push(`collection: a ${Math.round(maxGapMin)}-minute gap between OK polls (> 10)`);
+    const newsReasons = newsGaps.get(day) || [];
+    out.newsCoverage = newsReasons.length ? 'INCOMPLETE' : 'COMPLETE'; // fix 3: never from poll success alone
+    out.reasons.push(...newsReasons);
     if (byKind.UNREADABLE) out.reasons.push(`file: ${byKind.UNREADABLE} unreadable line(s)`);
     const fail = (src) => L.filter((x) => x.kind === 'POLL_STATUS' && x.source === src && !x.ok).map((x) => x.error).slice(-1)[0];
     if (!byKind.EARNINGS_SNAPSHOT) out.reasons.push(`sources: no earnings snapshot${fail('finnhub-earnings') ? ` (finnhub-earnings: ${fail('finnhub-earnings')})` : ''}`);
@@ -93,7 +107,7 @@ function summarize(dir, { budget = null, through = null } = {}) {
     out.healthy = out.reasons.length === 0;
     return out;
   });
-  const sessions = days.filter((d) => d.session);
+  const sessions = days.filter((d) => d.session && !d.inProgress);
   const last10 = sessions.slice(-10);
   return { files: files.length, days, warnings, pilotCriteria: { sessions: sessions.length, healthy: sessions.filter((d) => d.healthy).length,
     ok: last10.length === 10 && last10.every((d) => d.healthy) } };
@@ -103,13 +117,17 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const bf = args.includes('--budget') ? args[args.indexOf('--budget') + 1] : path.join(__dirname, 'budget.json');
   const budget = fs.existsSync(bf) ? JSON.parse(fs.readFileSync(bf, 'utf8')) : null;
-  const through = args.includes('--through') ? args[args.indexOf('--through') + 1] : require('../decision-review/time').ymd(Date.now());
-  const s = summarize(args.find((a, i) => !a.startsWith('--') && !['--budget', '--through'].includes(args[i - 1])) || '.', { budget, through });
+  const now = args.includes('--now') ? Date.parse(args[args.indexOf('--now') + 1]) : Date.now();
+  if (!Number.isFinite(now)) { console.log('--now needs an ISO time, e.g. 2026-10-09T21:00:00Z'); process.exit(2); }
+  const through = args.includes('--through') ? args[args.indexOf('--through') + 1] : T.ymd(now);
+  const s = summarize(args.find((a, i) => !a.startsWith('--') && !['--budget', '--through', '--now'].includes(args[i - 1])) || '.', { budget, through, now });
   for (const w of s.warnings || []) console.log(`WARNING: ${w}`);
   if (!s.files) { console.log('no events-*.jsonl files in this folder (an older vm-audit, or the capture is not deployed)'); process.exit(0); }
   for (const d of s.days) {
     if (!d.session) { console.log(`${d.day}  not a market session (no market-hours polls)`); continue; }
-    console.log(`${d.day}  ${d.healthy ? 'HEALTHY' : 'NOT HEALTHY'}  polls ${d.polls.present}/${d.polls.expected} (ok ${d.polls.ok}, max gap ${d.polls.maxGapMin} min)  news ${d.news}  CPU p95 ${d.process.cpuP95}%  RSS ${d.process.rssMax} MB  loop p99 ${d.process.loopP99Max} ms`);
+    if (d.inProgress) { console.log(`${d.day}  NOT JUDGED  ${d.reasons[0]}`); continue; }
+    if (!d.polls) { console.log(`${d.day}  NOT HEALTHY  no events file`); for (const r of d.reasons) console.log(`    - ${r}`); continue; } // a missing session has no counts to print
+    console.log(`${d.day}  ${d.healthy ? 'HEALTHY' : 'NOT HEALTHY'}  polls ${d.polls.present}/${d.polls.expected} (ok ${d.polls.ok}, max gap ${d.polls.maxGapMin} min)  news ${d.news} (coverage ${d.newsCoverage})  CPU p95 ${d.process.cpuP95}%  RSS ${d.process.rssMax} MB  loop p99 ${d.process.loopP99Max} ms`);
     for (const r of d.reasons) console.log(`    - ${r}`);
   }
   console.log(`pilot criteria: ${s.pilotCriteria.healthy} healthy of ${s.pilotCriteria.sessions} session(s); the last 10 all healthy: ${s.pilotCriteria.ok ? 'YES (expansion still needs the user\'s approval)' : 'not yet'}`);

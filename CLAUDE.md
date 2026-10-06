@@ -285,7 +285,9 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   - News: a TAP on the existing news socket (its subscription is NOT changed: equity-day reads it) + a REST poll (sort=asc from a
     persisted cursor in news-cursor.json; Alpaca's start filters on updated_at, checked live).
     - An unfinished query (start + page token) is carried to the next poll; the cursor is clamped to now.
-    - Restart gaps are recorded as NEWS_GAP (catch-up <= 24 h, `catchUp` labels).
+    - Restart gaps are recorded as NEWS_GAP with recovery PENDING (catch-up <= 24 h, `catchUp` labels) or UNRECOVERABLE, never
+      "covered" in advance; pending gaps persist in news-cursor.json; only a query that read its LAST page writes NEWS_RECOVERY
+      COMPLETE (a pending gap overtaken by the 24 h limit: INCOMPLETE). Unread pages carried > 10 min = NEWS_BACKLOG PERSISTENT / CLEARED.
     - A version is cached only once recorded.
     - Labels: versionCoverage OBSERVED_ONLY, receipt POLL_RECEIPT / STREAM_RECEIPT.
   - Snapshots and marks:
@@ -299,7 +301,9 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   - PC tools:
     - tools/event-research/inspect.js: the C4 pilot health check. It uses the NYSE calendar (holidays / early closes 2026-27; a weekday
       without a file = UNHEALTHY), >= 90% polls / >= 95% ok / no 10-min gap between OK polls, complete earnings + macro snapshots, STATUS
-      coverage, no drops / errors / stalls, and budget.json (PROVISIONAL VM limits).
+      coverage, no drops / errors / stalls, budget.json (PROVISIONAL VM limits) and news coverage (news-coverage.js: no gap pending at the
+      day's end, none unrecoverable, no backlog > 10 min; HTTP-ok polls alone never count). --now = the archive time: an unclosed session
+      is NOT JUDGED; a missing session prints "no events file" (tests/ph94capture-report.js runs the command itself).
     - scripts/research/entitlements.js: read-only probes of the free plans.
     - scripts/research/freeze-universe.js: universe-v1, dated, sources hashed, limitations in the file, never overwrites.
   - Expanding the pilot, any deploy and any data purchase need the user's approval.

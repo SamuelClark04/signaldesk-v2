@@ -7,7 +7,7 @@
 const path = require('path');
 const { createSink } = require('./jsonl-sink');
 
-const KINDS = new Set(['NEWS', 'NEWS_GAP', 'MACRO_SNAPSHOT', 'EARNINGS_SNAPSHOT', 'OPTION_MARK', 'POLL_STATUS', 'STATUS']);
+const KINDS = new Set(['NEWS', 'NEWS_GAP', 'NEWS_RECOVERY', 'NEWS_BACKLOG', 'MACRO_SNAPSHOT', 'EARNINGS_SNAPSHOT', 'OPTION_MARK', 'POLL_STATUS', 'STATUS']);
 const FLUSH_MS = 5000;
 const KEEP_DAYS = 60;
 const MAX_TEXT = 64 * 1024;

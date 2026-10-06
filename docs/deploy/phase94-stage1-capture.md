@@ -11,11 +11,13 @@ record. `news-cursor.json` holds the news poll's cursor.
 | Kind | What | Source |
 |---|---|---|
 | NEWS | each news document VERSION (id + updated_at) with OUR receipt time `t_recv`, `seenVia` stream / poll, `versionCoverage: OBSERVED_ONLY`, `receipt: POLL_RECEIPT / STREAM_RECEIPT`, `catchUp` after a restart | a tap on the existing news socket (subscription unchanged) + a REST poll for the 24 pilot symbols, every 2 min in market hours (10 min otherwise) |
-| NEWS_GAP | restart gaps: covered (caught up from the saved cursor, at most 24 h) or uncovered | the news poll at start |
+| NEWS_GAP | restart gaps, each with a `gapId`. `recovery: PENDING` (the catch-up from the saved cursor, at most 24 h back, has not read every page yet) or `UNRECOVERABLE` (older than 24 h, or no saved cursor). A gap line never claims coverage (`covered: false`); pending gaps persist in `news-cursor.json` across restarts | the news poll at start |
+| NEWS_RECOVERY | `COMPLETE`: a query that started at or before the named gaps has read its LAST page. `INCOMPLETE`: a restart past the 24 h limit overtook a pending gap | the news poll |
+| NEWS_BACKLOG | `PERSISTENT`: unread pages carried for more than 10 min (news is read late); `CLEARED` with its length once the last page is read | the news poll |
 | MACRO_SNAPSHOT | the weekly Forex Factory feed's USD rows with forecast / previous, on each daily refresh | a tap in `macro-calendar.refresh` |
 | EARNINGS_SNAPSHOT | Finnhub earnings calendar (30 days ahead) rows for the pilot symbols with their estimates | one call a day after 07:00 ET |
 | OPTION_MARK | bid / ask, quote age, IV, Greeks + source, DTE, feed (indicative) of contracts the app already quotes, at most once per contract per minute | a tap in `options-data.refreshQuotes` |
-| POLL_STATUS | every news poll (ok / error, cursor, marketOpen) and every failed source (finnhub-earnings, macro-feed) | |
+| POLL_STATUS | every news poll (ok / error, cursor, marketOpen, `unreadPagesLeft`, the backlog age, the pending recovery count) and every failed source (finnhub-earnings, macro-feed) | |
 | STATUS | every 10 min: counters, stall state, and process health (CPU %, RSS / heap MB, event-loop p99 beyond the 20 ms sampling) | the event recorder |
 
 ## What it never does
@@ -39,7 +41,9 @@ record. `news-cursor.json` holds the news poll's cursor.
 2. `/api/version`: `eventRecorder.enabled: true`, `queued` small, `dropped 0`, `stalled false`.
 3. Settings > Strategies footer: "Event capture: N today · 0 dropped · 0 write errors · last write HH:MM".
 4. After one session: run the pinned vm-audit (Phase 94 copies `events-*.jsonl`, `news-cursor.json` and `watchlist.json`). Then, on the
-   PC: `node tools/event-research/inspect.js <archive>/decisions`.
+   PC: `node tools/event-research/inspect.js <archive>/decisions --now <the archive time, ISO>`. Without `--now` the audit time is now;
+   a session that had not closed by then is NOT JUDGED (neither healthy nor missing). `--through YYYY-MM-DD` reports later dates too:
+   a session with no file is NOT HEALTHY ("no events file"), before, between or after the files.
 
 ## Pilot health (correction C4)
 
@@ -47,6 +51,9 @@ A session is HEALTHY only if all of these hold:
 - >= 90% of the expected market-hours polls are present and >= 95% of them ok, with no gap over 10 min;
 - the earnings and macro snapshots were recorded;
 - STATUS lines cover >= 6 of the 7 market hours;
+- news coverage is COMPLETE: no restart gap still PENDING at the end of the day, none UNRECOVERABLE or closed INCOMPLETE, and no
+  unread-page backlog over 10 min of the session. HTTP-ok polls alone never establish it (`tools/event-research/news-coverage.js`).
+  The first start of collection (no saved cursor on the first file's day) is the pilot's start, not a loss;
 - no drop, error or stall was added that day;
 - CPU p95, RSS max and event-loop p99 are within `tools/event-research/budget.json` (measured in Task 16).
 
