@@ -57,10 +57,12 @@ async function main() {
   if (components.length < 95) { console.log(`only ${components.length} components parsed: check the page format before freezing`); process.exit(1); }
   const wlRaw = fs.readFileSync(wl, 'utf8');
   const appCommit = require('child_process').execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  const dirtyTree = require('child_process').execSync('git status --porcelain --untracked-files=no', { encoding: 'utf8' }).trim() !== ''; // recorded: STOCKS may differ from the commit
   const u = build({ components, revid: j.parse.revid, rawSha: crypto.createHash('sha256').update(text).digest('hex'), appStocks: [...require('../../server/market/universe').STOCKS], appCommit,
     watchlist: watchlistSymbols(JSON.parse(wlRaw)), watchlistSha: crypto.createHash('sha256').update(wlRaw).digest('hex'), frozenOn: require('../../server/services/et-time').ymd(Date.now()) });
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, `${JSON.stringify(u, null, 1)}\n`);
+  u.sources[1].dirtyTree = dirtyTree;
+  fs.writeFileSync(out, `${JSON.stringify(u, null, 1)}\n`, { flag: 'wx' }); // 'wx': never overwrites, even if created meanwhile
   console.log(`universe-v1: ${u.symbols.length} symbols + ${u.benchmarks.length} benchmarks, frozen ${u.frozenOn} -> ${out}`);
 }
 

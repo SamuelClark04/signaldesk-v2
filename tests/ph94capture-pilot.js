@@ -76,5 +76,10 @@ module.exports = async ({ check }) => {
   const ur = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94p9-'));
   fs.writeFileSync(path.join(ur, 'events-2026-10-06.jsonl'), day('2026-10-06').map((l) => JSON.stringify(l)).join('\n') + '\n{"broken\n');
   const urd = insp.summarize(ur, { budget }).days[0];
+  const thr = insp.summarize(dir, { budget, through: '2026-10-06' });
+  check('review (nit): --through extends the range: sessions after the last file (outage) count as missing', thr.pilotCriteria.ok === false && thr.days.some((x) => x.day === '2026-10-06' && x.healthy === false));
+  const y28 = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94p10-'));
+  fs.writeFileSync(path.join(y28, 'events-2028-01-03.jsonl'), day('2028-01-03').map((l) => JSON.stringify(l)).join('\n') + '\n');
+  check('review (nit): a day outside the calendar years carries a warning', /2028/.test((insp.summarize(y28, { budget }).warnings || []).join()));
   check('review: unreadable lines make a session unhealthy (a damaged file is not a clean day)', urd.healthy === false && /unreadable/.test(urd.reasons.join()), JSON.stringify(urd.reasons));
 };

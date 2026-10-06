@@ -1,5 +1,6 @@
 // Phase 94 Stage 1 pilot health check (PC, read-only; correction C4): summarize the events-*.jsonl files of a vm-audit archive.
-// Run: node tools/event-research/inspect.js <folder with events-*.jsonl> [--budget tools/event-research/budget.json]
+// Run: node tools/event-research/inspect.js <folder with events-*.jsonl> [--budget tools/event-research/budget.json] [--through YYYY-MM-DD]
+// (--through = the audit date, default today: sessions after the last file count as missing)
 // A SESSION is an NYSE trading day (weekdays minus the NYSE holidays below) between the first and last events file: a session with NO file
 // (the server was down) is NOT HEALTHY. Session length = 09:30 to 16:00, or 13:00 on NYSE's listed early closes. HEALTHY needs every check:
 //   collection   >= 90% of the expected session polls present (one every 2 min), >= 95% of them ok, no gap > 10 min between OK polls
@@ -17,6 +18,7 @@ const T = require('../decision-review/time');
 const NYSE_HOLIDAYS = new Set(['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
   '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31', '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24']);
 const NYSE_EARLY_CLOSES = new Set(['2026-11-27', '2026-12-24', '2027-11-26']);
+const CALENDAR_YEARS = [2026, 2027];
 const weekday = (ymd) => { const wd = new Date(`${ymd}T12:00:00Z`).getUTCDay(); return wd > 0 && wd < 6; };
 const isSessionDay = (ymd) => weekday(ymd) && !NYSE_HOLIDAYS.has(ymd);
 const closeMinOf = (ymd) => (NYSE_EARLY_CLOSES.has(ymd) ? 13 * 60 : T.CLOSE_MIN);
@@ -33,13 +35,18 @@ function added(statuses, field, base) {
   return { sum, last: { value: prev, bootId: boot } };
 }
 
-function summarize(dir, { budget = null } = {}) {
+function summarize(dir, { budget = null, through = null } = {}) {
   if (!fs.existsSync(dir)) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
   const files = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
   if (!files.length) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
   const base = { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } };
   const byDay = new Map(files.map((f) => [f.slice(7, 17), f]));
-  const days = daysBetween(files[0].slice(7, 17), files[files.length - 1].slice(7, 17)).map((day) => {
+  // review: `through` (the audit date) extends the range, so an outage AFTER the last file is a missing session too.
+  const last = through && through > files[files.length - 1].slice(7, 17) ? through : files[files.length - 1].slice(7, 17);
+  const range = daysBetween(files[0].slice(7, 17), last);
+  const years = [...new Set(range.map((d) => Number(d.slice(0, 4))))].filter((y) => !CALENDAR_YEARS.includes(y));
+  const warnings = years.length ? [`the NYSE calendar here covers ${CALENDAR_YEARS.join(' / ')} only: holidays in ${years.join(', ')} count as sessions (extend NYSE_HOLIDAYS)`] : [];
+  const days = range.map((day) => {
     if (!byDay.has(day)) return isSessionDay(day) ? { day, session: true, healthy: false, byKind: {}, news: 0, reasons: ['no events file for this NYSE session (the server was down, or the file was not archived)'] } : { day, session: false, healthy: null, byKind: {}, news: 0, reasons: [] };
     const f = byDay.get(day); const L = read(path.join(dir, f));
     const open = T.at(day, T.OPEN_MIN); const close = T.at(day, closeMinOf(day));
@@ -88,7 +95,7 @@ function summarize(dir, { budget = null } = {}) {
   });
   const sessions = days.filter((d) => d.session);
   const last10 = sessions.slice(-10);
-  return { files: files.length, days, pilotCriteria: { sessions: sessions.length, healthy: sessions.filter((d) => d.healthy).length,
+  return { files: files.length, days, warnings, pilotCriteria: { sessions: sessions.length, healthy: sessions.filter((d) => d.healthy).length,
     ok: last10.length === 10 && last10.every((d) => d.healthy) } };
 }
 
@@ -96,7 +103,9 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const bf = args.includes('--budget') ? args[args.indexOf('--budget') + 1] : path.join(__dirname, 'budget.json');
   const budget = fs.existsSync(bf) ? JSON.parse(fs.readFileSync(bf, 'utf8')) : null;
-  const s = summarize(args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--budget') || '.', { budget });
+  const through = args.includes('--through') ? args[args.indexOf('--through') + 1] : require('../decision-review/time').ymd(Date.now());
+  const s = summarize(args.find((a, i) => !a.startsWith('--') && !['--budget', '--through'].includes(args[i - 1])) || '.', { budget, through });
+  for (const w of s.warnings || []) console.log(`WARNING: ${w}`);
   if (!s.files) { console.log('no events-*.jsonl files in this folder (an older vm-audit, or the capture is not deployed)'); process.exit(0); }
   for (const d of s.days) {
     if (!d.session) { console.log(`${d.day}  not a market session (no market-hours polls)`); continue; }

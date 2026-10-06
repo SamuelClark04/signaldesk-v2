@@ -12,8 +12,8 @@ const FLUSH_MS = 5000;
 const KEEP_DAYS = 60;
 const MAX_TEXT = 64 * 1024;
 const STATUS_EVERY_MS = 10 * 60 * 1000;
-const LOOP_RESOLUTION_MS = 20;
-const BOOT_ID = new Date(Date.now() - process.uptime() * 1000).toISOString(); // this process's start: counters restart with it // the event-loop monitor's sampling interval: an idle loop reads about this much
+const LOOP_RESOLUTION_MS = 20; // the event-loop monitor's sampling interval: an idle loop reads about this much
+const BOOT_ID = new Date(Date.now() - process.uptime() * 1000).toISOString(); // this process's start: counters restart with it
 
 let clock = () => Date.now();
 let timer = null;

@@ -36,7 +36,8 @@ async function take({ now = Date.now() } = {}) {
         { headers: { 'X-Finnhub-Token': key, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
-      partial.rows.set(symbol, (Array.isArray(body.earningsCalendar) ? body.earningsCalendar : []).filter((e) => e && e.symbol === symbol).map((e) => ({ symbol, date: e.date, hour: e.hour || null,
+      const fetchedAt = Date.now(); // review: a completed snapshot may join rows fetched at different times: each keeps its own
+      partial.rows.set(symbol, (Array.isArray(body.earningsCalendar) ? body.earningsCalendar : []).filter((e) => e && e.symbol === symbol).map((e) => ({ symbol, fetchedAt, date: e.date, hour: e.hour || null,
         epsEstimate: e.epsEstimate ?? null, revenueEstimate: e.revenueEstimate ?? null, epsActual: e.epsActual ?? null, revenueActual: e.revenueActual ?? null, quarter: e.quarter ?? null, year: e.year ?? null })));
     } catch (err) { errors.push({ symbol, error: String(err.message || err).slice(0, 120) }); }
   }
