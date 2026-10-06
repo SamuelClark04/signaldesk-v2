@@ -30,6 +30,8 @@ const MAX_CATCHUP_MS = 24 * 3600 * 1000;
 const FIRST_LOOKBACK_MS = 60 * 60 * 1000;
 const TIMEOUT_MS = 8000;
 const BACKLOG_WARN_MS = 10 * 60 * 1000;
+const PERSIST_WAIT_MS = 5000;              // at most this long for the poll's lines to reach the disk before the cursor is saved
+const UNCONFIRMED_GIVE_UP_MS = 15 * 60 * 1000; // lines never confirmed for this long (dropped / failing writes): stop saving the cursor
 
 let versions = new Map(); // `${id}|${updated_at}` -> true (insertion-ordered: oldest evicted)
 let cursor = null;        // ms: the newest article time READ so far (polls continue from here)
@@ -37,9 +39,11 @@ let carried = null;       // { since, token }: a query whose later pages are sti
 let pending = [];         // [{ gapId, from, to }]: restart gaps whose catch-up has not read every page yet (fix 3)
 let backlog = null;       // { since, polls, warned }: unread pages carried since `since`
 let gapSeq = 0;
+let unconfirmed = [];    // review: poll NEWS / NEWS_RECOVERY entries recorded since the last cursor save, not yet confirmed on disk
+let unconfirmedSince = null; let persistFrozen = null;
 let startedAt = Date.now();
 let polling = false; let timer = null;
-const st = { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 };
+const st = { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0, persistDeferred: 0 };
 
 const base = () => (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/$/, '');
 const evDir = () => process.env.EVENTS_DIR || path.dirname(process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json'));
@@ -55,12 +59,13 @@ function observe(n, seenVia, tRecv = Date.now()) {
     const k = `${n.id}|${version}`;
     if (versions.has(k)) return false;
     const t = tOf(n);
-    const ok = rec.record('NEWS', { docId: `alpaca:${n.id}`, providerId: n.id, version, created_at: n.created_at || null, updated_at: n.updated_at || null,
+    const entry = rec.recordTracked('NEWS', { docId: `alpaca:${n.id}`, providerId: n.id, version, created_at: n.created_at || null, updated_at: n.updated_at || null,
       headline: rec.text(n.headline), summary: rec.text(n.summary), content: rec.text(n.content), author: n.author || null, url: n.url || null, source: n.source || null,
       symbols: Array.isArray(n.symbols) ? n.symbols.slice(0, 50) : [], t_recv: tRecv, seenVia, versionCoverage: 'OBSERVED_ONLY',
       receipt: seenVia === 'poll' ? 'POLL_RECEIPT' : 'STREAM_RECEIPT', ...(seenVia === 'poll' ? { pollEveryMs: everyMs() } : {}),
       ...(t !== null && t < startedAt ? { catchUp: true } : {}) });
-    if (!ok) { st.refused += 1; return false; } // C3: not cached: the next poll offers it again
+    if (!entry) { st.refused += 1; return false; } // C3: not cached: the next poll offers it again
+    if (seenVia === 'poll') unconfirmed.push(entry); // the cursor that skips past it is saved only once it is on disk
     versions.set(k, true);
     if (versions.size > MAX_VERSIONS) versions.delete(versions.keys().next().value);
     return true;
@@ -105,20 +110,41 @@ function resume(now = Date.now()) {
   const oldest = now - MAX_CATCHUP_MS;
   if (saved.cursor < oldest) {
     gap(now, { reason: 'restart: gap longer than the catch-up limit', from: saved.cursor, to: oldest, recovery: 'UNRECOVERABLE' });
-    // every earlier pending gap starts at or before the saved cursor, so part of it is now beyond the limit
-    if (earlier.length) rec.record('NEWS_RECOVERY', { status: 'INCOMPLETE', gapIds: earlier.map((g) => g.gapId), reason: 'the server was down past the 24 h catch-up limit: part of these gaps can no longer be read' });
+    // An earlier pending gap the saved cursor had already passed was read through before the restart (the cursor is saved only once
+    // those lines are on disk); any other one is now partly beyond the limit.
+    const readThrough = earlier.filter((g) => Number.isFinite(g.to) && g.to <= saved.cursor); const cut = earlier.filter((g) => !readThrough.includes(g));
+    if (readThrough.length) rec.record('NEWS_RECOVERY', { status: 'COMPLETE', gapIds: readThrough.map((g) => g.gapId), readThrough: saved.cursor, note: 'read through before the restart (the saved cursor had passed the gap end)' });
+    if (cut.length) rec.record('NEWS_RECOVERY', { status: 'INCOMPLETE', gapIds: cut.map((g) => g.gapId), reason: 'the server was down past the 24 h catch-up limit: part of these gaps can no longer be read' });
     cursor = oldest;
   } else { cursor = Math.min(saved.cursor, now); pending = earlier; } // a saved cursor in the future never blanks the polls
   pending.push(gap(now, { reason: 'restart: catching up from the saved cursor', from: cursor, to: now, recovery: 'PENDING', lastSavedAt: saved.savedAt || null }));
   saveCursorNow(now);
 }
 
+// Fix 3 (review): the cursor and the pending gaps are saved only once every line they skip past (the poll's NEWS lines and the
+// NEWS_RECOVERY line that empties `pending`) is confirmed on disk. Until then the file keeps the older cursor and gaps, so a crash in
+// between re-reads those articles at the next start instead of claiming them. Lines never confirmed for UNCONFIRMED_GIVE_UP_MS
+// (dropped from a full queue, or a failing disk: both already counted by the recorder) freeze the saved cursor for this process.
+async function persist(now) {
+  if (persistFrozen) return false;
+  if (unconfirmed.length) await rec.drain(PERSIST_WAIT_MS);
+  unconfirmed = unconfirmed.filter((e) => !rec.isCommitted(e));
+  if (!unconfirmed.length) { unconfirmedSince = null; await saveCursor(now); return true; }
+  st.persistDeferred += 1; unconfirmedSince = unconfirmedSince || Date.now();
+  if (Date.now() - unconfirmedSince > UNCONFIRMED_GIVE_UP_MS) {
+    persistFrozen = `news lines recorded since ${new Date(unconfirmedSince).toISOString()} never reached the disk: the saved cursor stays put; a restart catches up from it`;
+    unconfirmed = [];
+    rec.record('POLL_STATUS', { source: 'news-cursor', ok: false, error: persistFrozen });
+  }
+  return false;
+}
+
 // Fix 3: after each poll. Coverage is established only by a COMPLETED query (no unread page), never by HTTP success alone.
 function afterPoll(now, since, done) {
   if (done && pending.length) {
-    const ok = rec.record('NEWS_RECOVERY', { status: 'COMPLETE', gapIds: pending.map((g) => g.gapId), from: Math.min(...pending.map((g) => (g.from === null ? Infinity : g.from))),
+    const entry = rec.recordTracked('NEWS_RECOVERY', { status: 'COMPLETE', gapIds: pending.map((g) => g.gapId), from: Math.min(...pending.map((g) => (g.from === null ? Infinity : g.from))),
       to: Math.max(...pending.map((g) => g.to)), since, readThrough: Date.now(), note: 'every page of a query that started at or before these gaps was read' });
-    if (ok) pending = []; // a refused line keeps them pending: the next completed query records the recovery
+    if (entry) { pending = []; unconfirmed.push(entry); } // a refused line keeps them pending: the next completed query records the recovery
   }
   if (!done) {
     backlog = backlog || { since: now, polls: 0, warned: false };
@@ -161,7 +187,7 @@ async function poll({ now = Date.now() } = {}) {
     afterPoll(now, since, !token);
     rec.record('POLL_STATUS', { source: 'alpaca-news', ok: true, new: fresh, pages, unreadPagesLeft: !!token, since, cursor, marketOpen: marketOpen(), symbols: universe.VERSION,
       backlog: backlogOf(now), recoveryPending: pending.length });
-    await saveCursor(now);
+    await persist(now);
     return { ok: true, new: fresh, pages, unreadPagesLeft: !!token };
   } catch (err) {
     st.pollErrors += 1; st.lastPollError = String(err.message || err).slice(0, 200);
@@ -178,8 +204,9 @@ function start() {
   timer = setTimeout(tick, 30 * 1000); if (timer.unref) timer.unref();
 }
 function stop() { if (timer) clearTimeout(timer); timer = null; }
-const status = () => ({ ...st, cursor, versionsKnown: versions.size, recoveryPending: pending.length, pendingGaps: pending.slice(0, 10), backlog: backlogOf(Date.now()) });
-const _test = { reset: () => { versions = new Map(); cursor = null; carried = null; startedAt = Date.now(); polling = false; pending = []; backlog = null;
+const status = () => ({ ...st, cursor, versionsKnown: versions.size, recoveryPending: pending.length, pendingGaps: pending.slice(0, 10), backlog: backlogOf(Date.now()),
+  unconfirmedLines: unconfirmed.length, persistFrozen });
+const _test = { reset: () => { versions = new Map(); cursor = null; carried = null; startedAt = Date.now(); polling = false; pending = []; backlog = null; unconfirmed = []; unconfirmedSince = null; persistFrozen = null;
   Object.assign(st, { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 }); },
   resume: (now) => resume(now), cursor: () => cursor, setStartedAt: (t) => { startedAt = t; } };
 

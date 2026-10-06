@@ -32,18 +32,24 @@ const warnStall = (msg) => { const n = clock(); if (n - lastStallWarn >= 5 * 60 
 const sink = createSink({ prefix: 'events', dir, dayOf: nyDay, serialize: (e) => ({ lines: [JSON.stringify(e)] }), keepDays: KEEP_DAYS, clock: () => clock(), warn, warnStall });
 const text = (s) => (typeof s === 'string' ? s.slice(0, MAX_TEXT) : null);
 
-function record(kind, data) {
+// recordTracked: as record(), but returns the queued entry (or null) so a caller can ask isCommitted(entry) before persisting state that
+// depends on that line being on disk (news-capture's cursor, fix 3 review).
+function recordTracked(kind, data) {
   try {
-    if (!enabled() || !KINDS.has(kind)) return false;
+    if (!enabled() || !KINDS.has(kind)) return null;
     const now = clock(); const d = nyDay(now);
     if (st.day !== d) { st.day = d; st.recordedToday = 0; st.byKind = {}; sink.resetDay(); }
     // review: the recorder's own v / kind / at always win (data cannot re-file a line under another kind or day); a source time
     // belongs in its own field (t_recv, created_at, ...).
-    sink.push({ ...(data && typeof data === 'object' ? data : {}), v: 1, kind, at: now });
+    const entry = { ...(data && typeof data === 'object' ? data : {}), v: 1, kind, at: now };
+    sink.push(entry);
     st.recordedToday += 1; st.byKind[kind] = (st.byKind[kind] || 0) + 1;
-    return true;
-  } catch (err) { st.recordErrors += 1; st.lastError = `recordErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); return false; }
+    return entry;
+  } catch (err) { st.recordErrors += 1; st.lastError = `recordErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); return null; }
 }
+const record = (kind, data) => recordTracked(kind, data) !== null;
+const isCommitted = (entry) => !!entry && sink.isCommitted(entry);
+const drain = (maxWaitMs) => sink.drain(maxWaitMs);
 
 function status() {
   const s = sink.status();
@@ -84,4 +90,4 @@ function stop() { if (timer) clearInterval(timer); timer = null; if (loopHist) {
 const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => sink.setFs(f), statusDue: () => { lastStatusAt = 0; }, reset: () => {
   sink.reset(); lastWarn = 0; lastStallWarn = 0; cpuMark = null; lastStatusAt = Infinity; Object.assign(st, { recordedToday: 0, byKind: {}, recordErrors: 0, lastError: null, lastErrorAt: null, day: null }); } };
 
-module.exports = { record, flush, start, stop, status, health, text, KINDS, KEEP_DAYS, _test };
+module.exports = { record, recordTracked, isCommitted, drain, flush, start, stop, status, health, text, KINDS, KEEP_DAYS, _test };

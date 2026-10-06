@@ -47,13 +47,14 @@ function summarize(dir, { budget = null, through = null, now = null } = {}) {
   const base = { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } };
   const byDay = new Map(files.map((f) => [f.slice(7, 17), f]));
   // review: `through` (the audit date) extends the range, so an outage AFTER the last file is a missing session too.
-  const last = through && through > files[files.length - 1].slice(7, 17) ? through : files[files.length - 1].slice(7, 17);
+  // review: `through` is the last date reported, before or after the last file (never before the first file).
+  const last = through ? (through < files[0].slice(7, 17) ? files[0].slice(7, 17) : through) : files[files.length - 1].slice(7, 17);
   const range = daysBetween(files[0].slice(7, 17), last);
   const years = [...new Set(range.map((d) => Number(d.slice(0, 4))))].filter((y) => !CALENDAR_YEARS.includes(y));
   const warnings = years.length ? [`the NYSE calendar here covers ${CALENDAR_YEARS.join(' / ')} only: holidays in ${years.join(', ')} count as sessions (extend NYSE_HOLIDAYS)`] : [];
   const linesByDay = new Map([...byDay].map(([d, f]) => [d, read(path.join(dir, f))]));
   // Fix 3: news coverage needs every file (a gap's recovery may be recorded on a later day); HTTP-ok polls alone never establish it.
-  const newsGaps = assess(linesByDay, range.filter(isSessionDay), { openAt: (d) => T.at(d, T.OPEN_MIN), closeAt: (d) => T.at(d, closeMinOf(d)), firstDay: files[0].slice(7, 17) });
+  const newsGaps = assess(linesByDay, range.filter(isSessionDay), { openAt: (d) => T.at(d, T.OPEN_MIN), closeAt: (d) => T.at(d, closeMinOf(d)), firstDay: files[0].slice(7, 17), now: now === null ? Infinity : now });
   const days = range.map((day) => {
     // A session that had not closed at the audit time (`now`) is not judged: its file is partial, and no file yet is not an outage.
     if (now !== null && isSessionDay(day) && now < T.at(day, closeMinOf(day))) return { day, session: true, inProgress: true, healthy: null, byKind: {}, news: 0,
@@ -117,9 +118,12 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const bf = args.includes('--budget') ? args[args.indexOf('--budget') + 1] : path.join(__dirname, 'budget.json');
   const budget = fs.existsSync(bf) ? JSON.parse(fs.readFileSync(bf, 'utf8')) : null;
-  const now = args.includes('--now') ? Date.parse(args[args.indexOf('--now') + 1]) : Date.now();
-  if (!Number.isFinite(now)) { console.log('--now needs an ISO time, e.g. 2026-10-09T21:00:00Z'); process.exit(2); }
+  // review: validated, never silently ignored. --now needs a time (a bare date would read as UTC midnight, the evening before in New York).
+  const nowArg = args.includes('--now') ? args[args.indexOf('--now') + 1] : null;
+  const now = nowArg === null ? Date.now() : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(nowArg || '') ? Date.parse(nowArg) : NaN;
+  if (!Number.isFinite(now)) { console.log('--now needs an ISO time with a time of day, e.g. 2026-10-09T21:00:00Z'); process.exit(2); }
   const through = args.includes('--through') ? args[args.indexOf('--through') + 1] : T.ymd(now);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(through || '') || !Number.isFinite(Date.parse(`${through}T12:00:00Z`))) { console.log('--through needs a date, YYYY-MM-DD'); process.exit(2); }
   const s = summarize(args.find((a, i) => !a.startsWith('--') && !['--budget', '--through', '--now'].includes(args[i - 1])) || '.', { budget, through, now });
   for (const w of s.warnings || []) console.log(`WARNING: ${w}`);
   if (!s.files) { console.log('no events-*.jsonl files in this folder (an older vm-audit, or the capture is not deployed)'); process.exit(0); }

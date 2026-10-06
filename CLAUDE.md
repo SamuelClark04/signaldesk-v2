@@ -287,7 +287,8 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
     - An unfinished query (start + page token) is carried to the next poll; the cursor is clamped to now.
     - Restart gaps are recorded as NEWS_GAP with recovery PENDING (catch-up <= 24 h, `catchUp` labels) or UNRECOVERABLE, never
       "covered" in advance; pending gaps persist in news-cursor.json; only a query that read its LAST page writes NEWS_RECOVERY
-      COMPLETE (a pending gap overtaken by the 24 h limit: INCOMPLETE). Unread pages carried > 10 min = NEWS_BACKLOG PERSISTENT / CLEARED.
+      COMPLETE (a pending gap overtaken by the 24 h limit: INCOMPLETE). news-cursor.json is saved only after the lines it skips past
+      are on disk (jsonl-sink isCommitted / drain). Unread pages carried > 10 min = NEWS_BACKLOG PERSISTENT / CLEARED.
     - A version is cached only once recorded.
     - Labels: versionCoverage OBSERVED_ONLY, receipt POLL_RECEIPT / STREAM_RECEIPT.
   - Snapshots and marks:

@@ -78,6 +78,20 @@ module.exports = async ({ check }) => {
   check('fix 3: unread pages still carried at the end of the archive -> reported as a backlog that never cleared', /still carried at the end of the archive/.test(dayOf(s, '2026-10-05').reasons.join()));
   s = one({ '2026-10-05': [...day('2026-10-05'), { v: 1, kind: 'NEWS_GAP', at: A('2026-10-05', 8 * 60), reason: 'restart', from: A('2026-10-05', 6 * 60), to: A('2026-10-05', 8 * 60), covered: true }] });
   check('fix 3: a gap written before this fix as covered: true without a recovery record -> recovery not verified', dayOf(s, '2026-10-05').healthy === false && /not verified/.test(dayOf(s, '2026-10-05').reasons.join()));
+  // Review: the day ends at midnight ET (also in daylight time); an evening restart archived before its catch-up is not yet a failure.
+  s = one({ '2026-10-05': [...day('2026-10-05'), gapLine('2026-10-05', 23 * 60 + 50, 'g6')], '2026-10-06': [...day('2026-10-06'), recLine('2026-10-06', 30, ['g6']), gapLine('2026-10-06', 20, 'g7')] });
+  check('review: a gap at 23:50 ET recovered at 00:30 fails ITS day; a gap at 00:20 ET the next day never fails the day before', /g6|23:50/.test(dayOf(s, '2026-10-05').reasons.join())
+    && !/00:20/.test(dayOf(s, '2026-10-05').reasons.join()) && /still PENDING/.test(dayOf(s, '2026-10-06').reasons.join()), JSON.stringify([dayOf(s, '2026-10-05').reasons, dayOf(s, '2026-10-06').reasons]));
+  const eve = folder('eve', { '2026-10-05': [...day('2026-10-05'), gapLine('2026-10-05', 17 * 60, 'g8')] });
+  const e1 = insp.summarize(eve, { budget, through: '2026-10-05', now: A('2026-10-05', 17 * 60 + 2) }).days[0];
+  const e2 = insp.summarize(eve, { budget, through: '2026-10-05', now: A('2026-10-06', 9 * 60) }).days[0];
+  check('review: a 17:00 restart archived at 17:02 (catch-up not run yet) leaves the closed session healthy; still pending the next morning = INCOMPLETE',
+    e1.healthy === true && e2.healthy === false && /still PENDING/.test(e2.reasons.join()), JSON.stringify([e1.reasons, e2.reasons]));
+  const badT = cli([mid, '--budget', bf, '--through', 'oct-9']); const badN = cli([mid, '--budget', bf, '--now', '2026-10-06']);
+  check('review: an invalid --through or a date-only --now is refused with a message (exit 2), never an empty report', badT.status === 2 && /YYYY-MM-DD/.test(badT.stdout)
+    && badN.status === 2 && /time of day/.test(badN.stdout), `${badT.status} ${badN.status}`);
+  const early = cli([mid, '--budget', bf, '--through', '2026-10-06', '--now', '2026-10-09T21:00:00Z']);
+  check('review: --through before the last file is the last date reported (Oct 7 not listed)', early.status === 0 && /2026-10-06/.test(early.stdout) && !/2026-10-07/.test(early.stdout), early.stdout.slice(-300));
   const rc = cli([folder('covcli', { '2026-10-05': [...day('2026-10-05'), gapLine('2026-10-05', 9 * 60, 'g1')] }), '--budget', bf, '--now', '2026-10-05T21:00:00Z']);
   check('fix 3: the report command prints the news coverage and the pending recovery', rc.status === 0 && /coverage INCOMPLETE/.test(rc.stdout) && /still PENDING/.test(rc.stdout), rc.stdout.slice(-400));
 };

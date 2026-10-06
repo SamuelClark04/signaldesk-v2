@@ -119,16 +119,36 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
   check('fix 3: a restart before recovery carries the earlier pending gap; one completed catch-up recovers both', RC.length === 1 && RC[0].gapIds.length === 2 && RC[0].gapIds.includes(firstGap.gapId), JSON.stringify(RC));
   // Restart after 30 h with a pending gap saved: the part older than 24 h is lost -> UNRECOVERABLE + that pending gap INCOMPLETE.
   await ev.flush(); wipeEvents(); nc._test.reset();
-  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 30 * 3600000, savedAt: NOW - 30 * 3600000, pending: [{ gapId: 'old-gap', from: NOW - 31 * 3600000, to: NOW - 30 * 3600000 }] }));
+  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 30 * 3600000, savedAt: NOW - 30 * 3600000, pending: [{ gapId: 'old-gap', from: NOW - 31 * 3600000, to: NOW - 29 * 3600000 }, { gapId: 'read-gap', from: NOW - 33 * 3600000, to: NOW - 32 * 3600000 }] }));
   nc._test.resume(NOW);
   G = await kinds('NEWS_GAP'); RC = await kinds('NEWS_RECOVERY');
   check('fix 3: restart after 30 h -> an UNRECOVERABLE gap (saved cursor .. now-24h) + a PENDING catch-up from now-24h', G.length === 2 && G[0].recovery === 'UNRECOVERABLE' && G[0].covered === false
     && G[0].from === NOW - 30 * 3600000 && G[0].to === NOW - 24 * 3600000 && G[1].recovery === 'PENDING' && G[1].from === NOW - 24 * 3600000, JSON.stringify(G));
-  check('fix 3: ... and the earlier pending gap is closed as INCOMPLETE (its recovery can no longer finish)', RC.length === 1 && RC[0].status === 'INCOMPLETE' && RC[0].gapIds.join() === 'old-gap', JSON.stringify(RC));
+  check('fix 3: ... an earlier pending gap the saved cursor had not passed is closed INCOMPLETE; one it had passed (read before the restart) COMPLETE (review)',
+    RC.length === 2 && RC.find((r) => r.status === 'INCOMPLETE').gapIds.join() === 'old-gap' && RC.find((r) => r.status === 'COMPLETE').gapIds.join() === 'read-gap', JSON.stringify(RC));
   await ev.flush(); wipeEvents(); nc._test.reset(); fs.rmSync(cf, { force: true }); nc._test.resume(NOW);
   G = await kinds('NEWS_GAP');
   check('fix 3: no saved cursor -> an UNRECOVERABLE gap (first start / lost file) + the first-hour catch-up PENDING', G.length === 2 && G[0].recovery === 'UNRECOVERABLE' && G[0].from === null
     && /no saved cursor/.test(G[0].reason) && G[1].recovery === 'PENDING' && G[1].from === NOW - 3600000, JSON.stringify(G));
+  // Review: the cursor / pending gaps are saved only after the lines they skip past are on disk. A failing disk, then a crash (the queue
+  // lost), then a restart: the gap is still pending in the cursor file, the articles are read again, and only then is it COMPLETE.
+  await ev.flush(); wipeEvents(); nc._test.reset(); ev._test.reset();
+  fs.writeFileSync(cf, JSON.stringify({ cursor: NOW - 2 * 3600000, savedAt: NOW - 2 * 3600000 }));
+  nc._test.resume(NOW); await ev.flush();
+  const crashGap = (await kinds('NEWS_GAP'))[0];
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ news: [art(41, '2026-10-06T12:10:00Z'), art(42, '2026-10-06T12:20:00Z')], next_page_token: null }) });
+  ev._test.setFs({ mkdir: async () => {}, appendFile: async () => { throw new Error('EIO: test disk failure'); } });
+  const cp = await nc.poll({ now: NOW + 60000 });
+  let saved2 = JSON.parse(fs.readFileSync(cf, 'utf8'));
+  check('review: lines not on disk -> the cursor file keeps the OLD cursor and the gap still pending (no COMPLETE claimed ahead of the lines)',
+    cp.ok && saved2.cursor === NOW - 2 * 3600000 && saved2.pending.some((g) => g.gapId === crashGap.gapId) && nc.status().persistDeferred >= 1 && nc.status().unconfirmedLines >= 3, JSON.stringify(saved2));
+  ev._test.setFs(null); ev._test.reset(); nc._test.reset(); // the crash: the recorder's queue and the in-memory state are gone
+  nc._test.resume(NOW + 600000);
+  await nc.poll({ now: NOW + 660000 });
+  RC = await kinds('NEWS_RECOVERY'); const reread = readEvents().filter((x) => x.kind === 'NEWS' && [41, 42].includes(x.providerId));
+  saved2 = JSON.parse(fs.readFileSync(cf, 'utf8'));
+  check('review: after the restart the articles are read again and recorded, then ONE recovery names the gap; the file is saved only now',
+    reread.length === 2 && RC.length === 1 && RC[0].gapIds.includes(crashGap.gapId) && saved2.pending.length === 0 && saved2.cursor === Date.parse('2026-10-06T12:20:00Z'), JSON.stringify({ RC, n: reread.length, saved2 }));
   // Persistent unread-page backlog: pages carried for more than 10 minutes -> one NEWS_BACKLOG PERSISTENT line, then CLEARED.
   await ev.flush(); wipeEvents(); nc._test.reset(); nc._test.resume(NOW);
   let tk = 0; global.fetch = async (u) => { const tok = new URL(String(u)).searchParams.get('page_token'); tk += 1;

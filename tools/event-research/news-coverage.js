@@ -15,11 +15,13 @@ const when = (t) => (t === null || t === undefined ? 'the start of collection' :
 
 // linesByDay: Map(ymd -> lines of that day's file); sessions: the NYSE session days of the report range; openAt / closeAt(ymd) -> ms.
 // Returns Map(ymd -> reasons[]) for the session days (empty = news coverage COMPLETE).
-function assess(linesByDay, sessions, { openAt, closeAt, firstDay }) {
+// now: the audit time (a day that had not ended by then is not failed for a gap recorded after its close: the catch-up may still run).
+function assess(linesByDay, sessions, { openAt, closeAt, firstDay, now = Infinity }) {
   const out = new Map(sessions.map((d) => [d, []]));
   const all = [...linesByDay.values()].flat().filter((x) => Number.isFinite(x.at)).sort((a, b) => a.at - b.at);
   const recs = all.filter((x) => x.kind === 'NEWS_RECOVERY');
-  const endOf = (d) => T.at(d, 24 * 60);
+  const nextDay = (d) => new Date(Date.parse(`${d}T12:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  const endOf = (d) => T.at(nextDay(d), 0); // review: midnight ET of the next day (T.at(d, 24 * 60) fell back to EST: 1 h late in summer)
   const sessionOf = (at) => sessions.find((d) => endOf(d) > at); // the session the record belongs to (that day, else the next one)
   const add = (d, r) => { if (d && out.has(d) && !out.get(d).includes(r)) out.get(d).push(r); };
   for (const g of all.filter((x) => x.kind === 'NEWS_GAP')) {
@@ -35,6 +37,7 @@ function assess(linesByDay, sessions, { openAt, closeAt, firstDay }) {
     const doneAt = done ? done.at : Infinity;
     for (const d of sessions) {
       if (endOf(d) <= g.at || endOf(d) > doneAt) continue; // only the days that ENDED while this gap was still pending
+      if (!done && endOf(d) > now && g.at >= closeAt(d)) continue; // review: a restart after the close, archived that evening: not yet judged
       add(d, done ? `news: catch-up of the gap ${span} still pending at the end of the day (${done.status === 'COMPLETE' ? 'completed' : 'closed INCOMPLETE'} ${when(done.at)})`
         : `news: catch-up of the gap ${span} still PENDING: no recovery recorded by the end of the archive`);
     }

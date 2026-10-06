@@ -5,6 +5,7 @@
 //                 are never written twice); onCommitted(state, writtenFiles) runs with the files that were actually written.
 //   status()      C2: a write in flight longer than stallMs is a STALL (stalled / stalledForMs, a log warning): the queue keeps
 //                 accepting records (bounded), so the trading path never waits on the disk.
+//   isCommitted(entry) / drain(maxWaitMs)  whether an entry's append returned; wait for an in-flight write, then flush (bounded)
 //   prune(now)    deletes <prefix>-YYYY-MM-DD.jsonl files older than keepDays
 const fs = require('fs');
 const path = require('path');
@@ -18,6 +19,7 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
   let stallEpisode = false;
   let fsp = fs.promises;
   const truncCounted = new WeakSet(); // an entry re-serialized after a failed write is not counted as truncated twice
+  const committed = new WeakSet();    // fix 3 (review): entries whose append returned (a caller may persist state that depends on them)
   const st = { dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, stalls: 0, lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null };
   const fail = (kind, err) => { st[kind] += 1; st.lastError = `${kind}: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); };
   const fileOf = (at) => path.join(dir(), `${prefix}-${dayOf(at)}.jsonl`);
@@ -67,6 +69,7 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
         const text = `${slot.lines.join('\n')}\n`;
         await io.appendFile(file, text);
         written.add(file); pending.shift();
+        for (const e of slot.entries) committed.add(e);
         st.bytesToday += text.length; st.file = file; st.lastWriteAt = clock();
       }
     } catch (err) {
@@ -81,6 +84,16 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
     }
   }
 
+  // Waits (at most maxWaitMs, real time) for a write already in flight, then flushes what is queued. Never throws. Off the trading path:
+  // only a record-only caller that must not persist ahead of its lines (news-capture's cursor) awaits it.
+  async function drain(maxWaitMs = 5000) {
+    try {
+      const until = Date.now() + maxWaitMs;
+      while (writing && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+      if (!writing) await flush();
+    } catch { /* flush records its own errors */ }
+  }
+
   function prune(now = clock()) {
     const re = new RegExp(`^${prefix}-(\\d{4}-\\d{2}-\\d{2})\\.jsonl$`);
     try {
@@ -92,7 +105,8 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
   }
 
   return {
-    push, flush, prune,
+    push, flush, drain, prune,
+    isCommitted: (e) => committed.has(e),
     status: () => { const ms = stalledFor(); return { ...st, queued: queue.length, writing, stalled: ms > stallMs, stalledForMs: ms > stallMs ? ms : 0 }; },
     resetDay: () => { st.bytesToday = 0; },
     setFs: (f) => { fsp = f || fs.promises; },
