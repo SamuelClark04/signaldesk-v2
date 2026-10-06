@@ -275,6 +275,35 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   - Change report: tools/decision-review/compare.js + docs/research/phase94-stage0-report-changes.md.
   - vm-audit.sh: find -exec needs `\;` (the Phase 93 line copied NO decision file).
   - Tests: tests/ph94unit.js, tests/ph94review.js.
+- **Phase 94 Stage 1 (record-only event capture, pilot P1 = 24 symbols in server/research/capture-universe.js; branch phase94-capture,
+  NOT deployed)**:
+  - Sink: research/jsonl-sink.js is shared by decision-recorder and event-recorder.
+    - A failed append re-queues only the unwritten files (no duplicates); a bad entry costs only itself.
+    - A write in flight > 30 s = STALL (status + Settings footer).
+  - event-recorder writes events-YYYY-MM-DD.jsonl (60 days; EVENTS_RECORDER=off / EVENTS_DIR). STATUS every 10 min carries a bootId +
+    whole-process CPU / RSS / heap / event-loop p99 beyond 20 ms sampling.
+  - News: a TAP on the existing news socket (its subscription is NOT changed: equity-day reads it) + a REST poll (sort=asc from a
+    persisted cursor in news-cursor.json; Alpaca's start filters on updated_at, checked live).
+    - An unfinished query (start + page token) is carried to the next poll; the cursor is clamped to now.
+    - Restart gaps are recorded as NEWS_GAP (catch-up <= 24 h, `catchUp` labels).
+    - A version is cached only once recorded.
+    - Labels: versionCoverage OBSERVED_ONLY, receipt POLL_RECEIPT / STREAM_RECEIPT.
+  - Snapshots and marks:
+    - MACRO_SNAPSHOT from a tap in macro-calendar.refresh;
+    - EARNINGS_SNAPSHOT: Finnhub, one query PER capture symbol (the all-US answer is capped at 1,500 rows), only failed symbols retried,
+      complete: false named;
+    - OPTION_MARK: a tap in options-data.refreshQuotes, 60 s per contract;
+    - failed sources are recorded as POLL_STATUS.
+  - server.js: one guarded event-capture.start().
+  - vm-audit copies events-*, news-cursor.json and watchlist.json.
+  - PC tools:
+    - tools/event-research/inspect.js: the C4 pilot health check. It uses the NYSE calendar (holidays / early closes 2026-27; a weekday
+      without a file = UNHEALTHY), >= 90% polls / >= 95% ok / no 10-min gap between OK polls, complete earnings + macro snapshots, STATUS
+      coverage, no drops / errors / stalls, and budget.json (PROVISIONAL VM limits).
+    - scripts/research/entitlements.js: read-only probes of the free plans.
+    - scripts/research/freeze-universe.js: universe-v1, dated, sources hashed, limitations in the file, never overwrites.
+  - Expanding the pilot, any deploy and any data purchase need the user's approval.
+  - Tests: tests/ph94capture.js (+ -news, -taps, -pilot), tests/ph94universe.js.
 - **Shell:** Windows + Git Bash. Write temporary `.js` / `.py` scripts (scratchpad) for
   anything longer than a one-liner instead of complex inline quoting: nested quotes in
   heredocs and `sed` have broken edits before.
