@@ -16,10 +16,12 @@ const coinbaseApi = require('../connectors/coinbase-api');
 const coinbaseSocket = require('../connectors/coinbase-socket');
 const paperLock = require('../risk/paper-lock'); // Phase 91: no LIVE entry while locked
 const decisions = require('../research/decision-recorder'); // Phase 93: record-only lifecycle events
+// Phase 94 S0-3: the guard snapshot THIS event decided with (record-only; a failure records null, never blocks an approval).
+const guardNow = (shield) => { try { return require('../research/decision-guard').snapshot(shield || entryShields.status(ledger.getSettings()), ledger.getSettings()); } catch { return null; } };
 // APPROVED = the click passed every guard (recorded before routing); then OPENED (the ledger) or ROUTE_FAILED (execution refused).
-async function tracked(id, order, run) {
-  decisions.record('APPROVED', id, { candidate: order });
-  try { return await run(); } catch (err) { decisions.record('ROUTE_FAILED', id, { reason: err.message, candidate: order, extra: { stillPending: ledger.getPendingOrders().some((o) => o.id === id) } }); throw err; }
+async function tracked(id, order, run, guard = null) {
+  decisions.record('APPROVED', id, { candidate: order, guard });
+  try { return await run(); } catch (err) { decisions.record('ROUTE_FAILED', id, { reason: err.message, candidate: order, guard, extra: { stillPending: ledger.getPendingOrders().some((o) => o.id === id) } }); throw err; }
 }
 
 // Execution venue per market: which mode setting governs it, and which broker
@@ -147,7 +149,7 @@ async function approveWithGuard(id, { amount, confirmed, actor } = {}) {
   const stack = stackingConflict(order, ledger.getActivePositions()); // Phase 68: e.g. a Pilot rotation into a coin already held
   // Phase 77: the book's open-risk ceiling / equity direction limit, again at approval (other trades may have opened).
   // Phase 81: + the entry shields (kill switch, macro blackout, sector cap); like the book limits, a shielded setup stays pending.
-  entryShields.refresh(ledger, ledger.getSettings());
+  const guard = guardNow(entryShields.refresh(ledger, ledger.getSettings())); // Phase 94: the state THIS approval decided with
   const book = (o) => portfolioRisk.check(o, { positions: ledger.getActivePositions(), bankroll: o.sizingBankroll, settings: ledger.getSettings() })
     || entryShields.check(o, { positions: ledger.getActivePositions(), journal: ledger.getTradeJournal(), settings: ledger.getSettings() }); // entries only: no waiting setups
   const heat = stack ? null : book(order);
@@ -155,19 +157,19 @@ async function approveWithGuard(id, { amount, confirmed, actor } = {}) {
   if (check.valid && amount !== undefined && amount !== null) {
     const paper = ledger.getSettings()[VENUES[order.market].modeKey] === 'paper';
     const resized = resizeOrder(order, amount, { confirmed: confirmed === true, fractional: paper && order.market === 'stocks' });
-    if (!resized.approved) { decisions.record('APPROVAL_HOLD', id, { reason: resized.reason, candidate: order }); throw new Error(resized.reason); }
+    if (!resized.approved) { decisions.record('APPROVAL_HOLD', id, { reason: resized.reason, candidate: order, guard }); throw new Error(resized.reason); }
     const heat2 = book(resized);
-    if (heat2) { decisions.record('APPROVAL_HOLD', id, { reason: heat2, candidate: order }); throw new Error(heat2); } // a bigger trade amount would pass the ceiling: the setup stays pending
+    if (heat2) { decisions.record('APPROVAL_HOLD', id, { reason: heat2, candidate: order, guard }); throw new Error(heat2); } // a bigger trade amount would pass the ceiling: the setup stays pending
     console.log(`[ledger] APPROVE ${id}: trade amount $${Number(amount).toFixed(2)} -> ${resized.positionSize} (was ${order.positionSize}), risk $${resized.dollarRisk.toFixed(2)}`);
-    return tracked(id, resized, () => routeApproved(resized, livePrice));
+    return tracked(id, resized, () => routeApproved(resized, livePrice), guard);
   }
-  if (check.valid) return tracked(id, order, () => routeApproved(order, livePrice));
+  if (check.valid) return tracked(id, order, () => routeApproved(order, livePrice), guard);
   // A missing price is a data gap, not a verdict on the setup: leave it pending.
   if (check.reason !== 'NO_LIVE_PRICE' && !heat) { // a book limit is temporary (close a trade, then approve): it stays pending
     ledger.discardOrder(id);
     recordRejection(id, check.reason, order);
   }
-  decisions.record(check.reason !== 'NO_LIVE_PRICE' && !heat ? 'APPROVAL_REJECT' : 'APPROVAL_HOLD', id, { reason: check.reason, candidate: order });
+  decisions.record(check.reason !== 'NO_LIVE_PRICE' && !heat ? 'APPROVAL_REJECT' : 'APPROVAL_HOLD', id, { reason: check.reason, candidate: order, guard });
   throw new Error(check.reason);
 }
 
@@ -177,7 +179,7 @@ const QUEUE_ACTIONS = {
     const order = ledger.getPendingOrders().find((o) => o.id === id);
     const discarded = ledger.discardOrder(id);
     recordRejection(id, 'REJECTED_BY_USER', order);
-    decisions.record('USER_REJECT', id, { reason: 'REJECTED_BY_USER', candidate: order });
+    decisions.record('USER_REJECT', id, { reason: 'REJECTED_BY_USER', candidate: order, guard: guardNow() });
     return discarded;
   },
 };

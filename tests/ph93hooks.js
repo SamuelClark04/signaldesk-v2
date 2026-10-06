@@ -61,4 +61,13 @@ module.exports = async ({ S, check, rec, dc, readLines, wipe, T }) => {
   const ver = require(S + 'version').report(ledger.getSettings());
   check('/api/version carries the recorder status (recorded, dropped, errors, missing inputs, last write)', ver.decisionRecorder && Number.isFinite(ver.decisionRecorder.dropped)
     && ver.decisionRecorder.lastWriteAt > 0 && Number.isFinite(ver.decisionRecorder.missingContext), JSON.stringify(ver.decisionRecorder).slice(0, 200));
+  // Phase 94 S0-3: each decision event carries ITS OWN guard snapshot, taken when that event happened (approval-time ones included).
+  const decisionEvents = L.filter((x) => x.type === 'decision' && ['STAGED', 'PIPELINE_REJECT', 'APPROVAL_HOLD', 'APPROVED', 'USER_REJECT'].includes(x.path));
+  check('S0-3: every staged / rejection / approval-time event has its own guard (limits + kill switch + macro state, stamped)', decisionEvents.length >= 6
+    && decisionEvents.every((x) => x.guard && Number.isFinite(x.guard.at) && x.guard.maxOpenRiskPct !== undefined && 'kill' in x.guard && 'macroActive' in x.guard),
+    JSON.stringify(decisionEvents.filter((x) => !x.guard || !Number.isFinite(x.guard.at)).map((x) => x.path)));
+  const hold = L.find((x) => x.type === 'decision' && x.id === jpm.id && x.path === 'APPROVAL_HOLD');
+  const stagedLine = L.find((x) => x.type === 'decision' && x.id === jpm.id && x.path === 'STAGED');
+  check('S0-3: the approval-time snapshot is taken at the approval (its own time, not the pass)', !!(hold && hold.guard && stagedLine && stagedLine.guard)
+    && hold.guard.at >= stagedLine.guard.at && hold.guard.at >= hold.at - 1000);
 };

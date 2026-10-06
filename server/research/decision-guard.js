@@ -9,4 +9,10 @@ function limits(settings = {}) {
   return out;
 }
 
-module.exports = { limits, KEYS };
+// Phase 94 S0-3: ONE event's guard: the shield state (entryShields.refresh / status) + the limits, stamped with the event's own time.
+function snapshot(shield, settings = {}, at = Date.now()) {
+  const s = shield || {};
+  return { at, kill: s.kill || null, macroActive: !!(s.macro && s.macro.active), macroEvent: (s.macro && s.macro.event) || null, ...limits(settings) };
+}
+
+module.exports = { limits, snapshot, KEYS };

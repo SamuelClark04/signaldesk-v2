@@ -109,7 +109,7 @@ async function pipelinePass() {
   // broker account (cached ~60 s).
   const settings = ledger.getSettings();
   const shieldState = entryShields.refresh(ledger, settings); // today's P/L (may trip the kill switch) + the macro blackout
-  passGuard = { kill: shieldState.kill, macroActive: !!(shieldState.macro && shieldState.macro.active), macroEvent: shieldState.macro && shieldState.macro.event, ...require('../research/decision-guard').limits(settings) };
+  passGuard = require('../research/decision-guard').snapshot(shieldState, settings); // Phase 93 / 94: the pass's guard, stamped
   const { riskPct, maxCapitalPct } = settings;
   counts.generated = candidates.length;
 
