@@ -14,7 +14,7 @@ const CATEGORICAL = ['strategy', 'setupType', 'timeOfDay', 'weekday', 'spyVsVwap
 
 function vwap(rows) { let pv = 0; let v = 0; for (const r of rows) { pv += ((r[2] + r[3] + r[4]) / 3) * (r[5] || 0); v += r[5] || 0; } return v > 0 ? pv / v : null; }
 
-// ctx: { minute (the setup's own rows), spyMinute, daily, spyDaily, macro: [epoch ms] }; everything strictly before t0.
+// ctx: { minute (the setup's own rows), spyMinute, daily, spyDaily, macro: [epoch ms] }; only bars that ENDED by t0 (Phase 94 S0-2).
 function features(d, m, ctx) {
   const f = { strategy: d.strategyId, setupType: (d.setupType || '').split(' · ')[0] || null };
   const t0 = d.t0; if (!Number.isFinite(t0)) return f;
@@ -23,7 +23,7 @@ function features(d, m, ctx) {
   if (d.market !== 'crypto') {
     f.minutesSinceOpen = mins >= 0 && mins < 390 ? mins : null;
     f.timeOfDay = (TOD.find(([a, b]) => mins >= a && mins < b) || [0, 0, 'outside the session'])[2];
-    const sess = (ctx.minute || []).filter((r) => r[0] < t0 && T.ymd(r[0]) === day && T.inSession(r[0]));
+    const sess = (ctx.minute || []).filter((r) => r[0] + T.MIN <= t0 && T.ymd(r[0]) === day && T.inSession(r[0]));
     const prior = (ctx.daily || []).filter((r) => r[0] < T.at(day, 0));
     if (sess.length && prior.length) f.gapPct = (sess[0][1] / prior[prior.length - 1][4] - 1) * 100;
     const tr = []; const p = prior.slice(-15);
@@ -32,7 +32,7 @@ function features(d, m, ctx) {
     if (dAtr && m && m.p0) f.atrPct = (dAtr / m.p0) * 100;
     const w = vwap(sess);
     if (w && dAtr && m && m.p0) f.vwapDistAtr = (d.d * (m.p0 - w)) / dAtr;
-    const spySess = (ctx.spyMinute || []).filter((r) => r[0] < t0 && T.ymd(r[0]) === day && T.inSession(r[0]));
+    const spySess = (ctx.spyMinute || []).filter((r) => r[0] + T.MIN <= t0 && T.ymd(r[0]) === day && T.inSession(r[0]));
     const sw = vwap(spySess);
     if (sw && spySess.length) f.spyVsVwap = spySess[spySess.length - 1][4] >= sw ? 'SPY above VWAP' : 'SPY below VWAP';
     const sd = (ctx.spyDaily || []).filter((r) => r[0] < T.at(day, 0));

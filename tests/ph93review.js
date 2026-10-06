@@ -57,7 +57,7 @@ const at = (i) => i - 420; // minutes after t0 (index 0 = 9:30 the Friday before
   const late = dec({ t0: T.at('2026-09-14', 15 * 60 + 50) });
   const ml = measure(late, path2((i) => 100 + i * 0.001), DAYS.slice(1), {});
   const h30 = ml.horizons.find((h) => h.key === '30m');
-  check_('a horizon past the close moves to the next session\'s first minute', T.ymd(h30.t) === '2026-09-15' && T.minuteOf(h30.t) === T.OPEN_MIN);
+  check_('a horizon past the close moves to the next session\'s first completed minute (Phase 94 C1: 09:31)', T.ymd(h30.t) === '2026-09-15' && T.minuteOf(h30.t) === T.OPEN_MIN + 1);
   const op = opposite(x.d, x.m);
   check_('opposite direction on the same path: reversed sign and label', op && near(op.m, -hz.H.m) && op.label === (hz.H.m >= 0.25 ? 'WRONG' : hz.H.m <= -0.25 ? 'CORRECT' : 'FLAT'));
 

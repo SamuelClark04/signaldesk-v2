@@ -34,6 +34,12 @@ function recordedRows(d, names) {
   return rows.length ? { rows, name: s.name, truncated: s.truncated } : null;
 }
 
+// Phase 94 S0-2: the strategy's own recorded inputs, used before fetched bars for every pre-decision value.
+function recordedInputs(d) {
+  const minute = recordedRows(d, ['session1m', 'todaySlots1m']); const daily = recordedRows(d, ['daily', 'dailyLong']);
+  return { minute: minute ? minute.rows : null, daily: daily ? daily.rows : null };
+}
+
 async function one(d, macro) {
   const r = { d, anchor: `s-${String(d.id).replace(/[^A-Za-z0-9]+/g, '-')}`.slice(0, 120), chart: {} };
   if (!Number.isFinite(d.t0) || !d.symbol) { r.m = { error: !d.symbol ? 'symbol unknown' : 'decision time not recorded' }; r.cls = classify(d, r.m); r.guard = check(d); r.feat = pat.features(d, null, {}); return r; }
@@ -50,7 +56,8 @@ async function one(d, macro) {
     }
   } catch (err) { r.fetchError = err.message; }
   const sessionDays = crypto ? days : [...new Set(minute.filter((x) => T.inSession(x[0])).map((x) => T.ymd(x[0])))].sort().filter((x) => x >= T.ymd(d.t0) || T.sessionClose(x) > d.t0);
-  r.m = measure(d, minute, sessionDays, { daily });
+  const rin = recordedInputs(d);
+  r.m = measure(d, minute, sessionDays, { daily, recorded: rin });
   r.cls = classify(d, r.m);
   r.endLabel = r.m && r.m.horizons ? (r.m.horizons.find((h) => h.key === 'H') || {}).label : null;
   r.oppDir = opposite(d, r.m);
@@ -71,12 +78,12 @@ async function one(d, macro) {
   r.overlay = r.cls.cls === 'CORRECT_DIRECTION' && contract && contract.rNet < 0;
   r.attr = attribute(d, r.m, r.cls.cls, contract);
   r.guard = check(d);
-  r.feat = pat.features(d, r.m, { minute, daily, spyMinute, spyDaily, macro });
+  r.feat = pat.features(d, r.m, { minute: rin.minute || minute, daily: rin.daily || daily, spyMinute, spyDaily, macro });
   // The chart: BEFORE the decision as the app saw it (RECORDED when captured), AFTER it to the planned end (FETCHED).
   const intraday = isIntraday(d);
   const rec = recordedRows(d, intraday ? ['session1m', 'todaySlots1m'] : ['daily', 'dailyLong']);
-  if (rec) { r.chart.pre = rec.rows.filter((x) => x[0] < d.t0 || !intraday).slice(intraday ? -240 : -90); r.chart.preSource = `RECORDED ${rec.name}${rec.truncated ? ' (truncated)' : ''}`; }
-  else if (intraday) { r.chart.pre = minute.filter((x) => x[0] < d.t0 && x[0] > d.t0 - 4 * 3600 * 1000 && (crypto || T.inSession(x[0]))); r.chart.preSource = `FETCHED ${crypto ? 'Coinbase' : 'SIP'} 1m (not the app's own feed)`; }
+  if (rec) { r.chart.pre = rec.rows.filter((x) => !intraday || x[0] + T.MIN <= d.t0).slice(intraday ? -240 : -90); r.chart.preSource = `RECORDED ${rec.name}${rec.truncated ? ' (truncated)' : ''}`; }
+  else if (intraday) { r.chart.pre = minute.filter((x) => x[0] + T.MIN <= d.t0 && x[0] > d.t0 - 4 * 3600 * 1000 && (crypto || T.inSession(x[0]))); r.chart.preSource = `FETCHED ${crypto ? 'Coinbase' : 'SIP'} 1m (not the app's own feed)`; }
   else { r.chart.pre = daily.filter((x) => x[0] < T.at(T.ymd(d.t0), 0)).slice(-60); r.chart.preSource = 'FETCHED SIP daily'; }
   const end = r.m && r.m.H ? r.m.H.endAt || Date.now() : d.t0 + 2 * T.DAY;
   r.chart.post = intraday ? minute.filter((x) => x[0] >= d.t0 && x[0] <= end && (crypto || T.inSession(x[0]))) : daily.filter((x) => x[0] >= T.at(T.ymd(d.t0), 0) && x[0] <= end);
