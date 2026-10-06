@@ -138,6 +138,7 @@ function start() {
   // so it doesn't compete with the bar stream; a 406/404 is retried quietly with
   // backoff inside the connector (see alpaca-news-socket.js).
   alpacaNews.init({ symbols: STREAMED_STOCKS });
+  require('./research/event-capture').start(); // Phase 94: record-only event capture (news versions, snapshots, option marks)
   coinbase.init({ symbols: CRYPTO });
   // Last closes for quiet stocks (display only), so a closed market isn't all "—".
   referencePrices.start({ symbols: STOCKS, onChange: (closes) => broadcast('REFERENCE_PRICES', closes) });

@@ -199,6 +199,7 @@ async function refreshQuotes(symbols, now = Date.now(), spotOf = null, maxAgeMs 
     const body = await getJson(`${dataBase()}/v1beta1/options/snapshots?symbols=${stale.map(encodeURIComponent).join(',')}&feed=${feed()}`);
     for (const [sym, snap] of Object.entries(body.snapshots || {})) {
       const c = toContract(sym, snap, now);
+      try { require('../research/option-marks').observe(sym, c, now); } catch { /* Phase 94: record-only mark of a quote already fetched */ }
       // bid 0 is a real quote too (a short leg far out of the money is bought back at the ask).
       if (c && c.bid >= 0 && c.ask > 0) quotes.set(sym, { at: now, bid: c.bid, ask: c.ask, quoteTime: c.quoteTime, iv: c.iv, delta: c.delta, spot: spotOf ? spotOf(c.underlying) || null : null });
     }
