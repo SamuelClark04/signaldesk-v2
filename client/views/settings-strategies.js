@@ -6,7 +6,7 @@
   const SD = window.SignalDesk;
   const { $, el } = SD.ui;
   let saved = null;
-  let recorder = null; let recorderAt = 0; // Phase 93: the decision recorder's status (GET /api/version, at most every 30 s)
+  let recorder = null; let events = null; let recorderAt = 0; // Phase 93: the decision recorder's status (GET /api/version, at most every 30 s)
 
   function render(settings) {
     if (settings) saved = settings;
@@ -29,21 +29,21 @@
       return el('div', { className: `settings-strategy${on ? '' : ' is-off'}` }, [t, el('div', {}, [el('strong', { textContent: labels[id] }),
         ...[SD.evidenceBadge.badge(records[id])].filter(Boolean),
         ...(notes[id] ? [el('span', { className: 'settings-note', textContent: notes[id] })] : [])])]);
-    }), recorderLine());
+    }), recorderLine('Decision recorder', recorder, 'DECISIONS_RECORDER'), recorderLine('Event capture', events, 'EVENTS_RECORDER'));
     if (Date.now() - recorderAt > 30000) {
       recorderAt = Date.now();
-      fetch('/api/version', { credentials: 'same-origin', cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((v) => { recorder = v && v.decisionRecorder; render(); }).catch(() => {});
+      fetch('/api/version', { credentials: 'same-origin', cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((v) => { recorder = v && v.decisionRecorder; events = v && v.eventRecorder; render(); }).catch(() => {});
     }
   }
 
-  // "Decision recorder: 214 today · 0 dropped · last write 14:05" (amber: drops, write / serialization errors, or decisions without their inputs).
-  function recorderLine() {
-    const r = recorder;
-    if (!r) return el('p', { className: 'settings-recorder', textContent: 'Decision recorder: status not loaded yet' });
-    if (r.error || r.enabled === false) return el('p', { className: 'settings-recorder is-warn', textContent: `Decision recorder: ${r.error ? `unavailable (${r.error})` : 'OFF (DECISIONS_RECORDER=off)'}` });
-    const bad = (r.dropped || 0) + (r.writeErrors || 0) + (r.serializeErrors || 0) + (r.recordErrors || 0);
+  // "Decision recorder: 214 today · 0 dropped · last write 14:05" and (Phase 94) "Event capture: ..." (amber: drops, write /
+  // serialization errors, records without their inputs, or a write STALLED: the disk has not answered for 30 s).
+  function recorderLine(name, r, envVar) {
+    if (!r) return el('p', { className: 'settings-recorder', textContent: `${name}: status not loaded yet` });
+    if (r.error || r.enabled === false) return el('p', { className: 'settings-recorder is-warn', textContent: `${name}: ${r.error ? `unavailable (${r.error})` : `OFF (${envVar}=off)`}` });
+    const bad = (r.dropped || 0) + (r.writeErrors || 0) + (r.serializeErrors || 0) + (r.recordErrors || 0) + (r.stalled ? 1 : 0);
     const when = r.lastWriteAt ? new Date(r.lastWriteAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'none yet';
-    const text = `Decision recorder: ${r.recordedToday || 0} today · ${r.dropped || 0} dropped · ${(r.writeErrors || 0) + (r.serializeErrors || 0)} write errors`
+    const text = `${name}: ${r.stalled ? `write STALLED ${Math.round((r.stalledForMs || 0) / 1000)} s · ` : ''}${r.recordedToday || 0} today · ${r.dropped || 0} dropped · ${(r.writeErrors || 0) + (r.serializeErrors || 0)} write errors`
       + `${r.missingContext ? ` · ${r.missingContext} without inputs` : ''} · last write ${when}${r.lastError ? ` · last error: ${r.lastError}` : ''}`;
     return el('p', { className: `settings-recorder${bad || r.missingContext ? ' is-warn' : ''}`, textContent: text });
   }

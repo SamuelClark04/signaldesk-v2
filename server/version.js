@@ -14,7 +14,8 @@ function report(settings = {}) {
   return { ...BOOT, strategiesEnabled: { ...(settings.strategiesEnabled || {}) }, strategyPauseVersion: settings.strategyPauseVersion ?? null, radarVersion: settings.radarVersion ?? null, paperOnly: settings.paperOnly ?? null,
     stockMode: settings.stockMode, cryptoMode: settings.cryptoMode, paperStockBroker: settings.paperStockBroker,
     dailyProfitTargetOn: settings.dailyProfitTargetOn, maxOpenPositions: settings.maxOpenPositions,
-    decisionRecorder: (() => { try { return require('./research/decision-recorder').status(); } catch (err) { return { error: err.message }; } })() }; // Phase 93
+    decisionRecorder: (() => { try { return require('./research/decision-recorder').status(); } catch (err) { return { error: err.message }; } })(), // Phase 93
+    eventRecorder: (() => { try { return require('./research/event-recorder').status(); } catch (err) { return { error: err.message }; } })() }; // Phase 94
 }
 
 module.exports = { BOOT, report };
