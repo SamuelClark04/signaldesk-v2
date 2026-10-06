@@ -21,11 +21,16 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
     { title: 'GDP', country: 'EUR', date: '2026-10-07T05:00:00-04:00', impact: 'High', forecast: '', previous: '' }]) }) });
   await mc.refresh({ now: T0, fetchImpl: async () => ({ ok: false, status: 503, text: async () => '' }) });
   const es = require(S + 'research/earnings-snapshot'); es._test.reset();
-  global.fetch = async (u, o) => (/calendar\/earnings/.test(String(u)) && o.headers['X-Finnhub-Token'] === 'fk'
-    ? { ok: true, status: 200, json: async () => ({ earningsCalendar: [{ symbol: 'AMZN', date: '2026-10-29', hour: 'amc', epsEstimate: 1.6, revenueEstimate: 1.8e11, quarter: 3, year: 2026 }, { symbol: 'ZZZZ', date: '2026-10-20' }] }) }
-    : { ok: false, status: 401, json: async () => ({}) });
+  // Finnhub caps an all-US calendar answer (1,500 rows seen 2026-10-06): the snapshot queries EACH capture symbol.
+  const earnCalls = [];
+  global.fetch = async (u, o) => { const q = new URL(String(u)).searchParams; earnCalls.push(q.get('symbol'));
+    if (!/calendar\/earnings/.test(String(u)) || o.headers['X-Finnhub-Token'] !== 'fk') return { ok: false, status: 401, json: async () => ({}) };
+    if (q.get('symbol') === 'TSLA' && process.env.PH94_FAIL_TSLA) return { ok: false, status: 502, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ earningsCalendar: q.get('symbol') === 'AMZN' ? [{ symbol: 'AMZN', date: '2026-10-29', hour: 'amc', epsEstimate: 1.6, revenueEstimate: 1.8e11, quarter: 3, year: 2026 }] : [] }) }; };
   process.env.FINNHUB_API_KEY = 'fk'; process.env.FINNHUB_BASE_URL = 'http://finnhub.test';
   const snap = await es.take({ now: T0 });
+  const callsPerSnapshot = earnCalls.length;
+  process.env.PH94_FAIL_TSLA = '1'; es._test.reset(); const partial = await es.take({ now: T0 }); delete process.env.PH94_FAIL_TSLA; es._test.reset();
   process.env.FINNHUB_API_KEY = ''; const nokey = await es.take({ now: T0 }); const nokey2 = await es.take({ now: T0 + 600000 });
   global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
   process.env.FINNHUB_BASE_URL = DEAD; process.env.ALPACA_API_KEY = ''; process.env.ALPACA_API_SECRET = ''; process.env.ALPACA_DATA_BASE_URL = DEAD;
@@ -38,9 +43,12 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
   check('OPTION_MARK from the refreshQuotes tap: the fetched quote, labelled with the feed', tapMark && tapMark.bid === 1.2 && tapMark.ask === 1.3 && tapMark.feed);
   check('MACRO_SNAPSHOT: every USD row with forecast / previous (not only high impact), t_recv', macro && macro.rows.length === 1 && macro.rows[0].forecast === '0.3%' && Number.isFinite(macro.t_recv));
   check('C4: a failed macro feed refresh is recorded (POLL_STATUS macro-feed ok:false)', fails.some((x) => x.source === 'macro-feed' && /503/.test(x.error)));
-  check('EARNINGS_SNAPSHOT: capture-universe rows only, estimates kept, t_recv', snap.ok && earn.length === 1 && earn[0].rows.length === 1 && earn[0].rows[0].symbol === 'AMZN' && earn[0].rows[0].epsEstimate === 1.6 && earn[0].total === 2);
+  check('EARNINGS_SNAPSHOT: one query per capture symbol (no all-US cap), estimates kept, t_recv, complete', snap.ok && callsPerSnapshot === 24 && earn[0].rows.length === 1
+    && earn[0].rows[0].symbol === 'AMZN' && earn[0].rows[0].epsEstimate === 1.6 && earn[0].queried === 24 && earn[0].complete === true, `${callsPerSnapshot} ${JSON.stringify(earn[0] && { q: earn[0].queried, c: earn[0].complete })}`);
+  check('EARNINGS_SNAPSHOT: a symbol that failed makes the snapshot INCOMPLETE (named), never silently short', partial.ok === false && earn[1] && earn[1].complete === false
+    && earn[1].errors.some((e) => e.symbol === 'TSLA' && /502/.test(e.error)), JSON.stringify(earn[1] && earn[1].errors));
   check('C4: an earnings snapshot without a key is recorded as a failed source, once per day + error (no throw)', nokey.ok === false && nokey2.ok === false
-    && fails.filter((x) => x.source === 'finnhub-earnings').length === 1);
+    && fails.filter((x) => x.source === 'finnhub-earnings' && /not set/.test(x.error)).length === 1);
   // The capture start: idempotent; EVENTS_RECORDER=off starts nothing.
   const cap = require(S + 'research/event-capture');
   require(S + 'research/news-capture')._test.reset(); process.env.EVENTS_RECORDER = 'off'; cap.start(); const offStarted = require(S + 'research/news-capture').status().cursor !== null; delete process.env.EVENTS_RECORDER;

@@ -14,7 +14,7 @@ module.exports = async ({ check }) => {
       L.push({ v: 1, kind: 'POLL_STATUS', at: T.at(ymd, m), source: 'alpaca-news', ok: pollOk, marketOpen: true, ...(pollOk ? { new: 0 } : { error: 'HTTP 503' }) });
     }
     for (let i = 0; i < news; i += 1) L.push({ v: 1, kind: 'NEWS', at: T.at(ymd, 600 + i), docId: `alpaca:${i}`, seenVia: 'poll' });
-    if (earnings) L.push({ v: 1, kind: 'EARNINGS_SNAPSHOT', at: T.at(ymd, 7 * 60 + 5), rows: [] }); else L.push({ v: 1, kind: 'POLL_STATUS', at: T.at(ymd, 7 * 60 + 5), source: 'finnhub-earnings', ok: false, error: 'HTTP 401' });
+    if (earnings) L.push({ v: 1, kind: 'EARNINGS_SNAPSHOT', at: T.at(ymd, 7 * 60 + 5), rows: [], complete: earnings !== 'partial', errors: earnings === 'partial' ? [{ symbol: 'TSLA', error: 'HTTP 502' }] : [] }); else L.push({ v: 1, kind: 'POLL_STATUS', at: T.at(ymd, 7 * 60 + 5), source: 'finnhub-earnings', ok: false, error: 'HTTP 401' });
     if (macro) L.push({ v: 1, kind: 'MACRO_SNAPSHOT', at: T.at(ymd, 6 * 60 + 5), rows: [] });
     if (status) for (let m = T.OPEN_MIN; m < T.CLOSE_MIN; m += 10) L.push({ v: 1, kind: 'STATUS', at: T.at(ymd, m), dropped, writeErrors: 0, serializeErrors: 0, recordErrors: 0, stalled, health: { cpuPct: cpu, rssMb: rss, loopP99Ms: loop } });
     return L;
@@ -31,9 +31,9 @@ module.exports = async ({ check }) => {
   s = insp.summarize(bad, { budget });
   check('C4 pilot: ten files full of FAILED polls are not ten healthy sessions', s.pilotCriteria.ok === false && s.pilotCriteria.healthy === 0
     && s.days.every((x) => x.reasons.some((r) => /polls ok/.test(r))), JSON.stringify(s.days[0].reasons));
-  const cases = { gap: { gapAt: [12 * 60, 12 * 60 + 30] }, sparse: { pollsEvery: 5 }, earnings: { earnings: false }, macro: { macro: false }, status: { status: false },
+  const cases = { partial: { earnings: 'partial' }, gap: { gapAt: [12 * 60, 12 * 60 + 30] }, sparse: { pollsEvery: 5 }, earnings: { earnings: false }, macro: { macro: false }, status: { status: false },
     dropped: { dropped: 3 }, cpu: { cpu: 95 }, rss: { rss: 900 }, loop: { loop: 900 }, stalled: { stalled: true } };
-  const expect = { gap: /gap/, sparse: /polls present/, earnings: /earnings/, macro: /macro/, status: /STATUS/, dropped: /drop|error/, cpu: /CPU/, rss: /memory|RSS/, loop: /event-loop/, stalled: /stall/ };
+  const expect = { partial: /incomplete/, gap: /gap/, sparse: /polls present/, earnings: /earnings/, macro: /macro/, status: /STATUS/, dropped: /drop|error/, cpu: /CPU/, rss: /memory|RSS/, loop: /event-loop/, stalled: /stall/ };
   const one = (opts) => { const d1 = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94p3-')); fs.writeFileSync(path.join(d1, 'events-2026-10-05.jsonl'), day('2026-10-05', opts).map((l) => JSON.stringify(l)).join('\n') + '\n'); return insp.summarize(d1, { budget }).days[0]; };
   const results = Object.entries(cases).map(([k, o]) => { const r = one(o); return [k, r.healthy === false && r.reasons.some((x) => expect[k].test(x)), r.reasons.join('; ')]; });
   check('C4 pilot: each failure makes a session unhealthy with its reason (a 30-min poll gap, < 90% polls, earnings / macro source down, no STATUS coverage, drops, CPU, RSS, event loop, stall)',

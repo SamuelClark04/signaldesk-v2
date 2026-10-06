@@ -2,7 +2,7 @@
 // Run: node tools/event-research/inspect.js <folder with events-*.jsonl> [--budget tools/event-research/budget.json]
 // A SESSION is a day with market-hours news polls (weekends / holidays are not sessions). It is HEALTHY only if every check passes:
 //   collection   >= 90% of the expected market-hours polls present (one every 2 min), >= 95% of them ok, no market-hours gap > 10 min
-//   sources      the day's earnings snapshot and macro snapshot both recorded
+//   sources      the day's earnings snapshot (complete: every capture symbol answered) and macro snapshot both recorded
 //   recorder     STATUS lines in >= 6 of the 7 market hours; no drop / write / serialize / record error added that day; no stall
 //   process      CPU % p95, RSS max and event-loop p99 max within the measured budget (budget.json; none = not healthy)
 // NEWS counts are reported, never required: a quiet day with zero headlines is not a failure.
@@ -50,6 +50,10 @@ function summarize(dir, { budget = null } = {}) {
     if (maxGapMin > MAX_GAP_MIN) out.reasons.push(`collection: a ${Math.round(maxGapMin)}-minute gap between market-hours polls (> 10)`);
     const fail = (src) => L.filter((x) => x.kind === 'POLL_STATUS' && x.source === src && !x.ok).map((x) => x.error).slice(-1)[0];
     if (!byKind.EARNINGS_SNAPSHOT) out.reasons.push(`sources: no earnings snapshot${fail('finnhub-earnings') ? ` (finnhub-earnings: ${fail('finnhub-earnings')})` : ''}`);
+    else if (!L.some((x) => x.kind === 'EARNINGS_SNAPSHOT' && x.complete !== false)) {
+      const e = L.filter((x) => x.kind === 'EARNINGS_SNAPSHOT').slice(-1)[0];
+      out.reasons.push(`sources: earnings snapshot incomplete (${(e.errors || []).map((x) => `${x.symbol}: ${x.error}`).join(', ')})`);
+    }
     if (!byKind.MACRO_SNAPSHOT) out.reasons.push(`sources: no macro snapshot${fail('macro-feed') ? ` (macro-feed: ${fail('macro-feed')})` : ''}`);
     const hours = new Set(statuses.filter(inMkt).map((s) => Math.floor((T.minuteOf(s.at) - 30) / 60)));
     if (hours.size < MIN_STATUS_HOURS) out.reasons.push(`recorder: STATUS lines in ${hours.size} of 7 market hours (< ${MIN_STATUS_HOURS})`);
