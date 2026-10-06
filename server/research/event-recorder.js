@@ -59,7 +59,7 @@ function health() {
   cpuMark = { at: now, usage };
   let loopP99Ms = null; let loopMaxMs = null;
   // review: reported as delay BEYOND the sampling interval (an idle loop reads ~LOOP_RESOLUTION_MS), floored at 0
-  const excess = (ns) => Math.max(0, Math.round(ns / 1e4) / 100 - LOOP_RESOLUTION_MS);
+  const excess = (ns) => Math.max(0, Math.round(ns / 1e4 - LOOP_RESOLUTION_MS * 100) / 100); // rounded after the subtraction
   if (loopHist) { loopP99Ms = excess(loopHist.percentile(99)); loopMaxMs = excess(loopHist.max); loopHist.reset(); }
   return { scope: 'whole server process', cpuPct, rssMb: Math.round(mem.rss / 1e5) / 10, heapMb: Math.round(mem.heapUsed / 1e5) / 10, loopP99Ms, loopMaxMs,
     loopNote: `event-loop delay beyond the ${LOOP_RESOLUTION_MS} ms sampling interval; the first moments after each STATUS line are not sampled` };
