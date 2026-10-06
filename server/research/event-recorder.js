@@ -12,7 +12,8 @@ const FLUSH_MS = 5000;
 const KEEP_DAYS = 60;
 const MAX_TEXT = 64 * 1024;
 const STATUS_EVERY_MS = 10 * 60 * 1000;
-const LOOP_RESOLUTION_MS = 20; // the event-loop monitor's sampling interval: an idle loop reads about this much
+const LOOP_RESOLUTION_MS = 20;
+const BOOT_ID = new Date(Date.now() - process.uptime() * 1000).toISOString(); // this process's start: counters restart with it // the event-loop monitor's sampling interval: an idle loop reads about this much
 
 let clock = () => Date.now();
 let timer = null;
@@ -67,7 +68,7 @@ function health() {
 
 async function flush() {
   if (enabled() && clock() - lastStatusAt >= STATUS_EVERY_MS) { // review: no STATUS line while recording is off
-    lastStatusAt = clock(); sink.push({ v: 1, kind: 'STATUS', at: lastStatusAt, ...status(), health: health() }); }
+    lastStatusAt = clock(); sink.push({ v: 1, kind: 'STATUS', at: lastStatusAt, bootId: BOOT_ID, ...status(), health: health() }); }
   return sink.flush();
 }
 function start() {

@@ -30,7 +30,9 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
   process.env.FINNHUB_API_KEY = 'fk'; process.env.FINNHUB_BASE_URL = 'http://finnhub.test';
   const snap = await es.take({ now: T0 });
   const callsPerSnapshot = earnCalls.length;
-  process.env.PH94_FAIL_TSLA = '1'; es._test.reset(); const partial = await es.take({ now: T0 }); delete process.env.PH94_FAIL_TSLA; es._test.reset();
+  process.env.PH94_FAIL_TSLA = '1'; es._test.reset(); earnCalls.length = 0; const partial = await es.take({ now: T0 });
+  const retryCalls0 = earnCalls.length; const partial2 = await es.take({ now: T0 + 600000 }); const retry1 = earnCalls.slice(retryCalls0);
+  delete process.env.PH94_FAIL_TSLA; const healed = await es.take({ now: T0 + 1200000 }); es._test.reset();
   process.env.FINNHUB_API_KEY = ''; const nokey = await es.take({ now: T0 }); const nokey2 = await es.take({ now: T0 + 600000 });
   global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
   process.env.FINNHUB_BASE_URL = DEAD; process.env.ALPACA_API_KEY = ''; process.env.ALPACA_API_SECRET = ''; process.env.ALPACA_DATA_BASE_URL = DEAD;
@@ -47,6 +49,8 @@ module.exports = async ({ S, DEAD, check, readEvents, wipeEvents, ev }) => {
     && earn[0].rows[0].symbol === 'AMZN' && earn[0].rows[0].epsEstimate === 1.6 && earn[0].queried === 24 && earn[0].complete === true, `${callsPerSnapshot} ${JSON.stringify(earn[0] && { q: earn[0].queried, c: earn[0].complete })}`);
   check('EARNINGS_SNAPSHOT: a symbol that failed makes the snapshot INCOMPLETE (named), never silently short', partial.ok === false && earn[1] && earn[1].complete === false
     && earn[1].errors.some((e) => e.symbol === 'TSLA' && /502/.test(e.error)), JSON.stringify(earn[1] && earn[1].errors));
+  check('review: a retry queries ONLY the failed symbols, and an unchanged error set is not recorded again', retry1.join() === 'TSLA' && partial2.ok === false && earn.length === 3, `${retry1.join()} ${earn.length}`);
+  check('review: once the failed symbol answers, a COMPLETE snapshot (the day\'s good rows + the retried ones) is recorded', healed.ok === true && earn[2] && earn[2].complete === true && earn[2].rows.some((r) => r.symbol === 'AMZN'));
   check('C4: an earnings snapshot without a key is recorded as a failed source, once per day + error (no throw)', nokey.ok === false && nokey2.ok === false
     && fails.filter((x) => x.source === 'finnhub-earnings' && /not set/.test(x.error)).length === 1);
   // The capture start: idempotent; EVENTS_RECORDER=off starts nothing.

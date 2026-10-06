@@ -1,9 +1,11 @@
 // Phase 94 Stage 1 pilot health check (PC, read-only; correction C4): summarize the events-*.jsonl files of a vm-audit archive.
 // Run: node tools/event-research/inspect.js <folder with events-*.jsonl> [--budget tools/event-research/budget.json]
-// A SESSION is a day with market-hours news polls (weekends / holidays are not sessions). It is HEALTHY only if every check passes:
-//   collection   >= 90% of the expected market-hours polls present (one every 2 min), >= 95% of them ok, no market-hours gap > 10 min
+// A SESSION is an NYSE trading day (weekdays minus the NYSE holidays below) between the first and last events file: a session with NO file
+// (the server was down) is NOT HEALTHY. Session length = 09:30 to 16:00, or 13:00 on NYSE's listed early closes. HEALTHY needs every check:
+//   collection   >= 90% of the expected session polls present (one every 2 min), >= 95% of them ok, no gap > 10 min between OK polls
 //   sources      the day's earnings snapshot (complete: every capture symbol answered) and macro snapshot both recorded
-//   recorder     STATUS lines in >= 6 of the 7 market hours; no drop / write / serialize / record error added that day; no stall
+//   recorder     STATUS lines in all but one of the session's hours; no drop / write / serialize / record error added that day (counters
+//                restart from 0 with a new bootId); no stall; no unreadable line
 //   process      CPU % p95, RSS max and event-loop p99 max within the measured budget (budget.json; none = not healthy)
 // NEWS counts are reported, never required: a quiet day with zero headlines is not a failure.
 // The pilot criteria (spec 3.1): >= 10 sessions and the LAST 10 all healthy. Expansion still needs the user's approval.
@@ -11,43 +13,55 @@ const fs = require('fs');
 const path = require('path');
 const T = require('../decision-review/time');
 
+// NYSE full closures and 1 PM early closes, from nyse.com/markets/hours-calendars (checked 2026-10-06). Extend yearly.
+const NYSE_HOLIDAYS = new Set(['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31', '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24']);
+const NYSE_EARLY_CLOSES = new Set(['2026-11-27', '2026-12-24', '2027-11-26']);
+const weekday = (ymd) => { const wd = new Date(`${ymd}T12:00:00Z`).getUTCDay(); return wd > 0 && wd < 6; };
+const isSessionDay = (ymd) => weekday(ymd) && !NYSE_HOLIDAYS.has(ymd);
+const closeMinOf = (ymd) => (NYSE_EARLY_CLOSES.has(ymd) ? 13 * 60 : T.CLOSE_MIN);
+function daysBetween(a, b) { const out = []; for (let t = Date.parse(`${a}T12:00:00Z`); t <= Date.parse(`${b}T12:00:00Z`); t += 864e5) out.push(new Date(t).toISOString().slice(0, 10)); return out; }
 const POLL_EVERY_MIN = 2;
-const MIN_PRESENT = 0.9; const MIN_OK = 0.95; const MAX_GAP_MIN = 10; const MIN_STATUS_HOURS = 6;
+const MIN_PRESENT = 0.9; const MIN_OK = 0.95; const MAX_GAP_MIN = 10;
 const read = (f) => fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return { kind: 'UNREADABLE' }; } });
 const pct = (xs, p) => { const v = xs.filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.min(v.length - 1, Math.floor(p * v.length))] : null; };
 
-// Counters are cumulative per process: count only what was ADDED (a lower value = a restart, counted from 0).
+// Counters are cumulative per process: count only what was ADDED. A new bootId (or a lower value) = a restart, counted from 0.
 function added(statuses, field, base) {
-  let prev = base; let sum = 0;
-  for (const s of statuses) { const v = Number(s[field]) || 0; sum += v >= prev ? v - prev : v; prev = v; }
-  return { sum, last: prev };
+  let prev = base.value; let boot = base.bootId; let sum = 0;
+  for (const s of statuses) { const v = Number(s[field]) || 0; const restarted = (s.bootId && boot && s.bootId !== boot) || v < prev; sum += restarted ? v : v - prev; prev = v; boot = s.bootId || boot; }
+  return { sum, last: { value: prev, bootId: boot } };
 }
 
 function summarize(dir, { budget = null } = {}) {
   if (!fs.existsSync(dir)) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
   const files = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
-  const base = { dropped: 0, errors: 0 };
-  const days = files.map((f) => {
-    const day = f.slice(7, 17); const L = read(path.join(dir, f));
-    const open = T.at(day, T.OPEN_MIN); const close = T.at(day, T.CLOSE_MIN);
+  if (!files.length) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
+  const base = { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } };
+  const byDay = new Map(files.map((f) => [f.slice(7, 17), f]));
+  const days = daysBetween(files[0].slice(7, 17), files[files.length - 1].slice(7, 17)).map((day) => {
+    if (!byDay.has(day)) return isSessionDay(day) ? { day, session: true, healthy: false, byKind: {}, news: 0, reasons: ['no events file for this NYSE session (the server was down, or the file was not archived)'] } : { day, session: false, healthy: null, byKind: {}, news: 0, reasons: [] };
+    const f = byDay.get(day); const L = read(path.join(dir, f));
+    const open = T.at(day, T.OPEN_MIN); const close = T.at(day, closeMinOf(day));
     const inMkt = (x) => x.at >= open && x.at < close;
     const byKind = {}; for (const x of L) byKind[x.kind] = (byKind[x.kind] || 0) + 1;
     const polls = L.filter((x) => x.kind === 'POLL_STATUS' && x.source === 'alpaca-news' && inMkt(x)).sort((a, b) => a.at - b.at);
-    const session = polls.some((x) => x.marketOpen);
+    const session = isSessionDay(day);
     const out = { day, session, byKind, news: byKind.NEWS || 0, reasons: [] };
     const statuses = L.filter((x) => x.kind === 'STATUS').sort((a, b) => a.at - b.at);
-    const errs = statuses.map((s) => ({ errors: (Number(s.writeErrors) || 0) + (Number(s.serializeErrors) || 0) + (Number(s.recordErrors) || 0) }));
+    const errs = statuses.map((s) => ({ bootId: s.bootId, errors: (Number(s.writeErrors) || 0) + (Number(s.serializeErrors) || 0) + (Number(s.recordErrors) || 0) }));
     const dr = added(statuses, 'dropped', base.dropped); const er = added(errs, 'errors', base.errors);
     base.dropped = dr.last; base.errors = er.last;
     if (!session) { out.healthy = null; return out; }
-    const expected = Math.floor((T.CLOSE_MIN - T.OPEN_MIN) / POLL_EVERY_MIN);
+    const expected = Math.floor((closeMinOf(day) - T.OPEN_MIN) / POLL_EVERY_MIN);
     const ok = polls.filter((x) => x.ok).length;
-    const times = [open, ...polls.map((x) => x.at), close];
+    const times = [open, ...polls.filter((x) => x.ok).map((x) => x.at), close]; // review: failed polls never hide a gap
     const maxGapMin = Math.max(...times.slice(1).map((t, i) => (t - times[i]) / 60000));
     out.polls = { expected, present: polls.length, ok, maxGapMin: Math.round(maxGapMin) };
     if (polls.length / expected < MIN_PRESENT) out.reasons.push(`collection: ${polls.length} of ${expected} expected polls present (< 90%)`);
     if (polls.length && ok / polls.length < MIN_OK) out.reasons.push(`collection: ${ok} of ${polls.length} polls ok (< 95%)`);
-    if (maxGapMin > MAX_GAP_MIN) out.reasons.push(`collection: a ${Math.round(maxGapMin)}-minute gap between market-hours polls (> 10)`);
+    if (maxGapMin > MAX_GAP_MIN) out.reasons.push(`collection: a ${Math.round(maxGapMin)}-minute gap between OK polls (> 10)`);
+    if (byKind.UNREADABLE) out.reasons.push(`file: ${byKind.UNREADABLE} unreadable line(s)`);
     const fail = (src) => L.filter((x) => x.kind === 'POLL_STATUS' && x.source === src && !x.ok).map((x) => x.error).slice(-1)[0];
     if (!byKind.EARNINGS_SNAPSHOT) out.reasons.push(`sources: no earnings snapshot${fail('finnhub-earnings') ? ` (finnhub-earnings: ${fail('finnhub-earnings')})` : ''}`);
     else if (!L.some((x) => x.kind === 'EARNINGS_SNAPSHOT' && x.complete !== false)) {
@@ -56,7 +70,8 @@ function summarize(dir, { budget = null } = {}) {
     }
     if (!byKind.MACRO_SNAPSHOT) out.reasons.push(`sources: no macro snapshot${fail('macro-feed') ? ` (macro-feed: ${fail('macro-feed')})` : ''}`);
     const hours = new Set(statuses.filter(inMkt).map((s) => Math.floor((T.minuteOf(s.at) - 30) / 60)));
-    if (hours.size < MIN_STATUS_HOURS) out.reasons.push(`recorder: STATUS lines in ${hours.size} of 7 market hours (< ${MIN_STATUS_HOURS})`);
+    const sessionHours = Math.ceil((closeMinOf(day) - T.OPEN_MIN) / 60); const needHours = sessionHours - 1;
+    if (hours.size < needHours) out.reasons.push(`recorder: STATUS lines in ${hours.size} of ${sessionHours} session hours (< ${needHours})`);
     if (dr.sum > 0) out.reasons.push(`recorder: ${dr.sum} record(s) dropped that day`);
     if (er.sum > 0) out.reasons.push(`recorder: ${er.sum} write / serialize / record error(s) that day`);
     if (statuses.some((s) => s.stalled)) out.reasons.push('recorder: a write stall was reported');
@@ -91,4 +106,4 @@ if (require.main === module) {
   console.log(`pilot criteria: ${s.pilotCriteria.healthy} healthy of ${s.pilotCriteria.sessions} session(s); the last 10 all healthy: ${s.pilotCriteria.ok ? 'YES (expansion still needs the user\'s approval)' : 'not yet'}`);
 }
 
-module.exports = { summarize };
+module.exports = { summarize, isSessionDay, NYSE_HOLIDAYS, NYSE_EARLY_CLOSES };
