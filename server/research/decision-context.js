@@ -6,7 +6,8 @@
 //       values (Phase 94 S0-1: a bar the stream later updates in place never changes the evidence); values are bounded copies.
 //       No serialization here (the recorder's flush does it, time-sliced).
 //   block(id, reason, candidate, inputs)   a strategy-internal skip AFTER a signal fired (e.g. an ORB breakout filtered out):
-//       capture + decision-recorder STRATEGY_BLOCK in one call.
+//       capture + decision-recorder STRATEGY_BLOCK in one call. No guard snapshot: such a filter is checked against its own recorded
+//       signal values (Decision Review rule checks), never against the book limits / shields (Phase 94 S0-3: guard-exempt).
 // Observational: nothing here feeds a trading decision, and a failure is counted, never raised.
 const MAX_IDS = 500;
 const MAX_BARS = 3000;

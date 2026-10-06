@@ -99,17 +99,17 @@ async function pipelinePass() {
   // Open / staged trades on Coinbase gems keep streaming (exits and approvals need live prices).
   discovery.stream([...ledger.getActivePositions(), ...ledger.getPendingOrders()].filter((p) => p.market === 'crypto').map((p) => p.asset));
   const candidates = await runner.collect();
-  // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of runner.takeBlocks()) recordRejection(b.id, b.reason, b.candidate, 'STRATEGY_BLOCK');
-  // Scanner log: what each strategy concluded per symbol on this pass.
-  for (const [id, scan] of runner.scans()) scanLog.scanned(id, scan);
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
   // capital of the venue it would execute on: the paper bankroll, or the LIVE
   // broker account (cached ~60 s).
   const settings = ledger.getSettings();
   const shieldState = entryShields.refresh(ledger, settings); // today's P/L (may trip the kill switch) + the macro blackout
-  passGuard = require('../research/decision-guard').snapshot(shieldState, settings); // Phase 93 / 94: the pass's guard, stamped
+  passGuard = require('../research/decision-guard').snapshot(shieldState, settings); // Phase 93 / 94: THIS pass's guard (set before any rejection is recorded)
+  // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
+  for (const b of runner.takeBlocks()) recordRejection(b.id, b.reason, b.candidate, 'STRATEGY_BLOCK');
+  // Scanner log: what each strategy concluded per symbol on this pass.
+  for (const [id, scan] of runner.scans()) scanLog.scanned(id, scan);
   const { riskPct, maxCapitalPct } = settings;
   counts.generated = candidates.length;
 

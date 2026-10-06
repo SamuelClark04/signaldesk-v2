@@ -29,6 +29,8 @@ module.exports = async ({ S, check, rec, dc, readLines, wipe, T }) => {
   const staged = ledger.getPendingOrders().find((o) => o.asset === 'JPM');
   check('decisions unchanged: JPM staged, KO rejected by the risk engine (stop on the wrong side), as without the recorder', !!staged && !ledger.getPendingOrders().some((o) => o.asset === 'KO'));
   check('staged orders carry NO chart data (the inputs live beside the setup, never in the ledger / browser)', staged && !JSON.stringify(staged).includes('"bars"') && !('context' in staged));
+  // Phase 94 S0-3: a setting changed between the pass and the approval must show up in the APPROVAL's snapshot only (fresh, not reused).
+  ledger.updateSettings({ dailyProfitTarget: 777 });
   const router = require(S + 'execution/order-router');
   let err = null;
   try { await router.approveWithGuard(staged.id, { actor: 'user', amount: 0.01 }); } catch (e) { err = e.message; }
@@ -62,12 +64,14 @@ module.exports = async ({ S, check, rec, dc, readLines, wipe, T }) => {
   check('/api/version carries the recorder status (recorded, dropped, errors, missing inputs, last write)', ver.decisionRecorder && Number.isFinite(ver.decisionRecorder.dropped)
     && ver.decisionRecorder.lastWriteAt > 0 && Number.isFinite(ver.decisionRecorder.missingContext), JSON.stringify(ver.decisionRecorder).slice(0, 200));
   // Phase 94 S0-3: each decision event carries ITS OWN guard snapshot, taken when that event happened (approval-time ones included).
-  const decisionEvents = L.filter((x) => x.type === 'decision' && ['STAGED', 'PIPELINE_REJECT', 'APPROVAL_HOLD', 'APPROVED', 'USER_REJECT'].includes(x.path));
-  check('S0-3: every staged / rejection / approval-time event has its own guard (limits + kill switch + macro state, stamped)', decisionEvents.length >= 6
+  const decisionEvents = L.filter((x) => x.type === 'decision' && ['STAGED', 'PIPELINE_REJECT', 'STRATEGY_BLOCK', 'APPROVAL_HOLD', 'APPROVAL_REJECT', 'APPROVED', 'ROUTE_FAILED', 'USER_REJECT'].includes(x.path));
+  check('S0-3: every staged / rejection / approval-time event has its own guard (limits + kill switch + macro state, stamped)', decisionEvents.length >= 8 && decisionEvents.some((x) => x.path === 'STRATEGY_BLOCK')
     && decisionEvents.every((x) => x.guard && Number.isFinite(x.guard.at) && x.guard.maxOpenRiskPct !== undefined && 'kill' in x.guard && 'macroActive' in x.guard),
     JSON.stringify(decisionEvents.filter((x) => !x.guard || !Number.isFinite(x.guard.at)).map((x) => x.path)));
   const hold = L.find((x) => x.type === 'decision' && x.id === jpm.id && x.path === 'APPROVAL_HOLD');
   const stagedLine = L.find((x) => x.type === 'decision' && x.id === jpm.id && x.path === 'STAGED');
-  check('S0-3: the approval-time snapshot is taken at the approval (its own time, not the pass)', !!(hold && hold.guard && stagedLine && stagedLine.guard)
-    && hold.guard.at >= stagedLine.guard.at && hold.guard.at >= hold.at - 1000);
+  check('S0-3: the approval-time snapshot is FRESH (a setting changed after the pass appears in it, not in the STAGED snapshot of the pass)', !!(hold && hold.guard && stagedLine && stagedLine.guard)
+    && hold.guard.dailyProfitTarget === 777 && stagedLine.guard.dailyProfitTarget !== 777 && hold.guard.at >= stagedLine.guard.at, `${hold && hold.guard && hold.guard.dailyProfitTarget} / ${stagedLine && stagedLine.guard && stagedLine.guard.dailyProfitTarget}`);
+  const blkLine = L.find((x) => x.type === 'decision' && x.path === 'STRATEGY_BLOCK');
+  check('S0-3: a strategy block recorded in a pass carries the guard of THAT pass (refreshed before blocks are recorded)', !!(blkLine && blkLine.guard && Number.isFinite(blkLine.guard.at)));
 };
