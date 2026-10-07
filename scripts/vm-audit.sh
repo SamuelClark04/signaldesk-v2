@@ -73,10 +73,16 @@ L=server/data/ledger-state.json
 H0="$(sha256sum "$L" | cut -c1-64)"; cp -p "$L" "$OUT/ledger-snapshot.json"; H1="$(sha256sum "$L" | cut -c1-64)"
 for f in paper-runs.json external-holdings.json; do [ -f "server/data/$f" ] && cp -p "server/data/$f" "$OUT/$f"; done
 # Phase 93: the decision recorder's files (last 35 days; read-only copies) + its log warnings, for tools/decision-review on the PC.
-DD="${DECISIONS_DIR:-server/data}"; mkdir -p "$OUT/decisions"
+DD="${DECISIONS_DIR:-$(dirname "$L")}"; mkdir -p "$OUT/decisions" # the recorder writes next to the ledger unless DECISIONS_DIR is set
 find "$DD" -maxdepth 1 -name 'decisions-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" \; 2>/dev/null
 [ -n "$APP" ] && pm2 logs "$APP" --lines 5000 --nostream 2>/dev/null | grep 'decision-recorder' > "$OUT/decisions/recorder-log.txt"
 echo "decision recorder files: $(ls "$OUT/decisions"/decisions-*.jsonl 2>/dev/null | wc -l) day(s), $(cat "$OUT/decisions"/decisions-*.jsonl 2>/dev/null | wc -l) lines; warnings logged: $(wc -l < "$OUT/decisions/recorder-log.txt" 2>/dev/null || echo 0)"
+# Phase 94: the event capture files (last 35 days; read-only copies), the news cursor, and the saved watchlist (the universe-v1 freeze).
+ED="${EVENTS_DIR:-$(dirname "$L")}" # pm2 env vars are not visible to this shell: set them here if the app overrides them
+find "$ED" -maxdepth 1 -name 'events-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" \; 2>/dev/null
+[ -f "$ED/news-cursor.json" ] && cp -p "$ED/news-cursor.json" "$OUT/decisions/news-cursor.json"
+[ -f server/data/watchlist.json ] && cp -p server/data/watchlist.json "$OUT/watchlist.json"
+echo "event capture files: $(ls "$OUT/decisions"/events-*.jsonl 2>/dev/null | wc -l) day(s), $(cat "$OUT/decisions"/events-*.jsonl 2>/dev/null | wc -l) lines; watchlist copied: $([ -f "$OUT/watchlist.json" ] && echo yes || echo no)"
 { echo "original before copy $H0"; echo "original after copy  $H1"; echo "copy                 $(sha256sum "$OUT/ledger-snapshot.json" | cut -c1-64)"
   [ "$H0" = "$H1" ] || echo "(the server saved between the two hashes: the copy is still one consistent save)"; } > "$OUT/fingerprint.txt"
 LC="$(cat "$OUT/loaded-commit.txt" 2>/dev/null)"; LC="${LC:-$HEAD_FULL}"

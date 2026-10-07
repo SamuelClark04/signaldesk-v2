@@ -78,7 +78,10 @@ async function refresh({ now = Date.now(), fetchImpl = globalThis.fetch, url = p
   try {
     const res = await fetchImpl(url, { signal: ac.signal, headers: { 'User-Agent': 'SignalDesk' } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    feed = parseFeed(JSON.parse(await res.text()));
+    const raw = JSON.parse(await res.text());
+    feed = parseFeed(raw);
+    try { require('../research/event-recorder').record('MACRO_SNAPSHOT', { source: 'forexfactory-weekly', t_recv: Date.now(), // Phase 94: record-only consensus snapshot
+      rows: (Array.isArray(raw) ? raw : []).filter((r) => r && r.country === 'USD').slice(0, 300).map((r) => ({ title: r.title, date: r.date, impact: r.impact, forecast: r.forecast, previous: r.previous })) }); } catch { /* record-only */ }
     fetchedDay = et.ymd(now);
     fetchedAt = now;
     lastError = null;
@@ -86,6 +89,7 @@ async function refresh({ now = Date.now(), fetchImpl = globalThis.fetch, url = p
     return { ok: true, count: feed.length };
   } catch (err) {
     lastError = ac.signal.aborted ? `timed out after ${timeoutMs / 1000} s` : err.message;
+    try { require('../research/event-recorder').record('POLL_STATUS', { source: 'macro-feed', ok: false, error: String(lastError).slice(0, 200) }); } catch { /* Phase 94: record-only */ }
     fetchedDay = et.ymd(now); // retried tomorrow at 06:00 ET (or on restart); the built-in schedule covers the gap
     console.warn(`[macro] calendar feed unavailable (${lastError}): using the built-in FOMC / CPI / payrolls / PCE schedule`);
     return { ok: false, error: lastError };

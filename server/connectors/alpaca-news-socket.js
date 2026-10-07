@@ -121,6 +121,7 @@ function handleMessage(m) {
       console.log(`[alpaca-news] subscribed news=${JSON.stringify(m.news)}`);
       break;
     case 'n': {
+      try { require('../research/news-capture').fromStream(m); } catch { /* Phase 94: record-only tap; the app's handling below is unchanged */ }
       const item = normalizeNews(m);
       if (!item.headline || !item.symbols.length) break;
       remember(item);
@@ -197,4 +198,7 @@ function stop() {
 
 function restart() { const opts = { symbols, onNews }; stop(); return init(opts); } // Phase 73: new keys
 
-module.exports = { init, stop, restart, getNewsContext };
+// Tests only (Phase 94): drive handleMessage with a fake handler and symbol list.
+const _test = { handle: (m) => handleMessage(m), setHandler: (fn, syms) => { onNews = fn; symbols = syms; } };
+
+module.exports = { init, stop, restart, getNewsContext, _test };

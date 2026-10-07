@@ -8,17 +8,17 @@
 //                            OPENED ROUTE_FAILED FILLED VOIDED CLOSED; repeated observations (deduplicated per id + path + reason bucket): STRATEGY_BLOCK
 //                            PIPELINE_REJECT. A repeat only bumps a counter, written as a REPEATS line at most every 15 min per
 //                            key, before any lifecycle event of that id, and at the New York day rollover.
-//   flush (every 5 s, unref) serializes in <= SLICE_MS slices (setImmediate between them), each distinct bar series ONCE per day
-//                            (decision lines reference it by key), one appendFile in flight; a failed write re-queues the batch.
+//   flush (every 5 s, unref) the shared sink (jsonl-sink.js, Phase 94): time-sliced serialization, each distinct bar series ONCE per
+//                            day file, one append per file in flight; a failed append re-queues ONLY the files not written (C2: no
+//                            duplicates); a write in flight > 30 s is a visible STALL (status().stalled) while recording continues.
 // Files: <DECISIONS_DIR>/decisions-YYYY-MM-DD.jsonl (New York date), default next to the ledger; pruned after KEEP_DAYS.
 // status(): counters for /api/version, Settings and vm-audit (drops, errors, truncations, records missing their inputs).
-const fs = require('fs');
 const path = require('path');
 const ser = require('./decision-serialize');
+const { createSink } = require('./jsonl-sink');
 
 const MAX_QUEUE = 5000;
 const FLUSH_MS = 5000;
-const SLICE_MS = 10;
 const REPEAT_EVERY_MS = 15 * 60 * 1000;
 const STATUS_EVERY_MS = 10 * 60 * 1000; // a { type: 'status' } line in the day file: drops / errors reach the audit archive
 const MAX_SEEN = 20000;
@@ -28,15 +28,11 @@ const OBSERVED = new Set(['STRATEGY_BLOCK', 'PIPELINE_REJECT']);
 const RADAR = new Set(['equity-day', 'equity-swing', 'options-system', 'options-quickflips']);
 
 let clock = () => Date.now();
-let fsp = fs.promises; // tests swap in a hanging / failing fs
-let queue = [];
 let seen = new Map(); // key -> { id, path, bucket, count, emitted, firstAt, lastAt, lastPrice, lastEmitAt }
 let day = null;
 let timer = null;
-let writing = false;
 let seq = 0;
-const st = { recordedToday: 0, byPath: {}, dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, missingContext: 0, recordErrors: 0,
-  lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null };
+const st = { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, flushErrors: 0, lastError: null, lastErrorAt: null };
 let lastWarn = 0;
 let lastStatusAt = 0;
 
@@ -45,18 +41,27 @@ const dir = () => process.env.DECISIONS_DIR || path.dirname(process.env.LEDGER_S
 const nyDay = (ms) => { try { return require('../services/et-time').ymd(ms); } catch { return new Date(ms).toISOString().slice(0, 10); } };
 const bucketOf = (reason) => { try { return reason ? require('../execution/rejection-stats').bucket(String(reason)) : null; } catch { return null; } };
 const warn = (msg) => { const n = clock(); if (n - lastWarn >= 5 * 60 * 1000) { lastWarn = n; console.warn(`[decision-recorder] ${msg}`); } };
-function fail(kind, err) { st[kind] += 1; st.lastError = `${kind}: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); }
+let lastStallWarn = 0; // its own limiter: a queue-full or write-error warning never hides a STALL
+const warnStall = (msg) => { const n = clock(); if (n - lastStallWarn >= 5 * 60 * 1000) { lastStallWarn = n; console.warn(`[decision-recorder] ${msg}`); } };
+function fail(err) { st.recordErrors += 1; st.lastError = `recordErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); }
 
-function push(entry) {
-  queue.push(entry);
-  if (queue.length > MAX_QUEUE) { queue.splice(0, queue.length - MAX_QUEUE); st.dropped += 1; warn(`queue full: dropped the oldest record (${st.dropped} dropped)`); }
-}
+// Each distinct bar series ONCE per day file: the keys are committed only for the files actually written (C2).
+const sink = createSink({ prefix: 'decisions', dir, dayOf: nyDay, maxQueue: MAX_QUEUE, keepDays: KEEP_DAYS, clock: () => clock(), warn, warnStall,
+  serialize: (e, file, state) => {
+    state.byFile = state.byFile || new Map(); if (!state.byFile.has(file)) state.byFile.set(file, new Set());
+    const fresh = state.byFile.get(file);
+    // review: keys are marked written only once the WHOLE entry serialized (a decision line that throws leaves no dangling key)
+    const added = []; const out = ser.lines(e, (k) => ser.writtenSeries.has(`${file}|${k}`) || fresh.has(k) || added.includes(k), (k) => added.push(k));
+    for (const k of added) fresh.add(k);
+    return out; },
+  onCommitted: (state, written) => { for (const [file, keys] of state.byFile || []) if (written.has(file)) for (const k of keys) ser.markWritten(`${file}|${k}`); } });
+function push(entry) { sink.push(entry); }
 
 // The New York day changed: flush every pending repeat count, start a fresh dedupe map.
 function rollover(now) {
   const d = nyDay(now);
   if (day === d) return;
-  if (day !== null) { for (const s of seen.values()) emitRepeats(s, now); seen = new Map(); st.recordedToday = 0; st.byPath = {}; st.bytesToday = 0; }
+  if (day !== null) { for (const s of seen.values()) emitRepeats(s, now); seen = new Map(); st.recordedToday = 0; st.byPath = {}; sink.resetDay(); }
   day = d;
 }
 function emitRepeats(s, now) {
@@ -98,71 +103,38 @@ function record(pathName, id, info = {}) {
       setup: ser.pick(c), price: { last: price, at: now }, guard: info.guard || null, extra: info.extra || null, context: ctx || null, code: codeVersion() });
     st.recordedToday += 1; st.byPath[pathName] = (st.byPath[pathName] || 0) + 1;
     return true;
-  } catch (err) { fail('recordErrors', err); return false; }
+  } catch (err) { fail(err); return false; }
 }
 let code = null;
 const codeVersion = () => { if (code === null) { try { code = require('../version').BOOT.commit || ''; } catch { code = ''; } } return code || null; };
 
-// Serialize the batch in time slices (never one long synchronous loop), then ONE append per day file.
 async function flush() {
-  if (!writing && clock() - lastStatusAt >= STATUS_EVERY_MS && (queue.length || st.dropped || st.writeErrors || st.recordedToday)) {
+  const s = sink.status();
+  if (!s.writing && clock() - lastStatusAt >= STATUS_EVERY_MS && (s.queued || s.dropped || s.writeErrors || st.recordedToday)) {
     lastStatusAt = clock(); push({ type: 'status', at: lastStatusAt, ...status() });
   }
-  if (writing || !queue.length) return;
-  writing = true;
-  const io = fsp; // one fs for the whole flush (a swap mid-flush never mixes writers)
-  const batch = queue.splice(0, queue.length);
-  const lines = new Map(); // file -> [lines]
-  const newSeries = new Set();
-  try {
-    let t = clock(); let since = Date.now();
-    for (const e of batch) {
-      if (Date.now() - since > SLICE_MS) { await new Promise((r) => setImmediate(r)); since = Date.now(); }
-      const file = path.join(dir(), `decisions-${nyDay(e.at || t)}.jsonl`);
-      if (!lines.has(file)) lines.set(file, []);
-      try {
-        const out = ser.lines(e, (k) => ser.writtenSeries.has(`${file}|${k}`) || newSeries.has(`${file}|${k}`), (k) => newSeries.add(`${file}|${k}`)); // series once per day file
-        if (out.truncated) st.truncated += 1;
-        lines.get(file).push(...out.lines);
-      } catch (err) { fail('serializeErrors', err); }
-    }
-    await io.mkdir(dir(), { recursive: true });
-    for (const [file, list] of lines) {
-      if (!list.length) continue;
-      const text = `${list.join('\n')}\n`;
-      await io.appendFile(file, text);
-      st.bytesToday += text.length; st.file = file; st.lastWriteAt = clock(); t = st.lastWriteAt;
-    }
-    for (const k of newSeries) ser.markWritten(k);
-  } catch (err) {
-    fail('writeErrors', err);
-    queue = batch.concat(queue); // retry next flush; the cap still applies
-    if (queue.length > MAX_QUEUE) { st.dropped += queue.length - MAX_QUEUE; queue.splice(0, queue.length - MAX_QUEUE); }
-  } finally { writing = false; }
+  return sink.flush();
 }
 
-function prune(now = clock()) {
-  try {
-    for (const f of fs.readdirSync(dir())) {
-      const m = /^decisions-(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(f);
-      if (m && now - Date.parse(`${m[1]}T12:00:00Z`) > KEEP_DAYS * 86400000) fs.unlinkSync(path.join(dir(), f));
-    }
-  } catch { /* no folder yet */ }
-}
+const prune = (now = clock()) => sink.prune(now);
 
 function start() {
   if (timer || !enabled()) return;
   prune();
-  timer = setInterval(() => { flush().catch((err) => fail('writeErrors', err)); }, FLUSH_MS);
+  timer = setInterval(() => { flush().catch((err) => { st.flushErrors += 1; st.lastError = `flushErrors: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); }); }, FLUSH_MS);
   if (timer.unref) timer.unref();
 }
 function stop() { if (timer) clearInterval(timer); timer = null; }
-const status = () => ({ enabled: enabled(), ...st, byPath: { ...st.byPath }, queued: queue.length, writing, dir: dir() });
+function status() {
+  const s = sink.status();
+  const mineNewer = (st.lastErrorAt || 0) > (s.lastErrorAt || 0);
+  return { enabled: enabled(), ...s, ...st, writeErrors: s.writeErrors + st.flushErrors, byPath: { ...st.byPath }, lastError: mineNewer ? st.lastError : s.lastError, lastErrorAt: mineNewer ? st.lastErrorAt : s.lastErrorAt, dir: dir() };
+}
 
 // Tests only.
-const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => { fsp = f || fs.promises; }, reset: () => {
-  queue = []; seen = new Map(); day = null; seq = 0; writing = false; lastWarn = 0; lastStatusAt = Infinity; ser.writtenSeries.clear();
-  Object.assign(st, { recordedToday: 0, byPath: {}, dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, missingContext: 0, recordErrors: 0, lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null }); },
-  queue: () => queue, statusDue: () => { lastStatusAt = 0; } };
+const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => sink.setFs(f), reset: () => {
+  sink.reset(); seen = new Map(); day = null; seq = 0; lastWarn = 0; lastStatusAt = Infinity; ser.writtenSeries.clear();
+  lastStallWarn = 0; Object.assign(st, { recordedToday: 0, byPath: {}, missingContext: 0, recordErrors: 0, flushErrors: 0, lastError: null, lastErrorAt: null }); },
+  queue: () => sink.queue(), statusDue: () => { lastStatusAt = 0; } };
 
 module.exports = { record, flush, start, stop, status, prune, LIFECYCLE, OBSERVED, MAX_QUEUE, REPEAT_EVERY_MS, _test };

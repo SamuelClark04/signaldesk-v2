@@ -275,6 +275,40 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   - Change report: tools/decision-review/compare.js + docs/research/phase94-stage0-report-changes.md.
   - vm-audit.sh: find -exec needs `\;` (the Phase 93 line copied NO decision file).
   - Tests: tests/ph94unit.js, tests/ph94review.js.
+- **Phase 94 Stage 1 (record-only event capture, pilot P1 = 24 symbols in server/research/capture-universe.js; branch phase94-capture,
+  NOT deployed)**:
+  - Sink: research/jsonl-sink.js is shared by decision-recorder and event-recorder.
+    - A failed append re-queues only the unwritten files (no duplicates); a bad entry costs only itself.
+    - A write in flight > 30 s = STALL (status + Settings footer).
+  - event-recorder writes events-YYYY-MM-DD.jsonl (60 days; EVENTS_RECORDER=off / EVENTS_DIR). STATUS every 10 min carries a bootId +
+    whole-process CPU / RSS / heap / event-loop p99 beyond 20 ms sampling.
+  - News: a TAP on the existing news socket (its subscription is NOT changed: equity-day reads it) + a REST poll (sort=asc from a
+    persisted cursor in news-cursor.json; Alpaca's start filters on updated_at, checked live).
+    - An unfinished query (start + page token) is carried to the next poll; the cursor is clamped to now.
+    - Restart gaps are recorded as NEWS_GAP with recovery PENDING (catch-up <= 24 h, `catchUp` labels) or UNRECOVERABLE, never
+      "covered" in advance; pending gaps persist in news-cursor.json; only a query that read its LAST page writes NEWS_RECOVERY
+      COMPLETE (a pending gap overtaken by the 24 h limit: INCOMPLETE). news-cursor.json is saved only after the lines it skips past
+      are on disk (jsonl-sink isCommitted / drain). Unread pages carried > 10 min = NEWS_BACKLOG PERSISTENT / CLEARED.
+    - A version is cached only once recorded.
+    - Labels: versionCoverage OBSERVED_ONLY, receipt POLL_RECEIPT / STREAM_RECEIPT.
+  - Snapshots and marks:
+    - MACRO_SNAPSHOT from a tap in macro-calendar.refresh;
+    - EARNINGS_SNAPSHOT: Finnhub, one query PER capture symbol (the all-US answer is capped at 1,500 rows), only failed symbols retried,
+      complete: false named;
+    - OPTION_MARK: a tap in options-data.refreshQuotes, 60 s per contract;
+    - failed sources are recorded as POLL_STATUS.
+  - server.js: one guarded event-capture.start().
+  - vm-audit copies events-*, news-cursor.json and watchlist.json.
+  - PC tools:
+    - tools/event-research/inspect.js: the C4 pilot health check. It uses the NYSE calendar (holidays / early closes 2026-27; a weekday
+      without a file = UNHEALTHY), >= 90% polls / >= 95% ok / no 10-min gap between OK polls, complete earnings + macro snapshots, STATUS
+      coverage, no drops / errors / stalls, budget.json (PROVISIONAL VM limits) and news coverage (news-coverage.js: no gap pending at the
+      day's end, none unrecoverable, no backlog > 10 min; HTTP-ok polls alone never count). --now = the archive time: an unclosed session
+      is NOT JUDGED; a missing session prints "no events file" (tests/ph94capture-report.js runs the command itself).
+    - scripts/research/entitlements.js: read-only probes of the free plans.
+    - scripts/research/freeze-universe.js: universe-v1, dated, sources hashed, limitations in the file, never overwrites.
+  - Expanding the pilot, any deploy and any data purchase need the user's approval.
+  - Tests: tests/ph94capture.js (+ -news, -taps, -pilot), tests/ph94universe.js.
 - **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken and OKX US ACCOUNT rates at boot + every 6 h (retry 10 min),
   read-only, like coinbase-fees.js. Kraken: POST /0/private/TradeVolume for XBTUSD, ETHUSD, XBTUSDC, ETHUSDC (answer keys XXBTZUSD / XETHZUSD /
   XBTUSDC / ETHUSDC); EVERY requested pair needs a valid maker + taker or the read fails and replaces nothing; claimed for those pairs only
