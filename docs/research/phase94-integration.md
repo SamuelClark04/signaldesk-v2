@@ -54,7 +54,42 @@ dead, AI URLs dead, SMTP at the local sink, and Finnhub dead. It ran on port 399
 
 The earlier Stage 1 budget run (15 min, `7284967`) is in `docs/deploy/phase94-stage1-capture.md`.
 
-## Not done (separate decisions)
+## Re-run after the pre-merge fixes (2026-10-07)
+
+The three pre-merge fixes changed the combined server code (news capture, the shared JSONL sink, the event recorder), so the
+integration was repeated. Nothing was merged into `main`, nothing was deployed, and no existing work was reset or rebased.
+
+| What | Branch | Commit |
+|---|---|---|
+| PR #1 (venue fees), unchanged | `phase92-venue-fees` | `74c77a2` |
+| PR #2 + Stage 0 + fix C1-B (and its review follow-ups) | `phase93-decision-review` | `bd25755` |
+| Stage 1 + fixes 2 and 3, with PR #2 merged in | `phase94-capture` | `70dcb3e` |
+| Temporary integration: `70dcb3e` + PR #1 | `scratch/pr1-integration-2` (local, never pushed, deleted after the test) | `9074689` |
+
+**Merge:** the same three conflicts as before, in `CLAUDE.md`, `client/styles/settings.css` and `server/execution/pipeline.js`.
+Each was two independent additions at the same place, so the resolution kept both sides. `check:limits` passed.
+
+**Suites:**
+
+| Run | Commit | Suites | Result |
+|---|---|---|---|
+| Stage 0 | `bd25755` | 55 | 55 clean |
+| Stage 1 | `70dcb3e` | 57 | 57 clean |
+| Integration | `9074689` | 58 | **58 clean** |
+
+The `ph75unit` timing check passed in all three runs. It is still timing-sensitive on this PC (see above).
+
+**Isolated harness boot on `9074689`:** the same isolation as above (scratch ledger and credentials, broker / AI / Finnhub URLs dead,
+broker keys blank). Only the Alpaca data keys were live, and they were used read-only for news.
+- The `[version] running 9074689` line appeared.
+- `/api/version`: the decision recorder showed 17 records today and the event recorder 83, each with 0 dropped, 0 write errors and not
+  stalled.
+- The restart gap was recorded `PENDING`. The first completed poll wrote `NEWS_RECOVERY COMPLETE`, and only then was
+  `news-cursor.json` saved with `pending: []`.
+- No crash or uncaught error. The server was stopped after the check (only the harness process this test started).
+- The Settings footers and PR #1's fee-source screen were not re-checked in the browser: neither UI changed since the first run.
+
+
 
 - Merge order of PR #1 / PR #2 / Stage 1, any merge into `main`, and any deploy.
 - The integration branch was deleted after the test.
