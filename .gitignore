@@ -18,3 +18,6 @@ server/data/*
 
 # Phase 93: Decision Review reports + market-data cache (local and private, never committed)
 reports/
+
+# Phase 95: research bucket service-account keys (never committed)
+.research-gcs.json
