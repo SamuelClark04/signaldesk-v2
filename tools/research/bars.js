@@ -53,7 +53,35 @@ async function fetchDays(db, { symbols, days, now = Date.now(), fetchImpl = fetc
   return out;
 }
 
-module.exports = { fetchDays, fetchSymbolDay, READY_AFTER_MS };
+// Daily bars (for ATR30 from PRIOR sessions, spec 8.1): one request per symbol over [from, to], stored by New York date.
+async function fetchDaily(db, { symbols, from, to, fetchImpl = fetch, limiter, keys, base = 'https://data.alpaca.markets' }) {
+  const st = db.prepare('insert into bars_1d (symbol, day, o, h, l, c, v) values (?, ?, ?, ?, ?, ?, ?) on conflict (symbol, day) do update set o = excluded.o, h = excluded.h, l = excluded.l, c = excluded.c, v = excluded.v');
+  const out = { symbols: 0, rows: 0, errors: 0 };
+  for (const symbol of symbols) {
+    try {
+      let token = null; const rows = [];
+      do {
+        const q = new URLSearchParams({ timeframe: '1Day', feed: 'sip', adjustment: 'raw', limit: '10000', start: `${from}T00:00:00Z`, end: `${to}T23:59:59Z` });
+        if (token) q.set('page_token', token);
+        let res = null;
+        for (let tries = 0; tries < MAX_TRIES; tries += 1) {
+          await limiter.acquire();
+          res = await fetchImpl(`${base}/v2/stocks/${encodeURIComponent(symbol)}/bars?${q}`, { headers: { 'APCA-API-KEY-ID': keys.key, 'APCA-API-SECRET-KEY': keys.secret, 'User-Agent': 'SignalDesk-research/1.0' }, signal: AbortSignal.timeout(30000) });
+          limiter.report(res.status); if (res.status !== 429) break;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        for (const b of body.bars || []) rows.push([symbol, et.ymd(Date.parse(b.t)), b.o, b.h, b.l, b.c, b.v]);
+        token = body.next_page_token || null;
+      } while (token);
+      db.exec('begin'); try { for (const r of rows) st.run(...r); db.exec('commit'); } catch (e) { db.exec('rollback'); throw e; }
+      out.symbols += 1; out.rows += rows.length;
+    } catch { out.errors += 1; }
+  }
+  return out;
+}
+
+module.exports = { fetchDays, fetchSymbolDay, fetchDaily, READY_AFTER_MS };
 
 // CLI: node tools/research/bars.js [--sessions 20] [--symbols universe|pilot] [--db research-data/research.sqlite]
 // Reads ONLY the Alpaca data keys from .env (headers only, never printed). Fetches the last N completed NYSE sessions.

@@ -30,6 +30,12 @@ const MIGRATIONS = [{ v: 1, sql: `
   create table quote_gaps (source text, from_t integer, to_t integer, reason text, primary key (source, from_t)) without rowid;
 ` }, { v: 2, sql: `
   create table bars_days (symbol text, day text, rows integer, status text, error text, fetched_at integer, primary key (symbol, day)) without rowid;
+` }, { v: 3, sql: `
+  create table bars_1d (symbol text, day text, o real, h real, l real, c real, v real, primary key (symbol, day)) without rowid;
+  create table observe_days (symbol text, day text, atr real, atr_sessions integer, status text, reason text, version text, primary key (symbol, day)) without rowid;
+  create table moves (symbol text, day text, scale text, k integer, dir integer, type text, parent_k integer, start_t integer, start_px real, start_confirmed_at integer,
+    end_t integer, end_px real, confirmed_at integer, open integer, size_pct real, size_atr real, duration_min integer, volume real, primary key (symbol, day, scale, k)) without rowid;
+  create table quiet_periods (symbol text, day text, k integer, start_t integer, end_t integer, duration_min integer, range_atr real, primary key (symbol, day, k)) without rowid;
 ` }];
 const QUOTE_MIGRATIONS = [{ v: 1, sql: `
   create table quotes (contract text, t_quote integer, t_recv integer, bid real, ask real, bid_size real, ask_size real, underlying real, iv real,
