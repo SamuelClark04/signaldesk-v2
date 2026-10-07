@@ -163,6 +163,8 @@ const jsonl = (dir, day, lines) => { fs.mkdirSync(path.join(dir, 'decisions'), {
   const b8 = B2('b8');
   check_('C1-B (review): a setup without a direction -> direction MISSING (never defaulted to long)', b8.direction === null && b8.d === null
     && b8.missing.some((x) => /direction/.test(x)), `${b8.direction} ${b8.d} | ${b8.missing.join(' / ')}`);
+  const cardHtml = require(R + 'render-cards').card({ d: { ...b8, thesis: 'opening range break', outcome: { group: 'PENDING', label: 'Staged' } }, m: null, cls: { cls: 'NOT_MEASURABLE' }, chart: {}, anchor: 'b8' });
+  check_('C1-B (review): the card never says "called up" for an unknown direction', /Why it was proposed \(direction unknown\)/.test(cardHtml) && !/Why it called up/.test(cardHtml));
   const lg = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph94l-'));
   const jr = (id, extra) => ({ id, asset: 'AAPL', market: 'stocks', strategyId: 'equity-swing', direction: 'long', entryPrice: 100, invalidation: 95, targets: [{ price: 110 }],
     approvedAt: t0 + 60000, openedAt: t0 + 120000, closedAt: t0 + 86400000, netPnl: 1, dollarRisk: 10, ...extra });
