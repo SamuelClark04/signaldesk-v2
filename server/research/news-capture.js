@@ -47,7 +47,12 @@ const st = { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollErro
 
 const base = () => (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/$/, '');
 const evDir = () => process.env.EVENTS_DIR || path.dirname(process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json'));
-const cursorFile = () => path.join(evDir(), 'news-cursor.json');
+// Phase 95: the research collector polls with its OWN cursor file and its own (rate-limited) fetch; the server keeps the defaults.
+let cursorName = 'news-cursor.json';
+let fetchFn = (url, opts) => require('../connectors/net-guard').guardedFetch(url, opts);
+const useCursorFile = (name) => { if (/^[a-z0-9-]+\.json$/.test(name || '')) cursorName = name; };
+const useFetch = (fn) => { if (typeof fn === 'function') fetchFn = fn; };
+const cursorFile = () => path.join(evDir(), cursorName);
 // Phase 95: the host process injects its market-open check (the trading server: the Alpaca clock via market-session, set in
 // event-capture.start; the research collector: the NYSE calendar). Not imported here, so the collector never reaches broker code.
 let marketOpenFn = () => false;
@@ -176,7 +181,7 @@ async function poll({ now = Date.now() } = {}) {
     do {
       const q = new URLSearchParams({ symbols: universe.symbols().join(','), start: since, sort: 'asc', limit: '50', include_content: 'true' });
       if (token) q.set('page_token', token);
-      const res = await require('../connectors/net-guard').guardedFetch(`${base()}/v1beta1/news?${q}`,
+      const res = await fetchFn(`${base()}/v1beta1/news?${q}`,
         { headers: { 'APCA-API-KEY-ID': keys.key, 'APCA-API-SECRET-KEY': keys.secret }, signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) { if (carried && [400, 422].includes(res.status)) carried = null; throw new Error(`HTTP ${res.status}`); } // an expired page token: restart from the cursor
       const body = await res.json(); const tRecv = Date.now();
@@ -212,6 +217,6 @@ const status = () => ({ ...st, cursor, versionsKnown: versions.size, recoveryPen
   unconfirmedLines: unconfirmed.length, persistFrozen });
 const _test = { reset: () => { versions = new Map(); cursor = null; carried = null; startedAt = Date.now(); polling = false; pending = []; backlog = null; unconfirmed = []; unconfirmedSince = null; persistFrozen = null;
   Object.assign(st, { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 }); },
-  resume: (now) => resume(now), cursor: () => cursor, setStartedAt: (t) => { startedAt = t; } };
+  resume: (now) => resume(now), cursor: () => cursor, setStartedAt: (t) => { startedAt = t; }, marketOpen: () => marketOpen(), cursorFile: () => cursorFile(), polling: () => !!timer };
 
-module.exports = { observe, fromStream, poll, start, stop, status, useMarketOpen, _test, MAX_PAGES, MAX_CATCHUP_MS };
+module.exports = { observe, fromStream, poll, start, stop, status, useMarketOpen, useCursorFile, useFetch, _test, MAX_PAGES, MAX_CATCHUP_MS };

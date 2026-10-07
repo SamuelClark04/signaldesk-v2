@@ -98,4 +98,19 @@ module.exports = async ({ check }) => {
   check('review: --through before the last file is the last date reported (Oct 7 not listed)', early.status === 0 && /2026-10-06/.test(early.stdout) && !/2026-10-07/.test(early.stdout), early.stdout.slice(-300));
   const rc = cli([folder('covcli', { '2026-10-05': [...day('2026-10-05'), gapLine('2026-10-05', 9 * 60, 'g1')] }), '--budget', bf, '--now', '2026-10-05T21:00:00Z']);
   check('fix 3: the report command prints the news coverage and the pending recovery', rc.status === 0 && /coverage INCOMPLETE/.test(rc.stdout) && /still PENDING/.test(rc.stdout), rc.stdout.slice(-400));
+
+  // Phase 95 (Task 1.1 review): with RESEARCH_COLLECTOR=on the news polls and the earnings snapshot are in the collector's
+  // research-<day>.jsonl. Both files count for collection; each process's counters are judged on ITS OWN STATUS stream.
+  const srv = day('2026-10-05', { polls: () => null }).filter((l) => l.kind !== 'EARNINGS_SNAPSHOT')
+    .map((l) => (l.kind === 'STATUS' ? { ...l, bootId: 'srv', dropped: 3 } : l)); // 3 dropped long before this day, never added today
+  const col = day('2026-10-05').filter((l) => l.kind !== 'MACRO_SNAPSHOT').map((l) => (l.kind === 'STATUS' ? { ...l, bootId: 'col', dropped: 0, health: { scope: 'research collector process' } } : l));
+  const prevDay = day('2026-10-02').map((l) => (l.kind === 'STATUS' ? { ...l, bootId: 'srv', dropped: 3 } : l)); // sets the server's baseline (3)
+  const two = folder('two', { '2026-10-02': prevDay, '2026-10-05': srv });
+  fs.writeFileSync(path.join(two, 'research-2026-10-05.jsonl'), col.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const tw = insp.summarize(two, { budget, through: '2026-10-05' }).days.find((d) => d.day === '2026-10-05');
+  check('Phase 95: the collector\'s polls and earnings snapshot count; interleaved bootIds from two processes are NOT read as restarts (no false drops)',
+    tw.healthy === true && tw.polls.present === tw.polls.expected && tw.collectorFile === true && !tw.reasons.some((r) => /dropped/.test(r)), JSON.stringify(tw.reasons));
+  const colDrop = col.map((l, i) => (l.kind === 'STATUS' && i > col.length / 2 ? { ...l, dropped: 2 } : l));
+  const two2 = folder('two2', { '2026-10-02': prevDay, '2026-10-05': srv }); fs.writeFileSync(path.join(two2, 'research-2026-10-05.jsonl'), colDrop.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  check('Phase 95: drops added by the COLLECTOR that day are reported as its own', insp.summarize(two2, { budget, through: '2026-10-05' }).days.find((d) => d.day === '2026-10-05').reasons.some((r) => /collector recorder: 2 record/.test(r)));
 };

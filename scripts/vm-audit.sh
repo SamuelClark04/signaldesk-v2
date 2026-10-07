@@ -81,6 +81,9 @@ echo "decision recorder files: $(ls "$OUT/decisions"/decisions-*.jsonl 2>/dev/nu
 ED="${EVENTS_DIR:-$(dirname "$L")}" # pm2 env vars are not visible to this shell: set them here if the app overrides them
 find "$ED" -maxdepth 1 -name 'events-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" \; 2>/dev/null
 [ -f "$ED/news-cursor.json" ] && cp -p "$ED/news-cursor.json" "$OUT/decisions/news-cursor.json"
+# Phase 95: the research collector's own files (research-<day>.jsonl, its news cursor)
+find "$ED" -maxdepth 1 -name 'research-*.jsonl' -mtime -35 -exec cp -p {} "$OUT/decisions/" \; 2>/dev/null
+[ -f "$ED/research-news-cursor.json" ] && cp -p "$ED/research-news-cursor.json" "$OUT/decisions/research-news-cursor.json"
 [ -f server/data/watchlist.json ] && cp -p server/data/watchlist.json "$OUT/watchlist.json"
 echo "event capture files: $(ls "$OUT/decisions"/events-*.jsonl 2>/dev/null | wc -l) day(s), $(cat "$OUT/decisions"/events-*.jsonl 2>/dev/null | wc -l) lines; watchlist copied: $([ -f "$OUT/watchlist.json" ] && echo yes || echo no)"
 { echo "original before copy $H0"; echo "original after copy  $H1"; echo "copy                 $(sha256sum "$OUT/ledger-snapshot.json" | cut -c1-64)"

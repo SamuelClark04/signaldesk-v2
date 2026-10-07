@@ -78,3 +78,27 @@ The second one runs on the PC and should print "reader: cannot create, can read 
 - **Free tier:** confirm in the console that us-central1 standard storage is within the Always Free tier for your account
   (5 GB-months, 5,000 Class A and 50,000 Class B operations a month). Expected use: about 0.3 GB, about 1,500 uploads and about 0.3 GB
   downloaded a month (to be replaced by measurements, plan section 11).
+
+## 3. Research collector (Task 8.4 draft; DEPLOYING it needs your separate approval)
+
+- **Process:** a separate pm2 app, low priority, which never touches the trading server's files:
+  ```bash
+  cd ~/signaldesk-v2 && pm2 start "nice -n 10 node server/research/collector/main.js" --name signaldesk-research \
+    --max-memory-restart 200M --kill-timeout 6000 && pm2 save
+  ```
+  `--kill-timeout 6000` gives its shutdown (up to 4.5 s: it waits for a write in flight, then flushes) time to finish.
+- **Its own files** in the events folder: `research-YYYY-MM-DD.jsonl`, `research-news-cursor.json`. Its STATUS lines read "research
+  collector process". `vm-audit.sh` copies them; `inspect.js` reads both files and judges each process on its own counters.
+- **The one switch: `RESEARCH_COLLECTOR=on` in `.env`.**
+  - With it, the trading server stops ITS news poll and earnings snapshot at its next restart, and the collector runs them.
+  - Without it, the collector records only its heartbeat (and later the option grid), so the two never poll twice.
+  - Order: add the line, start the collector, then restart the trading server.
+- **Keys:** the collector reads ONLY these from `.env`: the Alpaca data keys, `ALPACA_DATA_BASE_URL`, the Finnhub key and URL,
+  `EVENTS_DIR`, `EVENTS_RECORDER`, `LEDGER_STATE_PATH`, `RESEARCH_*`. It never reads the broker keys or the credentials vault. If the
+  Alpaca keys live only in the vault, add the PAPER data keys to `.env` for it. Check: its first `POLL_STATUS` line is `ok: true`.
+- **Requests:** every Alpaca request goes through its limiter (`RESEARCH_COLLECTOR_PER_MIN`, default 40, clamped 1-150; 2-min stand-back
+  on HTTP 429). The account limit (200 / min) is shared with the trading server.
+- **Rollback:**
+  1. `pm2 delete signaldesk-research && pm2 save`;
+  2. remove `RESEARCH_COLLECTOR=on`;
+  3. restart the trading server (its own poll resumes).

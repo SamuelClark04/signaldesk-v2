@@ -7,6 +7,7 @@
 // The wait is a REF'd timer on purpose: a caller awaiting a slot must keep its process alive (an unref'd wait let the PC bars CLI
 // exit silently after its first 60 requests).
 function createLimiter({ perMin = 40, pauseMs = 120000, windowMs = 60000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  perMin = Math.max(1, Math.floor(Number(perMin)) || 1); // a zero / negative / NaN ceiling would wait forever
   const sent = []; // times of the requests in the last 60 s, oldest first
   let total = 0; let r429 = 0; let pausedUntil = 0;
   const trim = () => { while (sent.length && now() - sent[0] >= windowMs) sent.shift(); };

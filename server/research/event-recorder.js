@@ -29,7 +29,11 @@ const nyDay = (ms) => { try { return require('../services/et-time').ymd(ms); } c
 const warn = (msg) => { const n = clock(); if (n - lastWarn >= 5 * 60 * 1000) { lastWarn = n; console.warn(`[event-recorder] ${msg}`); } };
 let lastStallWarn = 0; // its own limiter: another warning never hides a STALL
 const warnStall = (msg) => { const n = clock(); if (n - lastStallWarn >= 5 * 60 * 1000) { lastStallWarn = n; console.warn(`[event-recorder] ${msg}`); } };
-const sink = createSink({ prefix: 'events', dir, dayOf: nyDay, serialize: (e) => ({ lines: [JSON.stringify(e)] }), keepDays: KEEP_DAYS, clock: () => clock(), warn, warnStall });
+// Phase 95: the file identity of this process. The trading server keeps 'events' (the Stage-1 pilot files); the research collector
+// calls useIdentity({ prefix: 'research', scope: 'research collector process' }) before start(), so the two never share a file.
+let identity = { prefix: 'events', scope: 'whole server process' };
+function useIdentity({ prefix, scope }) { if (/^[a-z][a-z0-9-]*$/.test(prefix || '') && scope) identity = { prefix, scope }; }
+const sink = createSink({ prefix: () => identity.prefix, dir, dayOf: nyDay, serialize: (e) => ({ lines: [JSON.stringify(e)] }), keepDays: KEEP_DAYS, clock: () => clock(), warn, warnStall });
 const text = (s) => (typeof s === 'string' ? s.slice(0, MAX_TEXT) : null);
 
 // recordTracked: as record(), but returns the queued entry (or null) so a caller can ask isCommitted(entry) before persisting state that
@@ -68,7 +72,7 @@ function health() {
   // review: reported as delay BEYOND the sampling interval (an idle loop reads ~LOOP_RESOLUTION_MS), floored at 0
   const excess = (ns) => Math.max(0, Math.round(ns / 1e4 - LOOP_RESOLUTION_MS * 100) / 100); // rounded after the subtraction
   if (loopHist) { loopP99Ms = excess(loopHist.percentile(99)); loopMaxMs = excess(loopHist.max); loopHist.reset(); }
-  return { scope: 'whole server process', cpuPct, rssMb: Math.round(mem.rss / 1e5) / 10, heapMb: Math.round(mem.heapUsed / 1e5) / 10, loopP99Ms, loopMaxMs,
+  return { scope: identity.scope, cpuPct, rssMb: Math.round(mem.rss / 1e5) / 10, heapMb: Math.round(mem.heapUsed / 1e5) / 10, loopP99Ms, loopMaxMs,
     loopNote: `event-loop delay beyond the ${LOOP_RESOLUTION_MS} ms sampling interval; the first moments after each STATUS line are not sampled` };
 }
 
@@ -90,4 +94,4 @@ function stop() { if (timer) clearInterval(timer); timer = null; if (loopHist) {
 const _test = { setClock: (fn) => { clock = fn || (() => Date.now()); }, setFs: (f) => sink.setFs(f), statusDue: () => { lastStatusAt = 0; }, reset: () => {
   sink.reset(); lastWarn = 0; lastStallWarn = 0; cpuMark = null; lastStatusAt = Infinity; Object.assign(st, { recordedToday: 0, byKind: {}, recordErrors: 0, lastError: null, lastErrorAt: null, day: null }); } };
 
-module.exports = { record, recordTracked, isCommitted, drain, flush, start, stop, status, health, text, KINDS, KEEP_DAYS, _test };
+module.exports = { record, recordTracked, isCommitted, drain, flush, start, stop, status, health, text, useIdentity, identity: () => ({ ...identity }), KINDS, KEEP_DAYS, _test };

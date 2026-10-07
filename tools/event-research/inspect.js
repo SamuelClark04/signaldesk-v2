@@ -38,15 +38,20 @@ function summarize(dir, { budget = null, through = null, now = null } = {}) {
   if (!fs.existsSync(dir)) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
   const files = fs.readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort();
   if (!files.length) return { files: 0, days: [], pilotCriteria: { sessions: 0, healthy: 0, ok: false } };
-  const base = { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } };
+  // Phase 95: the research collector writes its own research-<day>.jsonl (RESEARCH_COLLECTOR=on moves the news poll and the earnings
+  // snapshot there). Both files feed collection, sources and news coverage; each process's counters and health are judged on its own
+  // STATUS stream (interleaved bootIds would otherwise look like restarts).
+  const base = { server: { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } }, collector: { dropped: { value: 0, bootId: null }, errors: { value: 0, bootId: null } } };
   const byDay = new Map(files.map((f) => [f.slice(7, 17), f]));
+  const rByDay = new Map(fs.readdirSync(dir).filter((f) => /^research-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).map((f) => [f.slice(9, 19), f]));
   // review: `through` (the audit date) extends the range, so an outage AFTER the last file is a missing session too.
   // review: `through` is the last date reported, before or after the last file (never before the first file).
   const last = through ? (through < files[0].slice(7, 17) ? files[0].slice(7, 17) : through) : files[files.length - 1].slice(7, 17);
   const range = daysBetween(files[0].slice(7, 17), last);
   const years = [...new Set(range.map((d) => Number(d.slice(0, 4))))].filter((y) => !CALENDAR_YEARS.includes(y));
   const warnings = years.length ? [`the NYSE calendar here covers ${CALENDAR_YEARS.join(' / ')} only: holidays in ${years.join(', ')} count as sessions (extend NYSE_HOLIDAYS)`] : [];
-  const linesByDay = new Map([...byDay].map(([d, f]) => [d, read(path.join(dir, f))]));
+  const tag = (src) => (x) => ({ ...x, _src: src });
+  const linesByDay = new Map([...byDay].map(([d, f]) => [d, [...read(path.join(dir, f)).map(tag('server')), ...(rByDay.has(d) ? read(path.join(dir, rByDay.get(d))).map(tag('collector')) : [])]]));
   // Fix 3: news coverage needs every file (a gap's recovery may be recorded on a later day); HTTP-ok polls alone never establish it.
   const newsGaps = assess(linesByDay, range.filter(isSessionDay), { openAt: (d) => T.at(d, T.OPEN_MIN), closeAt: (d) => T.at(d, closeMinOf(d)), firstDay: files[0].slice(7, 17), now: now === null ? Infinity : now });
   const days = range.map((day) => {
@@ -60,11 +65,16 @@ function summarize(dir, { budget = null, through = null, now = null } = {}) {
     const byKind = {}; for (const x of L) byKind[x.kind] = (byKind[x.kind] || 0) + 1;
     const polls = L.filter((x) => x.kind === 'POLL_STATUS' && x.source === 'alpaca-news' && inMkt(x)).sort((a, b) => a.at - b.at);
     const session = isSessionDay(day);
-    const out = { day, session, byKind, news: byKind.NEWS || 0, reasons: [] };
-    const statuses = L.filter((x) => x.kind === 'STATUS').sort((a, b) => a.at - b.at);
-    const errs = statuses.map((s) => ({ bootId: s.bootId, errors: (Number(s.writeErrors) || 0) + (Number(s.serializeErrors) || 0) + (Number(s.recordErrors) || 0) }));
-    const dr = added(statuses, 'dropped', base.dropped); const er = added(errs, 'errors', base.errors);
-    base.dropped = dr.last; base.errors = er.last;
+    const news = new Set(L.filter((x) => x.kind === 'NEWS').map((x) => `${x.docId}|${x.version}`)).size; // the same version seen by both processes counts once
+    const out = { day, session, byKind, news, collectorFile: rByDay.has(day), reasons: [] };
+    const streams = {};
+    for (const src of ['server', 'collector']) {
+      const sts = L.filter((x) => x.kind === 'STATUS' && x._src === src).sort((a, b) => a.at - b.at);
+      const errs = sts.map((x) => ({ bootId: x.bootId, errors: (Number(x.writeErrors) || 0) + (Number(x.serializeErrors) || 0) + (Number(x.recordErrors) || 0) }));
+      const dr = added(sts, 'dropped', base[src].dropped); const er = added(errs, 'errors', base[src].errors);
+      base[src].dropped = dr.last; base[src].errors = er.last; streams[src] = { sts, dr, er };
+    }
+    const statuses = streams.server.sts; const { dr, er } = streams.server;
     if (!session) { out.healthy = null; return out; }
     const expected = Math.floor((closeMinOf(day) - T.OPEN_MIN) / POLL_EVERY_MIN);
     const ok = polls.filter((x) => x.ok).length;
@@ -91,6 +101,10 @@ function summarize(dir, { budget = null, through = null, now = null } = {}) {
     if (dr.sum > 0) out.reasons.push(`recorder: ${dr.sum} record(s) dropped that day`);
     if (er.sum > 0) out.reasons.push(`recorder: ${er.sum} write / serialize / record error(s) that day`);
     if (statuses.some((s) => s.stalled)) out.reasons.push('recorder: a write stall was reported');
+    const c = streams.collector;
+    if (c.dr.sum > 0) out.reasons.push(`collector recorder: ${c.dr.sum} record(s) dropped that day`);
+    if (c.er.sum > 0) out.reasons.push(`collector recorder: ${c.er.sum} write / serialize / record error(s) that day`);
+    if (c.sts.some((x) => x.stalled)) out.reasons.push('collector recorder: a write stall was reported');
     const mk = statuses.filter(inMkt).map((s) => s.health || {});
     out.process = { cpuP95: pct(mk.map((h) => h.cpuPct), 0.95), rssMax: pct(mk.map((h) => h.rssMb), 1), loopP99Max: pct(mk.map((h) => h.loopP99Ms), 1) };
     if (!budget) out.reasons.push('process: no CPU / memory budget measured yet (tools/event-research/budget.json, Task 16)');

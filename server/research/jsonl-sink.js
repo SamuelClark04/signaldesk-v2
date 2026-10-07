@@ -22,7 +22,8 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
   const committed = new WeakSet();    // fix 3 (review): entries whose append returned (a caller may persist state that depends on them)
   const st = { dropped: 0, serializeErrors: 0, writeErrors: 0, truncated: 0, stalls: 0, lastError: null, lastErrorAt: null, lastWriteAt: null, bytesToday: 0, file: null };
   const fail = (kind, err) => { st[kind] += 1; st.lastError = `${kind}: ${String((err && err.message) || err).slice(0, 200)}`; st.lastErrorAt = clock(); warn(st.lastError); };
-  const fileOf = (at) => path.join(dir(), `${prefix}-${dayOf(at)}.jsonl`);
+  const pfx = () => (typeof prefix === 'function' ? prefix() : prefix); // Phase 95: a function lets a process pick its file identity at start
+  const fileOf = (at) => path.join(dir(), `${pfx()}-${dayOf(at)}.jsonl`);
   const stalledFor = () => (writing && writingSince !== null ? clock() - writingSince : 0);
 
   function push(entry) {
@@ -95,7 +96,7 @@ function createSink({ prefix, dir, dayOf, serialize, onCommitted = () => {}, max
   }
 
   function prune(now = clock()) {
-    const re = new RegExp(`^${prefix}-(\\d{4}-\\d{2}-\\d{2})\\.jsonl$`);
+    const re = new RegExp(`^${pfx()}-(\\d{4}-\\d{2}-\\d{2})\\.jsonl$`);
     try {
       for (const f of fs.readdirSync(dir())) {
         const m = re.exec(f);
