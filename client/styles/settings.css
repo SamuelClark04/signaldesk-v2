@@ -124,6 +124,8 @@
 .wf-badge.is-route { border-color: var(--accent); color: var(--accent); }
 .wf-cash { color: var(--text); font-family: var(--font-mono); }
 .wf-fees { font-family: var(--font-mono); }
+.wf-fee-src { font-size: 11px; }
+.wf-fee-src.is-unverified { color: var(--warn); }
 .wf-role { color: var(--text-faint); }
 /* Phase 78: Settings > Strategies (one On / Off switch per scanner). */
 .settings-strategies { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 16px; }

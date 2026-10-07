@@ -19,7 +19,7 @@
 //   volumeGate       Phase 65B: standard crypto needs >= $1.5M of 24h volume (ticker base volume x price).
 //   cashoutVariance  a live close's expected cashout (best bid x qty - fee, right
 //                    before the sell) vs the actual fill (qty x avg price - real fee).
-const { legRate, coinbaseFees, VENUE_FEES, feeKey } = require('./cost-authority');
+const { legRate, coinbaseFees, VENUE_FEES, venueFees, feeKey } = require('./cost-authority');
 
 const WIDE_HURDLE = 0.025;
 const QUOTE_MAX_AGE_MS = 60 * 1000;
@@ -32,7 +32,7 @@ const MIN_CRYPTO_VOLUME_USD = 1500000;
 const exactRate = (market, liquidity = 'taker') => {
   const side = liquidity === 'maker' ? 'maker' : 'taker';
   if (market === 'crypto') return coinbaseFees()[side];
-  const v = String(market).startsWith('crypto:') ? VENUE_FEES[market.slice(7)] : null;
+  const v = String(market).startsWith('crypto:') && VENUE_FEES[market.slice(7)] ? venueFees(market.slice(7)) : null; // Phase 92: venueFees enforces the fee expiry
   return v ? v[side] : legRate(market, liquidity);
 };
 

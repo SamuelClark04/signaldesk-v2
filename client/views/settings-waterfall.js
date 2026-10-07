@@ -11,8 +11,15 @@
   const pct = (x) => `${(x * 100).toFixed(2)}%`;
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z]+/g, '-');
 
-  const feeText = (r) => (r.id === 'coinbase' ? `Live tier ~${pct(r.maker)} / ${pct(r.taker)} · ~${pct(r.bePct)} BE`
-    : `${pct(r.maker)} Maker / ${pct(r.taker)} Taker · ~${pct(r.bePct)} BE`);
+  const feeText = (r) => `${pct(r.maker)} Maker / ${pct(r.taker)} Taker · ~${pct(r.bePct)} BE`;
+  const hhmm = (ms) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // Phase 92: where the rates come from: "Verified from your account Oct 4, 18:07 (OKX US account Lv1 ...)", or UNVERIFIED + why.
+  function feeSource(r) {
+    const f = r.fee || {};
+    const failed = f.lookupOk === false && f.lookupError ? ` · last lookup failed${f.lookupAt ? ` ${hhmm(f.lookupAt)}` : ''}: ${f.lookupError}` : '';
+    if (f.verified) return { text: `Fees verified from your account ${hhmm(f.at)} (${f.source})${failed}`, warn: !!failed };
+    return { text: `Fees UNVERIFIED: ${f.source || 'default'}${failed || ' · not read yet'}`, warn: true };
+  }
   function cashText(r) {
     if (r.status === 'NOT CONFIGURED') return r.id === 'coinbase' ? 'No Coinbase API key in .env' : 'Add its API keys to .env to enable it';
     if (r.status !== 'CONNECTED') return `Balance unavailable: ${r.error || 'no answer'}`;
@@ -35,6 +42,7 @@
         ...(r.id === activeId ? [el('span', { className: 'wf-badge is-route', textContent: 'ACTIVE ROUTE' })] : [])]),
       el('span', { className: 'wf-cash', textContent: cashText(r) }),
       el('span', { className: 'wf-fees', textContent: feeText(r) }),
+      (() => { const s = feeSource(r); return el('span', { className: `wf-fee-src${s.warn ? ' is-unverified' : ''}`, textContent: s.text }); })(),
       el('span', { className: 'wf-role', textContent: r.role }),
     ]);
   }

@@ -25,7 +25,7 @@ function parse(body) {
 
 async function refresh(now = Date.now()) {
   const auth = api.loadAuth();
-  if (auth.error) { last = { ok: false, at: now, error: auth.error, tier: null }; return last; }
+  if (auth.error) { last = { ok: false, at: now, error: auth.error, tier: null }; cost.expireStaleFees('coinbase', now); return last; } // Phase 92: ages out too
   try {
     const r = parse(await api.cbFetch(auth, 'GET', PATH, { query: '?product_type=SPOT' }));
     if (!r) throw new Error('no fee_tier in the transaction summary');
@@ -35,6 +35,7 @@ async function refresh(now = Date.now()) {
     console.log(`[coinbase-fees] account fee tier${r.tier ? ` ${r.tier}` : ''}: maker ${(r.maker * 100).toFixed(2)}% / taker ${(r.taker * 100).toFixed(2)}%`);
   } catch (err) {
     last = { ok: false, at: now, error: err.message, tier: null };
+    if (cost.expireStaleFees("coinbase", now)) console.warn(`[coinbase-fees] last verified tier older than ${cost.VERIFIED_MAX_AGE_MS / 3600000} h; new entries now costed at the higher fallback`); // Phase 92
     const f = cost.coinbaseFees();
     console.warn(`[coinbase-fees] fee tier unavailable (${err.message}); using ${(f.maker * 100).toFixed(2)}% / ${(f.taker * 100).toFixed(2)}% (${f.source})`);
   }

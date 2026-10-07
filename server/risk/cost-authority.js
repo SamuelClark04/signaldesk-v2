@@ -41,14 +41,27 @@ const COINBASE_MAKER_FEE = Math.min(COINBASE_TAKER_FEE, feeFromEnv('COINBASE_MAK
 const COINBASE_SPREAD_BUFFER = feeFromEnv('COINBASE_SPREAD_BUFFER', DEFAULT_SPREAD_BUFFER, 0.02);
 // The Coinbase rates in force: the .env / default ones until the account's own tier is read.
 let cbFees = { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)', at: null };
-const coinbaseFees = () => ({ ...cbFees, buffer: COINBASE_SPREAD_BUFFER });
+// Phase 92: every public fee reader enforces the 24 h expiry AT USE TIME (enforce, below), independent of the next lookup.
+let clock = () => Date.now();
+const setClock = (fn) => { clock = typeof fn === 'function' ? fn : () => Date.now(); }; // tests only
+const enforce = (venue) => expireStaleFees(venue, clock());
+const coinbaseFees = () => { enforce('coinbase'); return { ...cbFees, buffer: COINBASE_SPREAD_BUFFER }; };
 
-// Phase 69A: the other crypto venues' fee schedules (the crypto router's waterfall, cheapest
-// first): OKX US 0.08% / 0.10% (OKX_MAKER_FEE / OKX_TAKER_FEE, Phase 69B), Kraken Pro 0.25% / 0.40%
-// (KRAKEN_MAKER_FEE / KRAKEN_TAKER_FEE). Coinbase keeps its account tier (coinbaseFees below).
+// Phase 69A: the other crypto venues' fees (the crypto router's waterfall). Phase 92: the ACCOUNT's real
+// rates are read at runtime (connectors/venue-fees.js: Kraken TradeVolume, OKX account/trade-fee) and set
+// here (setVenueFees); until a read succeeds the fallback is KRAKEN_* / OKX_* in .env, else the entry tier
+// both venues charged this account when verified on 2026-10-04 (Kraken 0.40% / 0.80%, OKX US Lv1 0.20% /
+// 0.35%). The old defaults (Kraken 0.25% / 0.40%, OKX 0.08% / 0.10%) were never verified and too low.
+// VENUE_FEES objects are updated IN PLACE (break-even.js holds a reference). Coinbase: coinbaseFees below.
+const envNamed = (v) => process.env[`${v}_MAKER_FEE`] !== undefined || process.env[`${v}_TAKER_FEE`] !== undefined;
 const VENUE_FEES = {
-  kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.0025, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.004, 0.05) },
-  okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.0008, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.001, 0.05) },
+  kraken: { maker: feeFromEnv('KRAKEN_MAKER_FEE', 0.004, 0.05), taker: feeFromEnv('KRAKEN_TAKER_FEE', 0.008, 0.05) },
+  okx: { maker: feeFromEnv('OKX_MAKER_FEE', 0.002, 0.05), taker: feeFromEnv('OKX_TAKER_FEE', 0.0035, 0.05) },
+};
+// Where each venue's rates in force came from: { source, at (ms of the account read; null = not verified) }.
+const VENUE_META = {
+  kraken: { source: envNamed('KRAKEN') ? '.env override (unverified)' : 'default: Kraken entry tier (unverified)', at: null },
+  okx: { source: envNamed('OKX') ? '.env override (unverified)' : 'default: OKX US Lv1 (unverified)', at: null },
 };
 
 // Cost of one leg as a fraction of that leg's notional. Keys are markets, plus 'crypto:<venue>'
@@ -66,10 +79,60 @@ const BROKER_VENUE = { Kraken: 'kraken', OKX: 'okx' };
 const venueOf = (x) => (x ? [x.venue, x.routeVenue, BROKER_VENUE[x.broker], x.broker === 'Coinbase' ? 'coinbase' : null].find((v) => v === 'coinbase' || VENUE_FEES[v]) : null) || null;
 const feeKey = (x) => { const v = venueOf(x); return x && x.market === 'crypto' && VENUE_FEES[v] ? `crypto:${v}` : x && x.market; };
 // A venue's exact rates { maker, taker } (Coinbase: the account tier in force).
-const venueFees = (venue) => (VENUE_FEES[venue] ? { ...VENUE_FEES[venue] } : { maker: coinbaseFees().maker, taker: coinbaseFees().taker });
+const venueFees = (venue) => { if (VENUE_FEES[venue]) { enforce(venue); return { ...VENUE_FEES[venue] }; } const c = coinbaseFees(); return { maker: c.maker, taker: c.taker }; };
 // The exact rates an order / position pays at its (routed) venue: { maker, taker }.
 const feesOf = (x) => venueFees(String(feeKey(x) || '').split(':')[1]);
 // The Coinbase rates in force: the .env / default ones until the account's own tier is read.
+
+// Phase 92: a venue account's verified rates (venue-fees.js). Refused when implausible; the old rates stay.
+// coverage: what the read verified (books / pairs / fee groups); the rate is claimed for those only.
+function setVenueFees(venue, { maker, taker, source, at = Date.now(), coverage = null }) {
+  const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
+  if (!VENUE_FEES[venue] || !ok(maker) || !ok(taker) || !(taker > 0)) return false;
+  Object.assign(VENUE_FEES[venue], { maker: Math.min(maker, taker), taker });
+  VENUE_META[venue] = { source: source || `${venue} account`, at, coverage };
+  LEG_RATE[`crypto:${venue}`] = { maker: VENUE_FEES[venue].maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  return true;
+}
+// The rates in force + provenance, WITHOUT the expiry check (expireStaleFees itself reads through this).
+function rawInfo(venue) {
+  if (VENUE_FEES[venue]) { const m = VENUE_META[venue]; return { ...VENUE_FEES[venue], source: m.source, at: m.at, verified: m.at !== null, coverage: m.coverage || null }; }
+  return { maker: cbFees.maker, taker: cbFees.taker, source: cbFees.source, at: cbFees.at, verified: cbFees.at !== null, coverage: cbFees.coverage || null };
+}
+// { maker, taker, source, at, verified, coverage } for 'coinbase' | 'kraken' | 'okx' (expiry enforced first).
+function feeInfo(venue) { enforce(VENUE_FEES[venue] ? venue : 'coinbase'); return rawInfo(VENUE_FEES[venue] ? venue : 'coinbase'); }
+
+// Phase 92 fee-failure policy: verified account rates are trusted for VERIFIED_MAX_AGE_MS after their last
+// successful read. Past that, checked AT USE TIME (every public fee reader: legRate, venueFees, feeInfo, coinbaseFees;
+// independent of the next lookup) and on a failed lookup, each venue's rates in force become the HIGHER of the
+// last verified ones and its fallback (.env, else the default above), labelled unverified, so a lower cached
+// tier never keeps passing new-entry cost checks (risk-engine cost gate, stop floors, the ticket) on its own.
+// Exits never consult fees to decide whether to run: stops / targets / closes continue unchanged; only their
+// fee estimates (P&L preview, the ratchet's break-even) use the rates in force. A later good read restores them.
+const VERIFIED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const FALLBACK = {
+  kraken: { ...VENUE_FEES.kraken, source: VENUE_META.kraken.source },
+  okx: { ...VENUE_FEES.okx, source: VENUE_META.okx.source },
+  coinbase: { maker: COINBASE_MAKER_FEE, taker: COINBASE_TAKER_FEE, source: 'default (.env / Intro tier)' },
+};
+function expireStaleFees(venue, now = Date.now()) {
+  const fb = FALLBACK[venue];
+  const at = !fb ? null : VENUE_FEES[venue] ? VENUE_META[venue].at : cbFees.at; // cheap check first: this runs on every fee read
+  if (at === null || at === undefined || now - at <= VERIFIED_MAX_AGE_MS) return false;
+  const f = rawInfo(venue);
+  const maker = Math.max(f.maker, fb.maker);
+  const taker = Math.max(f.taker, fb.taker);
+  const source = `stale: last verified ${new Date(f.at).toISOString()} (${f.source}); using the higher of it and ${fb.source}`;
+  if (VENUE_FEES[venue]) {
+    Object.assign(VENUE_FEES[venue], { maker: Math.min(maker, taker), taker });
+    VENUE_META[venue] = { source, at: null, lastVerifiedAt: f.at };
+    LEG_RATE[`crypto:${venue}`] = { maker: VENUE_FEES[venue].maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  } else {
+    cbFees = { maker: Math.min(maker, taker), taker, source, at: null, lastVerifiedAt: f.at };
+    LEG_RATE.crypto = { maker: cbFees.maker, taker: taker + COINBASE_SPREAD_BUFFER };
+  }
+  return true;
+}
 
 function setCoinbaseFees({ maker, taker, source = 'Coinbase account fee tier', at = Date.now() }) {
   const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 0.05;
@@ -108,6 +171,7 @@ const MAX_FEE_DRAG_CRYPTO = Math.min(MAX_FEE_DRAG, 0.30); // Phase 65: standard 
 const maxFeeDrag = (market, speculative = false) => (/^crypto(:|$)/.test(market) && !speculative ? MAX_FEE_DRAG_CRYPTO : MAX_FEE_DRAG); // a venue key ('crypto:okx') is crypto too
 
 function legRate(market, liquidity = 'taker') {
+  if (market === 'crypto') enforce('coinbase'); else if (typeof market === 'string' && market.startsWith('crypto:')) enforce(market.slice(7)); // Phase 92: expiry at use
   const rates = LEG_RATE[market];
   if (!rates) throw new Error(`cost-authority: unknown market "${market}"`);
   return liquidity === 'maker' ? rates.maker : rates.taker;
@@ -174,6 +238,11 @@ module.exports = {
   maxFeeDrag,
   coinbaseFees,
   setCoinbaseFees,
+  setVenueFees,
+  feeInfo,
+  expireStaleFees,
+  setClock,
+  VERIFIED_MAX_AGE_MS,
   feeKey,
   venueFees,
   feesOf,
