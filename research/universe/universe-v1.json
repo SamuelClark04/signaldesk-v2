@@ -1,0 +1,971 @@
+{
+ "version": "universe-v1",
+ "frozenOn": "2026-10-07",
+ "limitations": [
+  "A pinned CURRENT list: the S&P 100 as listed on the freeze date. It is not historical index membership.",
+  "Applied to dates before the freeze it is survivorship-biased: it includes later joiners and omits companies that left before the freeze. Label such results \"membership as of <frozenOn>, applied retroactively\".",
+  "Wikipedia is a secondary source: it can lag an index change or contain an error. The revision id and sha256 make the exact list reproducible; a correction is a new universe version.",
+  "Real historical membership needs a separate dated source (S&P announcements or a point-in-time constituents dataset): not in scope, not purchased."
+ ],
+ "sources": [
+  {
+   "id": "sp100",
+   "what": "S&P 100 components (Wikipedia; a secondary source)",
+   "url": "https://en.wikipedia.org/wiki/S%26P_100",
+   "revid": 1378987012,
+   "sha256": "945c9b46606503454ca21b50c96368bb194640759a72737fa7a17a1c2efe7f7b"
+  },
+  {
+   "id": "app-stocks",
+   "what": "server/market/universe.js STOCKS",
+   "commit": "a93b0bc",
+   "dirtyTree": false
+  },
+  {
+   "id": "vm-watchlist",
+   "what": "NO saved watchlist on the VM: the app's first-run DEFAULT list (CORE_WATCHLIST of server/market/universe.js) at the commit it runs",
+   "commit": "7354041",
+   "checked": "2026-10-07 on the VM (pm2 app signaldesk running 7354041; deploy target 7bfad9c has the same CORE_WATCHLIST): ls server/data/watchlist.json -> No such file; grep -c ^WATCHLIST_PATH .env -> 0; pm2 jlist | grep -c WATCHLIST_PATH -> 0",
+   "sha256": "0969dea19b80856493c642289217301829c1b912565b2d0040a28a5e72395e39"
+  }
+ ],
+ "benchmarks": [
+  "SPY",
+  "QQQ",
+  "IWM",
+  "DIA",
+  "XLB",
+  "XLC",
+  "XLE",
+  "XLF",
+  "XLI",
+  "XLK",
+  "XLP",
+  "XLRE",
+  "XLU",
+  "XLV",
+  "XLY",
+  "SMH",
+  "KRE",
+  "XBI",
+  "XRT",
+  "IYT",
+  "VIXY"
+ ],
+ "vix": "Cboe VIX daily; VIXY = the intraday proxy (labelled)",
+ "symbols": [
+  {
+   "symbol": "AAPL",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Apple Inc.",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "ABBV",
+   "sources": [
+    "sp100"
+   ],
+   "name": "AbbVie",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "ABT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Abbott Laboratories",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "ACN",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Accenture",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "ADBE",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Adobe Inc.",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "AMAT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Applied Materials",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "AMD",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Advanced Micro Devices",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "AMGN",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Amgen",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "AMT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "American Tower",
+   "sector": "Real Estate"
+  },
+  {
+   "symbol": "AMZN",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Amazon",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "ANET",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Arista Networks",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "AVGO",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Broadcom",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "AXP",
+   "sources": [
+    "sp100"
+   ],
+   "name": "American Express",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "BA",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Boeing",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "BABA",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "BAC",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Bank of America",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "BKNG",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Booking Holdings",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "BLK",
+   "sources": [
+    "sp100"
+   ],
+   "name": "BlackRock",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "BMY",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Bristol Myers Squibb",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "BNY",
+   "sources": [
+    "sp100"
+   ],
+   "name": "BNY Mellon",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "BRK.B",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Berkshire Hathaway (Class B)",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "C",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Citigroup",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "CAT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Caterpillar Inc.",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "CMCSA",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Comcast",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "COF",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Capital One",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "COIN",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "COP",
+   "sources": [
+    "sp100"
+   ],
+   "name": "ConocoPhillips",
+   "sector": "Energy"
+  },
+  {
+   "symbol": "COST",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Costco",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "CRM",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Salesforce",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "CSCO",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Cisco",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "CVS",
+   "sources": [
+    "sp100"
+   ],
+   "name": "CVS Health",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "CVX",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Chevron Corporation",
+   "sector": "Energy"
+  },
+  {
+   "symbol": "DE",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Deere & Company",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "DELL",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Dell Technologies",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "DHR",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Danaher Corporation",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "DIS",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Walt Disney Company (The)",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "DUK",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Duke Energy",
+   "sector": "Utilities"
+  },
+  {
+   "symbol": "EMR",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Emerson Electric",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "F",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "FDX",
+   "sources": [
+    "sp100"
+   ],
+   "name": "FedEx",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "GD",
+   "sources": [
+    "sp100"
+   ],
+   "name": "General Dynamics",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "GE",
+   "sources": [
+    "sp100"
+   ],
+   "name": "GE Aerospace",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "GEV",
+   "sources": [
+    "sp100"
+   ],
+   "name": "GE Vernova",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "GILD",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Gilead Sciences",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "GM",
+   "sources": [
+    "sp100"
+   ],
+   "name": "General Motors",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "GOOG",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Alphabet Inc. (Class C)",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "GOOGL",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Alphabet Inc. (Class A)",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "GS",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Goldman Sachs",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "HD",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Home Depot",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "IBM",
+   "sources": [
+    "sp100"
+   ],
+   "name": "IBM",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "INTC",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Intel",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "INTU",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Intuit",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "ISRG",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Intuitive Surgical",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "JNJ",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Johnson & Johnson",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "JPM",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "JPMorgan Chase",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "KO",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Coca-Cola Company (The)",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "LIN",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Linde plc",
+   "sector": "Materials"
+  },
+  {
+   "symbol": "LLY",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Eli Lilly and Company",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "LMT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Lockheed Martin",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "LOW",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Lowe's",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "LRCX",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Lam Research",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "MA",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Mastercard",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "MCD",
+   "sources": [
+    "sp100"
+   ],
+   "name": "McDonald's",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "MDLZ",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Mondelēz International",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "MDT",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Medtronic",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "META",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Meta Platforms",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "MMM",
+   "sources": [
+    "sp100"
+   ],
+   "name": "3M",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "MO",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Altria",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "MRK",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Merck & Co.",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "MS",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Morgan Stanley",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "MSFT",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Microsoft",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "MU",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Micron Technology",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "NEE",
+   "sources": [
+    "sp100"
+   ],
+   "name": "NextEra Energy",
+   "sector": "Utilities"
+  },
+  {
+   "symbol": "NFLX",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Netflix, Inc.",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "NIO",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "NOW",
+   "sources": [
+    "sp100"
+   ],
+   "name": "ServiceNow",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "NVDA",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Nvidia",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "ORCL",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Oracle Corporation",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "PANW",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Palo Alto Networks",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "PEP",
+   "sources": [
+    "sp100"
+   ],
+   "name": "PepsiCo",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "PFE",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Pfizer",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "PG",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Procter & Gamble",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "PLTR",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Palantir Technologies",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "PM",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Philip Morris International",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "PYPL",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "QCOM",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Qualcomm",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "RTX",
+   "sources": [
+    "sp100"
+   ],
+   "name": "RTX Corporation",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "SBUX",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Starbucks",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "SCHW",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Charles Schwab Corporation",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "SNDK",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Sandisk",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "SO",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Southern Company",
+   "sector": "Utilities"
+  },
+  {
+   "symbol": "SOFI",
+   "sources": [
+    "app-stocks"
+   ]
+  },
+  {
+   "symbol": "T",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "AT&T",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "TMO",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Thermo Fisher Scientific",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "TMUS",
+   "sources": [
+    "sp100"
+   ],
+   "name": "T-Mobile US",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "TSLA",
+   "sources": [
+    "sp100",
+    "app-stocks",
+    "vm-watchlist"
+   ],
+   "name": "Tesla, Inc.",
+   "sector": "Consumer Discretionary"
+  },
+  {
+   "symbol": "TXN",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Texas Instruments",
+   "sector": "Information Technology"
+  },
+  {
+   "symbol": "UBER",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Uber",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "UNH",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "UnitedHealth Group",
+   "sector": "Health Care"
+  },
+  {
+   "symbol": "UNP",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Union Pacific Corporation",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "UPS",
+   "sources": [
+    "sp100"
+   ],
+   "name": "United Parcel Service",
+   "sector": "Industrials"
+  },
+  {
+   "symbol": "USB",
+   "sources": [
+    "sp100"
+   ],
+   "name": "U.S. Bancorp",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "V",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Visa Inc.",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "VZ",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Verizon",
+   "sector": "Communication Services"
+  },
+  {
+   "symbol": "WFC",
+   "sources": [
+    "sp100"
+   ],
+   "name": "Wells Fargo",
+   "sector": "Financials"
+  },
+  {
+   "symbol": "WMT",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "Walmart",
+   "sector": "Consumer Staples"
+  },
+  {
+   "symbol": "XOM",
+   "sources": [
+    "sp100",
+    "app-stocks"
+   ],
+   "name": "ExxonMobil",
+   "sector": "Energy"
+  }
+ ],
+ "pilot": {
+  "id": "P1",
+  "rule": "CORE_WATCHLIST stocks + IWM, DIA, the 11 SPDR sector ETFs and SMH (server/research/capture-universe.js)",
+  "symbols": [
+   "SPY",
+   "QQQ",
+   "AAPL",
+   "NVDA",
+   "MSFT",
+   "META",
+   "AMZN",
+   "GOOGL",
+   "TSLA",
+   "AMD",
+   "IWM",
+   "DIA",
+   "XLB",
+   "XLC",
+   "XLE",
+   "XLF",
+   "XLI",
+   "XLK",
+   "XLP",
+   "XLRE",
+   "XLU",
+   "XLV",
+   "XLY",
+   "SMH"
+  ]
+ }
+}
