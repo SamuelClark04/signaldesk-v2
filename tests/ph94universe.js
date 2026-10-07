@@ -17,6 +17,13 @@ check('freeze: benchmarks are kept apart from the stock list (SPY is a benchmark
 check('freeze: the file states its limits (a pinned CURRENT list, not historical membership; survivorship; secondary source)',
   u.limitations.length >= 3 && /not historical index membership/i.test(u.limitations.join(' ')) && /survivorship/i.test(u.limitations.join(' ')) && /secondary source/i.test(u.limitations.join(' ')));
 check('freeze: the Wikipedia source records the pinned revision and the raw-page hash', u.sources[0].revid === 1 && u.sources[0].sha256 === 'abc');
+// 2026-10-07: the VM had NO saved watchlist.json; the app then uses its default list. The file must say so, never "the VM watchlist.json".
+const ud = fu.build({ components: comps, revid: 1, rawSha: 'abc', appStocks: ['AAPL'], appCommit: 'c0ffee', watchlist: ['HOOD'], watchlistSha: 'def', frozenOn: '2026-10-07',
+  watchlistSource: { what: 'NO saved watchlist on the VM: the app default CORE_WATCHLIST', commit: '7354041', checked: 'no server/data/watchlist.json' } });
+const vs = ud.sources.find((s) => s.id === 'vm-watchlist');
+check('freeze: a VM without a saved watchlist is recorded as the app DEFAULT list at a named commit (never as a saved VM file)',
+  /NO saved watchlist/.test(vs.what) && vs.commit === '7354041' && vs.checked && vs.sha256 === 'def' && ud.symbols.find((s) => s.symbol === 'HOOD').sources.join() === 'vm-watchlist', JSON.stringify(vs));
+check('freeze: defaultWatchlist(commit) reads CORE_WATCHLIST of that commit', fu.defaultWatchlist('7354041').includes('AAPL') && fu.defaultWatchlist('7354041').includes('SPY'));
 const wl = fu.watchlistSymbols({ items: [{ symbol: 'NVDA' }, { symbol: 'ETH-USD' }] });
 check('freeze: watchlist.json shapes ({ items: [...] } or an array of strings / objects) are read', wl.join() === 'NVDA,ETH-USD' && fu.watchlistSymbols(['AAPL', { symbol: 'MU' }]).join() === 'AAPL,MU');
 

@@ -1,7 +1,8 @@
 // Phase 94 (spec 3.1): freeze universe-v1 as an EXPLICIT, DATED list. Sources, each recorded with its id / hash:
 //   S&P 100 components  Wikipedia "S&P 100" at a pinned revision (revid + sha256 of the raw wikitext; a SECONDARY source, labelled)
 //   app stocks          server/market/universe.js STOCKS at the current commit
-//   watchlist           the VM's watchlist.json from a vm-audit archive (Phase 94 vm-audit copies it)
+//   watchlist           the VM's watchlist.json from a vm-audit archive (Phase 94 vm-audit copies it), or, when the VM has NO saved
+//                       file, --vm-default-watchlist <commit> --checked "<how>": the app's default CORE_WATCHLIST at that commit, labelled
 // Run: node scripts/research/freeze-universe.js --watchlist <archive>/watchlist.json [--out research/universe/universe-v1.json]
 // Network: one GET to en.wikipedia.org with the APPLICATION identifier as User-Agent (spec 4.0: never a personal email). If Wikipedia
 // refuses it, the freeze stops and says so: a contact address is added only if the user designates one, never automatically.
@@ -30,7 +31,16 @@ function parseComponents(wikitext) {
 
 const watchlistSymbols = (j) => (Array.isArray(j) ? j : (j && j.items) || []).map((x) => (typeof x === 'string' ? x : x && x.symbol)).filter(Boolean);
 
-function build({ components, revid, rawSha, appStocks, appCommit, watchlist, watchlistSha, frozenOn }) {
+// The VM's watchlist when it has NO saved file (2026-10-07): the app's first-run default, CORE_WATCHLIST of the commit it runs.
+function defaultWatchlist(commit) {
+  const src = require('child_process').execSync(`git show ${commit}:server/market/universe.js`, { encoding: 'utf8', cwd: path.join(__dirname, '..', '..') });
+  const m = /CORE_WATCHLIST = Object\.freeze\(\[([^\]]*)\]/.exec(src);
+  if (!m) throw new Error(`no CORE_WATCHLIST in server/market/universe.js at ${commit}`);
+  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+}
+
+// watchlistSource: how the watchlist was obtained (default: a saved watchlist.json copied by vm-audit).
+function build({ components, revid, rawSha, appStocks, appCommit, watchlist, watchlistSha, frozenOn, watchlistSource = null }) {
   const map = new Map();
   const add = (sym, src, extra = {}) => { if (BENCHMARKS.includes(sym)) return; const e = map.get(sym) || { symbol: sym, sources: [] }; if (!e.sources.includes(src)) e.sources.push(src); map.set(sym, { ...e, ...extra }); };
   for (const c of components) add(c.symbol, 'sp100', { name: c.name, sector: c.sector });
@@ -39,7 +49,7 @@ function build({ components, revid, rawSha, appStocks, appCommit, watchlist, wat
   const { PILOT_P1 } = require(path.join(__dirname, '..', '..', 'server', 'research', 'capture-universe'));
   return { version: 'universe-v1', frozenOn, limitations: LIMITATIONS,
     sources: [{ id: 'sp100', what: 'S&P 100 components (Wikipedia; a secondary source)', url: 'https://en.wikipedia.org/wiki/S%26P_100', revid, sha256: rawSha },
-      { id: 'app-stocks', what: 'server/market/universe.js STOCKS', commit: appCommit }, { id: 'vm-watchlist', what: 'the VM watchlist.json from a vm-audit archive', sha256: watchlistSha }],
+      { id: 'app-stocks', what: 'server/market/universe.js STOCKS', commit: appCommit }, { id: 'vm-watchlist', what: 'the VM watchlist.json from a vm-audit archive', ...(watchlistSource || {}), sha256: watchlistSha }],
     benchmarks: BENCHMARKS, vix: 'Cboe VIX daily; VIXY = the intraday proxy (labelled)',
     symbols: [...map.values()].sort((a, b) => a.symbol.localeCompare(b.symbol)), pilot: { id: 'P1', rule: PILOT_RULE, symbols: [...PILOT_P1] } };
 }
@@ -47,7 +57,10 @@ function build({ components, revid, rawSha, appStocks, appCommit, watchlist, wat
 async function main() {
   const args = process.argv.slice(2);
   const wl = args.includes('--watchlist') ? args[args.indexOf('--watchlist') + 1] : null;
-  if (!wl || !fs.existsSync(wl)) { console.log('usage: --watchlist <archive>/watchlist.json (copied by vm-audit from Phase 94)'); process.exit(2); }
+  const defCommit = args.includes('--vm-default-watchlist') ? args[args.indexOf('--vm-default-watchlist') + 1] : null;
+  const checked = args.includes('--checked') ? args[args.indexOf('--checked') + 1] : null;
+  if (defCommit && !checked) { console.log('--vm-default-watchlist <commit> needs --checked "<how the VM was checked to have no saved watchlist>"'); process.exit(2); }
+  if (!defCommit && (!wl || !fs.existsSync(wl))) { console.log('usage: --watchlist <archive>/watchlist.json (copied by vm-audit from Phase 94), or --vm-default-watchlist <commit the VM runs> --checked "<text>"'); process.exit(2); }
   const out = args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(__dirname, '..', '..', 'research', 'universe', 'universe-v1.json');
   if (fs.existsSync(out)) { console.log(`${out} already exists: a frozen universe is never rewritten (a change is a new version file)`); process.exit(2); }
   const res = await fetch('https://en.wikipedia.org/w/api.php?action=parse&page=S%26P_100&prop=wikitext|revid&format=json&formatversion=2', { headers: { 'User-Agent': 'SignalDesk-research/1.0' } });
@@ -55,11 +68,12 @@ async function main() {
   const j = await res.json(); const text = j.parse.wikitext;
   const components = parseComponents(text);
   if (components.length < 95) { console.log(`only ${components.length} components parsed: check the page format before freezing`); process.exit(1); }
-  const wlRaw = fs.readFileSync(wl, 'utf8');
+  const wlRaw = defCommit ? JSON.stringify(defaultWatchlist(defCommit)) : fs.readFileSync(wl, 'utf8');
+  const watchlistSource = defCommit ? { what: `NO saved watchlist on the VM: the app's first-run DEFAULT list (CORE_WATCHLIST of server/market/universe.js) at the commit it runs`, commit: defCommit, checked } : null;
   const appCommit = require('child_process').execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
   const dirtyTree = require('child_process').execSync('git status --porcelain --untracked-files=no', { encoding: 'utf8' }).trim() !== ''; // recorded: STOCKS may differ from the commit
   const u = build({ components, revid: j.parse.revid, rawSha: crypto.createHash('sha256').update(text).digest('hex'), appStocks: [...require('../../server/market/universe').STOCKS], appCommit,
-    watchlist: watchlistSymbols(JSON.parse(wlRaw)), watchlistSha: crypto.createHash('sha256').update(wlRaw).digest('hex'), frozenOn: require('../../server/services/et-time').ymd(Date.now()) });
+    watchlist: watchlistSymbols(JSON.parse(wlRaw)), watchlistSha: crypto.createHash('sha256').update(wlRaw).digest('hex'), watchlistSource, frozenOn: require('../../server/services/et-time').ymd(Date.now()) });
   fs.mkdirSync(path.dirname(out), { recursive: true });
   u.sources[1].dirtyTree = dirtyTree;
   fs.writeFileSync(out, `${JSON.stringify(u, null, 1)}\n`, { flag: 'wx' }); // 'wx': never overwrites, even if created meanwhile
@@ -67,4 +81,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
-module.exports = { parseComponents, build, watchlistSymbols, BENCHMARKS, LIMITATIONS };
+module.exports = { parseComponents, build, watchlistSymbols, defaultWatchlist, BENCHMARKS, LIMITATIONS };
