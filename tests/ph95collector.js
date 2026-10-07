@@ -56,6 +56,11 @@ const FORBIDDEN = /^server\/(execution|risk|strategies|security)\/|^server\/conn
   L.report(200);
   check('limiter: stats name the ceiling, usage, 429s and the pause', L.stats().perMin === 40 && 'pausedUntil' in L.stats());
 
+  // regression: a process whose only pending work is a limiter wait must stay alive (an unref'd wait let a CLI exit after 60 requests)
+  const child = require('child_process').spawnSync(process.execPath, ['-e', `const { createLimiter } = require(${JSON.stringify(S + 'research/collector/budget')});
+    const L = createLimiter({ perMin: 1, windowMs: 300 }); (async () => { await L.acquire(); await L.acquire(); console.log('second slot'); })();`], { encoding: 'utf8', timeout: 10000 });
+  check('limiter: a process waiting for its next slot stays alive and gets it (no silent exit)', /second slot/.test(child.stdout), `${child.status} ${child.stdout} ${child.stderr}`);
+
   // heartbeat
   const ev = require(S + 'research/event-recorder'); ev._test.reset();
   const hb = require(S + 'research/collector/heartbeat');
