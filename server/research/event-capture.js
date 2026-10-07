@@ -5,7 +5,9 @@ const rec = require('./event-recorder');
 function start() {
   if (String(process.env.EVENTS_RECORDER || '').toLowerCase() === 'off') return;
   rec.start();
-  require('./news-capture').start();
+  const news = require('./news-capture');
+  news.useMarketOpen(() => require('../market/market-session').isEquityMarketOpen()); // the server's Alpaca clock, as before Phase 95
+  news.start();
   require('./earnings-snapshot').start();
 }
 function stop() { rec.stop(); require('./news-capture').stop(); require('./earnings-snapshot').stop(); }

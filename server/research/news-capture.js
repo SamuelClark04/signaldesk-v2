@@ -48,7 +48,11 @@ const st = { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollErro
 const base = () => (process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets').replace(/\/$/, '');
 const evDir = () => process.env.EVENTS_DIR || path.dirname(process.env.LEDGER_STATE_PATH || path.join(__dirname, '..', 'data', 'ledger-state.json'));
 const cursorFile = () => path.join(evDir(), 'news-cursor.json');
-const marketOpen = () => { try { return require('../market/market-session').isEquityMarketOpen(); } catch { return false; } };
+// Phase 95: the host process injects its market-open check (the trading server: the Alpaca clock via market-session, set in
+// event-capture.start; the research collector: the NYSE calendar). Not imported here, so the collector never reaches broker code.
+let marketOpenFn = () => false;
+const useMarketOpen = (fn) => { if (typeof fn === 'function') marketOpenFn = fn; };
+const marketOpen = () => { try { return !!marketOpenFn(); } catch { return false; } };
 const everyMs = () => (marketOpen() ? POLL_OPEN_MS : POLL_CLOSED_MS);
 const tOf = (n) => { const t = Date.parse(n.updated_at || n.created_at || ''); return Number.isFinite(t) ? t : null; };
 
@@ -165,7 +169,7 @@ async function poll({ now = Date.now() } = {}) {
   polling = true;
   try {
     if (cursor === null) resume(now);
-    const keys = require('../connectors/alpaca-api').dataKeys();
+    const keys = require('./data-keys').dataKeys(); // same answer as alpaca-api.dataKeys(), without the broker module (Phase 95)
     if (!keys) throw new Error('no Alpaca data keys');
     const since = carried ? carried.since : new Date(cursor - OVERLAP_MS).toISOString();
     let token = carried ? carried.token : null; let pages = 0; let fresh = 0; let newest = cursor;
@@ -210,4 +214,4 @@ const _test = { reset: () => { versions = new Map(); cursor = null; carried = nu
   Object.assign(st, { polls: 0, pollErrors: 0, lastPollAt: null, lastNew: 0, lastPollError: null, streamSeen: 0, refused: 0, truncatedPolls: 0 }); },
   resume: (now) => resume(now), cursor: () => cursor, setStartedAt: (t) => { startedAt = t; } };
 
-module.exports = { observe, fromStream, poll, start, stop, status, _test, MAX_PAGES, MAX_CATCHUP_MS };
+module.exports = { observe, fromStream, poll, start, stop, status, useMarketOpen, _test, MAX_PAGES, MAX_CATCHUP_MS };
