@@ -247,6 +247,34 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   strategy's test record, copied onto every staged setup (paper-ledger.stageOrder), in the email subject and on every card (components/evidence-badge.js).
   Quick Flips radar card: components/quickflip-card.js (contract, why, cost per contract, automatic exits, countdown to the entry deadline). Suites that
   test LIVE paths on mocks set require(S + 'risk/paper-lock').PAPER_ONLY = false first. Test: tests/ph91unit.js. Supersedes the Phase 89 / 89b notes on automatic Quick Flips paper execution (auto-paper) and on every scanner being off by default.
+- **Decision Review (Phase 93)**: spec docs/superpowers/specs/2026-10-05-decision-review-design.md. RECORD-ONLY on the server: research/decision-recorder.js
+  record(path, id, { reason, candidate, guard }) is SYNCHRONOUS, never throws / awaits (a bounded queue, 5,000; overflow drops the oldest, counted); a 5 s
+  unref timer serializes in 10 ms slices (setImmediate) and appends decisions-YYYY-MM-DD.jsonl next to the ledger (DECISIONS_DIR; DECISIONS_RECORDER=off;
+  180-day prune); each distinct bar series ONCE per day file (decision-serialize.js); status() in /api/version + Settings > Strategies footer + a status line
+  every 10 min in the file + vm-audit copies the files. Paths: STRATEGY_BLOCK / PIPELINE_REJECT (deduplicated per id + path + reason bucket: REPEATS
+  lines) and the lifecycle, NEVER deduplicated: STAGED APPROVAL_HOLD APPROVAL_REJECT APPROVED (the click passed every guard, recorded before routing)
+  ROUTE_FAILED USER_REJECT EXPIRED OPENED FILLED VOIDED CLOSED. research/decision-context.js: the four radar strategies hand ALL their inputs (full bar
+  series + signal values) to a bounded id-keyed store BESIDE the candidate (never on it: staged orders go to the ledger and the browser); post-detection
+  filters (ORB_FILTER, QUICKFLIPS_SIGNAL_SKIPPED) are strategy blocks; candidates byte-identical with capture on / off (tests). research/decision-guard.js:
+  the limits a pass decided with. ANALYSIS ON THE PC ONLY: tools/decision-review/run.js <archive folder(s)> writes reports/decision-review-<date>.html
+  (+ .json for a later in-app view; reports/ git-ignored: local and private): direction / timing on the UNDERLYING (fixed classes, spec 5), money apart
+  (LEDGER / FETCHED / ESTIMATE option prints / UNAVAILABLE), the opposite side, rule checks, evidence-only loss causes, pre-decision patterns (BH 10%,
+  n >= 20, provisional bins). Tests: tests/ph93unit.js (+ ph93hooks.js, ph93strategies.js), tests/ph93review.js.
+- **Phase 94 Stage 0 (PR #2 accuracy fixes; spec docs/superpowers/specs/2026-10-05-event-research-layer-design.md 16.1, plan
+  docs/superpowers/plans/2026-10-06-phase94-stage0-1.md)**:
+  - Evidence: decision-context copies bars into FROZEN objects (unchanged bars reused across captures for memory); series are keyed by a
+    sha256 of the stored body (b2: / r2:; legacy b: / r: labelled).
+  - Pre-decision values and checkpoint prices use bars that ENDED by that time (measure.closeBefore); recorded strategy inputs come first.
+  - Every staged / rejection / approval-time event records its OWN guard (decision-guard.snapshot; the pass guard is set before
+    strategy blocks; dc.block filters are guard-exempt).
+  - The decision is the STAGED record, else the rejection that ended the setup; a later lifecycle event is never the decision (stagedAt
+    recovered, else MISSING); decision / approved / entry / close times are kept separate.
+  - The opposite side is MIRRORED on the same entry opportunity; unfilled sides are counted.
+  - `--harness` folders never enter account statistics; the crypto coverage rule is unchanged; Swing T2-below-T1 is flagged
+    (docs/research/phase94-pfe-target-order.md).
+  - Change report: tools/decision-review/compare.js + docs/research/phase94-stage0-report-changes.md.
+  - vm-audit.sh: find -exec needs `\;` (the Phase 93 line copied NO decision file).
+  - Tests: tests/ph94unit.js, tests/ph94review.js.
 - **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken and OKX US ACCOUNT rates at boot + every 6 h (retry 10 min),
   read-only, like coinbase-fees.js. Kraken: POST /0/private/TradeVolume for XBTUSD, ETHUSD, XBTUSDC, ETHUSDC (answer keys XXBTZUSD / XETHZUSD /
   XBTUSDC / ETHUSDC); EVERY requested pair needs a valid maker + taker or the read fails and replaces nothing; claimed for those pairs only

@@ -15,3 +15,6 @@ Thumbs.db
 # Ledger state (paper trade history; loaded into the ledger on start). Code in server/data/ (news-feed.js) is tracked.
 server/data/*
 !server/data/*.js
+
+# Phase 93: Decision Review reports + market-data cache (local and private, never committed)
+reports/

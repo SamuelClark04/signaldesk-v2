@@ -14,6 +14,7 @@ const { peekDailyBars } = require('../connectors/daily-bars');
 const gate = require('../risk/reality-gate');
 const { createTally } = require('./scan-tally');
 const { pace } = require('../execution/loop-pace'); // Phase 72: yield the event loop between symbols
+const dc = require('../research/decision-context'); // Phase 93: record-only decision inputs (never changes a value below)
 
 const STRATEGY_ID = 'equity-day';
 const SESSION_OPEN = 9 * 60 + 30; // minutes after midnight, US/Eastern
@@ -107,7 +108,7 @@ function marketTape(marketDataMap) {
   const { bars } = sessionBars(lookup(marketDataMap, 'SPY'));
   const w = bars.length >= CONFIG.minOpeningRangeBars ? vwap(bars) : null;
   const last = bars.length ? bars[bars.length - 1].close : null;
-  return w && last ? { weak: last < w, text: `SPY ${last} ${last < w ? 'under' : 'over'} its session VWAP ${cents(w)}` } : { weak: false, text: 'SPY tape unknown' };
+  return w && last ? { weak: last < w, text: `SPY ${last} ${last < w ? 'under' : 'over'} its session VWAP ${cents(w)}`, vwap: w, last, bars } : { weak: false, text: 'SPY tape unknown', bars };
 }
 
 function detectOrb(symbol, rawBars, headlines, tape = { weak: false }) {
@@ -128,22 +129,29 @@ function detectOrb(symbol, rawBars, headlines, tape = { weak: false }) {
   const breakout = post.find((k) => k.close > orHigh);
   if (!breakout) return tally.skip(symbol, 'No 5m close above the opening-range high');
   if (breakout !== post[post.length - 1]) return tally.skip(symbol, 'Breakout happened earlier (not fresh)');
-  if (breakout.start > c.lastEntryMinute) return tally.skip(symbol, 'Past the entry cutoff');
-  if (breakout.close > orHigh * (1 + c.maxChasePct)) return tally.skip(symbol, 'Breakout too extended (no chasing)');
-  if (breakout.volume < orAvgVolume * c.volumeMultiple) return tally.skip(symbol, 'Breakout volume too low');
   const vw = vwap(bars);
-  if (vw && breakout.close <= vw) return tally.skip(symbol, 'Breakout under the session VWAP');
-  if (tape.weak) return tally.skip(symbol, `Weak market: ${tape.text}`);
-
   const catalyst = pickCatalyst(headlines);
-  if (catalyst && catalyst.classification === 'NEGATIVE') return tally.skip(symbol, 'Negative news catalyst'); // no longs into bad news
+  // Phase 93: a FRESH breakout is a decision: what it saw is kept (record-only), and a filter that drops it is a strategy block.
+  const inputs = (more = {}) => ({ strategyId: STRATEGY_ID, symbol, values: { orHigh, orLow, orAvgVolume, breakoutStart: breakout.start, breakoutClose: breakout.close, breakoutVolume: breakout.volume,
+    volumeRatio: orAvgVolume > 0 ? breakout.volume / orAvgVolume : null, vwap: vw, spyWeak: !!tape.weak, spyText: tape.text, spyLast: tape.last ?? null, spyVwap: tape.vwap ?? null,
+    catalyst: catalyst ? catalyst.headline : null, catalystClass: catalyst ? catalyst.classification : null, ...more },
+    series: [{ name: 'session1m', tf: '1m', bars }, { name: 'spySession1m', symbol: 'SPY', tf: '1m', bars: tape.bars || null }, { name: 'daily', tf: '1D', bars: peekDailyBars(symbol) }] });
+  const blocked = (why) => { dc.block(`${STRATEGY_ID}:ORB:${symbol}:${date}:${breakout.start}`, `ORB_FILTER: ${why}`, { asset: symbol, market: 'stocks', strategyId: STRATEGY_ID,
+    setupType: 'ORB', direction: 'long', timeframe: `${c.barMinutes}m`, expectedDuration: c.expectedDuration }, inputs()); return tally.skip(symbol, why); };
+  if (breakout.start > c.lastEntryMinute) return blocked('Past the entry cutoff');
+  if (breakout.close > orHigh * (1 + c.maxChasePct)) return blocked('Breakout too extended (no chasing)');
+  if (breakout.volume < orAvgVolume * c.volumeMultiple) return blocked('Breakout volume too low');
+  if (vw && breakout.close <= vw) return blocked('Breakout under the session VWAP');
+  if (tape.weak) return blocked(`Weak market: ${tape.text}`);
+  if (catalyst && catalyst.classification === 'NEGATIVE') return blocked('Negative news catalyst'); // no longs into bad news
 
   const entryMax = cents(Math.max(breakout.close, orHigh * (1 + c.entryBufferPct)));
   const minStop = Math.floor(entryMax * (1 - c.minStopPct) * 100) / 100;
   const invalidation = Math.min(cents(orLow), minStop);
   const risk = entryMax - invalidation;
   const cap = gate.atrCap(entryMax, entryMax + c.targets[0].r * risk, gate.dailyAtr(peekDailyBars(symbol)), 'intraday');
-  if (!cap.ok) return tally.skip(symbol, `Rejected: ${cap.reason}`);
+  if (!cap.ok) return blocked(`Rejected: ${cap.reason}`);
+  dc.capture(`${STRATEGY_ID}:ORB:${symbol}:${date}`, inputs({ entryMax, invalidation, risk }));
 
   return {
     id: `${STRATEGY_ID}:ORB:${symbol}:${date}`,

@@ -13,7 +13,8 @@ const BOOT = Object.freeze({ commit: git(['rev-parse', '--short', 'HEAD']) || 'u
 function report(settings = {}) {
   return { ...BOOT, strategiesEnabled: { ...(settings.strategiesEnabled || {}) }, strategyPauseVersion: settings.strategyPauseVersion ?? null, radarVersion: settings.radarVersion ?? null, paperOnly: settings.paperOnly ?? null,
     stockMode: settings.stockMode, cryptoMode: settings.cryptoMode, paperStockBroker: settings.paperStockBroker,
-    dailyProfitTargetOn: settings.dailyProfitTargetOn, maxOpenPositions: settings.maxOpenPositions };
+    dailyProfitTargetOn: settings.dailyProfitTargetOn, maxOpenPositions: settings.maxOpenPositions,
+    decisionRecorder: (() => { try { return require('./research/decision-recorder').status(); } catch (err) { return { error: err.message }; } })() }; // Phase 93
 }
 
 module.exports = { BOOT, report };

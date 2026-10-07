@@ -22,6 +22,7 @@ const et = require('../services/et-time');
 const sig = require('./quickflips-signals');
 const { createTally } = require('./scan-tally');
 const { pace } = require('../execution/loop-pace');
+const dc = require('../research/decision-context'); // Phase 93: record-only decision inputs (never changes a value below)
 
 const STRATEGY_ID = 'options-quickflips';
 const CONFIG = {
@@ -159,16 +160,25 @@ async function evaluate(symbol, now, fomc) {
   const list = sig.detect(s, today, { fomc }).filter((x) => CONFIG.setups.includes(x.setup));
   const fresh = list.filter((x) => nowMin >= x.endMin + 1 && (now - et.toEpoch(et.ymd(now), Math.floor((x.endMin + 1) / 60), (x.endMin + 1) % 60)) <= CONFIG.SIGNAL_TTL_MS);
   const live = fresh.find((x) => !x.skip);
+  // Phase 93: the inputs of a fired signal (record-only): today's minute slots, the prior sessions (RelVol / EMA baseline), the signal.
+  const inputs = (x, more = {}) => ({ strategyId: STRATEGY_ID, symbol, values: { setup: x.setup, dir: x.dir, endMin: x.endMin, trigger: x.trigger, vwap: x.vwap, relVol: x.relVol, spot: x.spot,
+    skip: x.skip || null, or: s.or || null, sessionVwap: s.vwap ?? null, open: s.open ?? null, fomc: !!fomc, completeness: c, ...more },
+    series: [{ name: 'todaySlots1m', tf: '1m', bars: today }, { name: 'priorSessions5m', tf: '5m', bars: past }] });
+  if (!live && fresh[0]) dc.block(`${STRATEGY_ID}:${fresh[0].setup}:${fresh[0].dir === 'long' ? 'CALL' : 'PUT'}:${symbol}:${et.ymd(now)}:${fresh[0].endMin}`, `QUICKFLIPS_SIGNAL_SKIPPED: ${fresh[0].skip}`,
+    { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Quick Flip', direction: fresh[0].dir, timeframe: '5m' }, inputs(fresh[0]));
   if (!live) return tally.skip(symbol, fresh[0] ? fresh[0].skip : 'No Quick Flip setup on the latest 5-minute bar');
   const key = `${symbol}|${et.ymd(now)}|${live.endMin}|${live.dir}`;
   if (proposed.has(key)) return tally.skip(symbol, 'Already proposed');
   const pick = await pickContract(symbol, live.dir, live.spot, now);
   if (pick.reason) {
+    dc.capture(`${STRATEGY_ID}:${symbol}:${live.endMin}`, inputs(live));
     blocks.push({ id: `${STRATEGY_ID}:${symbol}:${live.endMin}`, reason: pick.reason, candidate: { asset: symbol, market: 'options', strategyId: STRATEGY_ID, setupType: 'Quick Flip', direction: live.dir, timeframe: '5m' } });
     return tally.skip(symbol, `Rejected: ${pick.reason.split(':')[0].replace(/_/g, ' ').toLowerCase()}`);
   }
   proposed.add(key);
-  return candidate(symbol, { ...live, or: s.or }, pick, now, options.feed()); // Phase 91: the opening range for the radar card
+  const cand = candidate(symbol, { ...live, or: s.or }, pick, now, options.feed()); // Phase 91: the opening range for the radar card
+  dc.capture(cand.id, inputs(live, { quote: { bid: pick.quote.bid, ask: pick.quote.ask, quoteTime: pick.quote.quoteTime, delta: pick.quote.delta ?? null }, contract: pick.contract.symbol, dte: pick.contract.dte, iv: pick.contract.iv }));
+  return cand;
 }
 
 // Only while the options book is on paper and the US session is open (the pipeline runs this every pass).

@@ -64,6 +64,7 @@ function syncLiveFill(candidateId, { fillPrice, filledQty }) {
   }
   Object.assign(pos, { fillPrice, fillEstimated: false, brokerFillSyncedAt: Date.now() });
   L.save();
+  require('../research/decision-recorder').record('FILLED', candidateId, { candidate: pos, extra: { fillPrice, filledQty } }); // Phase 93: record-only
   return { ...pos };
 }
 
@@ -76,6 +77,7 @@ function voidLivePosition(candidateId, reason) {
   const voided = { ...pos, status: 'void', voidReason: reason, voidedAt: Date.now() };
   L.discardedOrders.push(voided);
   L.save();
+  require('../research/decision-recorder').record('VOIDED', candidateId, { reason, candidate: voided }); // Phase 93: record-only
   return { ...voided };
 }
 

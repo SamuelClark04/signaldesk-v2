@@ -19,6 +19,7 @@ const entryShields = require('../risk/entry-shields'); // Phase 81: daily loss k
 const exitPass = require('./exit-pass');
 const cryptoRouter = require('./crypto-router'); // Phase 69A: OKX -> Kraken -> Coinbase waterfall // broker reconciliation (first in every pass) + paper exits (Phase 67)
 const { recordRejection: recordStat } = require('./rejection-stats');
+const decisions = require('../research/decision-recorder'); // Phase 93: record-only (Decision Review); never feeds a decision
 const scanLog = require('./scan-log');
 const watchlist = require('./watchlist');
 const { publishIntelligence } = require('../intelligence/dashboard-intel');
@@ -44,9 +45,11 @@ const getProximity = () => proximityState;
 
 // Every dropped setup goes to the day's tally ("Why we passed", counted once)
 // and to the live scanner log (every pass, collapsed while it repeats).
-function recordRejection(id, reason, candidate) {
+let passGuard = null; // Phase 93: the limits / shield state this pass decided with (recorded beside each rejection)
+function recordRejection(id, reason, candidate, path = 'PIPELINE_REJECT') {
   recordStat(id, reason, candidate);
   scanLog.rejected(id, reason, candidate || {});
+  decisions.record(path, id, { reason, candidate, guard: passGuard });
 }
 
 // One pass: strategies propose, the risk engine decides, the ledger holds state; one candidate failing never
@@ -96,16 +99,17 @@ async function pipelinePass() {
   // Open / staged trades on Coinbase gems keep streaming (exits and approvals need live prices).
   discovery.stream([...ledger.getActivePositions(), ...ledger.getPendingOrders()].filter((p) => p.market === 'crypto').map((p) => p.asset));
   const candidates = await runner.collect();
-  // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
-  for (const b of runner.takeBlocks()) recordRejection(b.id, b.reason, b.candidate);
-  // Scanner log: what each strategy concluded per symbol on this pass.
-  for (const [id, scan] of runner.scans()) scanLog.scanned(id, scan);
   // Read once per pass: every candidate is sized with the same risk profile
   // (Settings: 0.5% / 1% / 2%) and Max Capital Per Trade (5-25%) against the
   // capital of the venue it would execute on: the paper bankroll, or the LIVE
   // broker account (cached ~60 s).
   const settings = ledger.getSettings();
   const shieldState = entryShields.refresh(ledger, settings); // today's P/L (may trip the kill switch) + the macro blackout
+  passGuard = require('../research/decision-guard').snapshot(shieldState, settings); // Phase 93 / 94: THIS pass's guard (set before any rejection is recorded)
+  // Strategy-level blocks (Earnings Shield, resistance over the target) are rejections too.
+  for (const b of runner.takeBlocks()) recordRejection(b.id, b.reason, b.candidate, 'STRATEGY_BLOCK');
+  // Scanner log: what each strategy concluded per symbol on this pass.
+  for (const [id, scan] of runner.scans()) scanLog.scanned(id, scan);
   const { riskPct, maxCapitalPct } = settings;
   counts.generated = candidates.length;
 
@@ -159,6 +163,7 @@ async function pipelinePass() {
       const staged = ledger.stageOrder(result);
       counts.staged += 1;
       scanLog.staged(result);
+      decisions.record('STAGED', staged.id, { candidate: staged, guard: passGuard });
       broadcast('order:staged', staged);
       console.log(`[pipeline] staged ${result.id}: ${result.positionSize} @ ${result.entryPrice}, stop ${result.invalidation}`);
       if (result.capitalCapped) console.warn(`[pipeline] ${result.id}: CAPITAL CAP ${result.capitalCapPct * 100}% of bankroll bound the size; `
@@ -239,6 +244,7 @@ function startPipeline(options = {}) {
   require('./exit-quote').start(ledger, broadcast); // POSITION_MARKS every 5 s: "Net if closed now" (Phase 59)
   require('../market/stock-poller').start(); // REST prices for stocks past the 30-symbol stream (Phase 59B)
   require('../connectors/coinbase-fees').start(); // the account's real Coinbase fee tier (Phase 65)
+  decisions.start(); // Phase 93: the decision recorder's 5 s background writer
   require('../connectors/venue-fees').start(); // Phase 92: the Kraken / OKX US accounts' real fee rates (read-only)
   cryptoIntraday.backfill().catch((err) => console.error('[pipeline] intraday backfill failed:', err.message)); // 15m + 1h history for all pairs
   pipelineTimer = setInterval(() => {
