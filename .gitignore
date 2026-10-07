@@ -21,3 +21,6 @@ reports/
 
 # Phase 95: research bucket service-account keys (never committed)
 .research-gcs.json
+
+# Phase 95: the PC research warehouse (local data, never committed)
+research-data/

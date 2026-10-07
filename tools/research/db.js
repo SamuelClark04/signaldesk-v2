@@ -28,6 +28,8 @@ const MIGRATIONS = [{ v: 1, sql: `
   create table candidates (recorded_at integer, underlying text, bucket text, side text, contract text, expiry text, strike real, delta real, dte integer,
     rule text, primary key (recorded_at, underlying, bucket, side)) without rowid;
   create table quote_gaps (source text, from_t integer, to_t integer, reason text, primary key (source, from_t)) without rowid;
+` }, { v: 2, sql: `
+  create table bars_days (symbol text, day text, rows integer, status text, error text, fetched_at integer, primary key (symbol, day)) without rowid;
 ` }];
 const QUOTE_MIGRATIONS = [{ v: 1, sql: `
   create table quotes (contract text, t_quote integer, t_recv integer, bid real, ask real, bid_size real, ask_size real, underlying real, iv real,
