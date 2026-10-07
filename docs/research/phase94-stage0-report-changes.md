@@ -78,6 +78,30 @@ The 16 harness examples now appear only in their own report section, outside eve
   recorded events, so the counts above are unchanged; recorded data from now on is affected.
 - **S0-5:** the report header and the JSON meta count the ACCOUNT recorder files only (harness files: `meta.harnessRecorder`).
 
+## Pre-merge fix C1-B (2026-10-06): evidence bound to the selected decision
+
+- **Defect:** the loader took the setup, levels, option and chart / signal context from the FIRST recorded event of an id. When a later
+  STAGED record (or the ending rejection, or a recovered stagedAt) was chosen as the decision, the evidence could still be an earlier
+  rejection's: the decision time from one record, the levels and chart from another.
+- **Fix:** `tools/decision-review/load.js` `bind()`. Every event keeps its own context. The decision's direction, setup type, levels,
+  option and context are taken from the selected decision record. Without one, they come from the order's own lifecycle record
+  (setup only) or the LEDGER record, and the context is labelled MISSING. The JSON notes and the cards name the record
+  (`evidenceFrom`).
+- **Tests:** tests/ph94review.js "C1-B" (6 checks: STAGED after a rejection (2), STAGED without its own context, a lost STAGED line, a ledger
+  recovery, the ending rejection). All 6 failed on `c8a8e32` and pass now.
+- **Effect on this archive:** none on any count. The analyzer at `c8a8e32` and with the fix were run back to back on the same archive,
+  harness file and bar cache:
+  - account class counts are identical; no setup changed direction, symbol, strategy or decision time;
+  - the 43 account setups have no recorded events (the archive predates the recorder), and each of the 16 harness setups has a single
+    decision record (15 STRATEGY_BLOCK, 1 PIPELINE_REJECT), so the evidence was already the decision's own;
+  - three money values moved by 0.01-0.07 R across the runs (AMZN put, XOM call, SPY call of 2026-10-02). All three are PENDING and
+    marked to the latest bar of a session still trading: data drift between the runs, not the fix.
+- **Review follow-up (same day):** a lost STAGED line followed by ANY later record of the order (EXPIRED, USER_REJECT,
+  APPROVAL_REJECT, not only approval / fill / close) now recovers the decision from that record's stagedAt. A selected record without
+  a setup clears every setup field (no earlier thesis or setup type survives), and an absent direction is MISSING, never defaulted to
+  long. 3 more checks (9 C1-B checks in all), failing before and passing after; the same-archive comparison is unchanged.
+- Recorded data from now on is affected: ids repeat per symbol per day, so a rejection before a later STAGED record is common.
+
 ## Not changed by Stage 0, as agreed
 
 - The crypto 90% coverage rule. 28 crypto trades stay UNCLEAR (coverage), pending a separately specified amendment.

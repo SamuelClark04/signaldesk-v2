@@ -39,6 +39,34 @@ function base(id, s, source) {
     realized: null, context: null, missing: [], evidence: s && s.evidence };
 }
 
+// C1-B: the decision's evidence (setup fields, levels, direction, option, chart / signal context) is bound to the SELECTED decision
+// record only. Another event's evidence (an earlier rejection of the same id) is never borrowed: what that record lacks is MISSING.
+// ev = { path, at, setup, context }; `what` names the record in the missing notes. A re-bind replaces the earlier bind's notes.
+const contextOf = new WeakMap(); // event -> its own recorded context (kept off the event, so the JSON report stays small)
+const boundNotes = new WeakMap();
+function bind(d, ev, what, series) {
+  const old = boundNotes.get(d) || []; d.missing = d.missing.filter((m) => !old.includes(m));
+  const notes = []; const s = ev.setup; const c = ev.context;
+  d.evidenceFrom = { path: ev.path, at: Number.isFinite(ev.at) ? ev.at : null, record: what };
+  if (s) {
+    const dir = s.direction === 'long' || s.direction === 'short' ? s.direction : null; // never defaulted: an absent direction is MISSING
+    Object.assign(d, { strategyId: s.strategyId || d.strategyId, symbol: s.asset || d.symbol, market: s.market || d.market, d: dir ? dirOf(dir) : null, direction: dir,
+      setupType: s.setupType, timeframe: s.timeframe, expectedDuration: s.expectedDuration, thesis: s.thesis, levels: levelsOf(s), option: s.optionsData || null, evidence: s.evidence });
+    if (!dir) notes.push(`direction at the decision: not recorded with ${what}`);
+  } else {
+    Object.assign(d, { d: null, direction: null, levels: null, option: null, setupType: null, timeframe: null, expectedDuration: null, thesis: null, evidence: null });
+    notes.push(`setup / levels / direction / option at the decision: not recorded with ${what}`);
+  }
+  d.context = c ? { capturedAt: c.capturedAt, values: c.values, refs: c.series || [] } : null;
+  if (d.context) {
+    d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
+    d.context.legacyKeys = d.context.series.some((x) => x.legacyKey);
+    if (d.context.series.some((x) => /^b:/.test(x.key || ''))) notes.push('decision chart stored under an endpoint-only key (b:, before Phase 94): another bar series with the same first / last bar may have been stored in its place');
+    if (d.context.series.some((x) => /^r:/.test(x.key || ''))) notes.push('decision inputs stored under a 32-bit content hash (r:, before Phase 94): a hash collision is unlikely but not excluded');
+  } else notes.push(`decision inputs (chart / signal values): not captured with ${what}`);
+  d.missing.push(...notes); boundNotes.set(d, notes);
+}
+
 // Recorded lines -> { decisions: Map(id -> decision), series: Map(key -> series), recorder: { firstAt, lastAt, files } }.
 function readRecorded(files) {
   const series = new Map(); const out = new Map(); const repeats = new Map();
@@ -54,10 +82,9 @@ function readRecorded(files) {
       firstAt = firstAt === null ? x.at : Math.min(firstAt, x.at); lastAt = Math.max(lastAt || 0, x.at);
       let d = out.get(x.id);
       if (!d) { d = base(x.id, x.setup, 'RECORDED'); out.set(x.id, d); } // t0: the first DECISION event, set below (C1)
-      if (!d.levels && x.setup) d.levels = levelsOf(x.setup);
-      if (!d.option && x.setup && x.setup.optionsData) d.option = x.setup.optionsData;
-      if (x.context && !d.context) d.context = { capturedAt: x.context.capturedAt, values: x.context.values, refs: x.context.series || [] };
-      d.events.push({ path: x.path, at: x.at, reason: x.reason, reasonBucket: x.reasonBucket, setup: x.setup, extra: x.extra, guard: x.guard || null, price: x.price ? x.price.last : null });
+      const e = { path: x.path, at: x.at, reason: x.reason, reasonBucket: x.reasonBucket, setup: x.setup, extra: x.extra, guard: x.guard || null, price: x.price ? x.price.last : null };
+      if (x.context) contextOf.set(e, x.context); // each event keeps its OWN context (C1-B)
+      d.events.push(e);
     }
   }
   for (const d of out.values()) {
@@ -66,24 +93,24 @@ function readRecorded(files) {
     // The decision is the STAGED event when there is one, else the LAST strategy block / pipeline rejection (the one that ended it).
     let decision = d.events.find((e) => e.path === 'STAGED') || [...d.events].reverse().find((e) => DECISION_PATHS.includes(e.path));
     const staged = d.events.map((e) => msOf(e.setup && e.setup.stagedAt)).find(Number.isFinite);
-    // The STAGED line was lost (e.g. a queue drop) but the setup went on to be approved / opened: a stagedAt AFTER the chosen rejection
-    // is the real decision; the rejection was an earlier, separate one (review nit).
+    // The STAGED line was lost (e.g. a queue drop) but the setup went on (approved / opened, or expired / rejected at approval / by
+    // you): a stagedAt AFTER the chosen rejection is the real decision; the rejection was an earlier, separate one (review nit, C1-B review).
     d.acceptedAfterReject = !!decision && decision.path !== 'STAGED' && d.events.some((e) => ['APPROVED', 'OPENED', 'FILLED', 'CLOSED'].includes(e.path) && e.at > decision.at);
-    if (d.acceptedAfterReject && staged && staged > decision.at) decision = null;
-    if (decision) { d.t0 = decision.at; d.p0 = decision.price; d.t0Source = decision.path === 'STAGED' ? 'RECORDED (the STAGED record)' : `RECORDED (the ${decision.path} that ended it)`; }
-    else if (staged) { d.t0 = staged; d.t0Source = 'RECORDED setup stagedAt (the decision record itself was not captured)'; }
-    else { d.t0 = null; d.t0Source = MISSING_T0; }
+    if (decision && decision.path !== 'STAGED' && staged && staged > decision.at) decision = null;
+    // C1-B: the evidence comes from the same record as the decision time. Without a decision record, the order's own lifecycle record
+    // carries the staged setup (never a chart / signal context: those ride only on the decision records).
+    if (decision) {
+      d.t0 = decision.at; d.p0 = decision.price; d.t0Source = decision.path === 'STAGED' ? 'RECORDED (the STAGED record)' : `RECORDED (the ${decision.path} that ended it)`;
+      bind(d, { ...decision, context: contextOf.get(decision) || null }, `the selected ${decision.path} record`, series);
+    } else {
+      d.t0 = staged || null; d.t0Source = staged ? 'RECORDED setup stagedAt (the decision record itself was not captured)' : MISSING_T0;
+      const ev = d.events.find((e) => staged && msOf(e.setup && e.setup.stagedAt) === staged) || d.events.find((e) => !DECISION_PATHS.includes(e.path) && e.setup) || { path: null, at: null, setup: null };
+      bind(d, { ...ev, context: null }, `the ${ev.path || 'order'} record (the STAGED record itself was not captured)`, series);
+    }
     const firstAt = (paths) => { const e = d.events.find((x) => paths.includes(x.path)); return e ? e.at : null; };
     const closed = [...d.events].reverse().find((x) => x.path === 'CLOSED');
     d.times = { decision: d.t0, approved: firstAt(['APPROVED']), entry: firstAt(['OPENED', 'FILLED']), close: closed ? closed.at : null };
     for (const [k, r] of repeats) if (k.startsWith(`${d.id}|`)) { const e = d.events.find((ev) => ev.path === r.path); if (e) e.repeats = r.count; }
-    if (d.context) {
-      d.context.series = d.context.refs.map((r) => ({ ...r, data: series.get(r.key) || null, legacyKey: /^[br]:/.test(r.key || '') }));
-      d.context.legacyKeys = d.context.series.some((s) => s.legacyKey);
-      if (d.context.series.some((s) => /^b:/.test(s.key || ''))) d.missing.push('decision chart stored under an endpoint-only key (b:, before Phase 94): another bar series with the same first / last bar may have been stored in its place');
-      if (d.context.series.some((s) => /^r:/.test(s.key || ''))) d.missing.push('decision inputs stored under a 32-bit content hash (r:, before Phase 94): a hash collision is unlikely but not excluded');
-    }
-    if (!d.context) d.missing.push('decision inputs (chart / signal values): not captured');
   }
   return { decisions: out, series, recorder: { firstAt, lastAt, files: files.length, unreadableLines: bad, lastStatus } };
 }
@@ -118,7 +145,10 @@ function load(dir, { origin = 'ACCOUNT' } = {}) { // Phase 94 S0-5: ACCOUNT (vm-
     const d = add(rootId, first, 'LEDGER');
     const tmj = timesOf(first, parts);
     if (d.source !== 'RECORDED') { d.times = tmj.times; d.t0 = tmj.t0; d.t0Source = tmj.source; d.levels = d.levels || levelsOf(first); }
-    else if ((d.t0 === null || (d.acceptedAfterReject && tmj.t0 > d.t0)) && tmj.t0) { d.t0 = tmj.t0; d.p0 = null; d.times.decision = tmj.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; } // C1: recovered
+    else if ((d.t0 === null || (d.acceptedAfterReject && tmj.t0 > d.t0)) && tmj.t0) { // C1: recovered; C1-B: with the ledger record's own setup
+      d.t0 = tmj.t0; d.p0 = null; d.times.decision = tmj.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)';
+      bind(d, { path: 'LEDGER', at: tmj.t0, setup: first, context: null }, 'the LEDGER record (the STAGED record itself was not captured)', rec.series);
+    }
     if (d.source !== 'RECORDED' && afterRecorder(d.t0)) missingRecords.push({ id: rootId, kind: 'closed trade' });
     const net = parts.reduce((s, p) => s + (p.netPnl || 0), 0); const risk = parts.reduce((s, p) => s + (p.dollarRisk || 0), 0);
     d.realized = { status: 'closed', source: 'LEDGER', fillPrice: first.fillPrice, openedAt: first.openedAt, approvedAt: first.approvedAt, execution: first.execution, run: first.run || null,
@@ -129,7 +159,10 @@ function load(dir, { origin = 'ACCOUNT' } = {}) { // Phase 94 S0-5: ACCOUNT (vm-
     const d = add(p.id, p, 'LEDGER');
     const tmp = timesOf(p);
     if (d.source !== 'RECORDED') { d.times = tmp.times; d.t0 = tmp.t0; d.t0Source = tmp.source; d.levels = d.levels || levelsOf(p); }
-    else if ((d.t0 === null || (d.acceptedAfterReject && tmp.t0 > d.t0)) && tmp.t0) { d.t0 = tmp.t0; d.p0 = null; d.times.decision = tmp.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)'; }
+    else if ((d.t0 === null || (d.acceptedAfterReject && tmp.t0 > d.t0)) && tmp.t0) {
+      d.t0 = tmp.t0; d.p0 = null; d.times.decision = tmp.t0; d.t0Source = 'LEDGER stagedAt (the decision record itself was not captured)';
+      bind(d, { path: 'LEDGER', at: tmp.t0, setup: p, context: null }, 'the LEDGER record (the STAGED record itself was not captured)', rec.series);
+    }
     d.realized = d.realized || { status: 'open', source: 'LEDGER', fillPrice: p.fillPrice, openedAt: p.openedAt, execution: p.execution, netPnl: null, rNet: null, debit: p.optionsData ? p.optionsData.debit : null };
   }
   for (const o of ledger.discardedOrders || []) {

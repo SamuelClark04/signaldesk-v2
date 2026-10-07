@@ -130,7 +130,7 @@ async function one(d, macro) {
   fs.writeFileSync(html, render(account, P, meta, { harness }));
   fs.writeFileSync(path.join(outDir, `decision-review-${stamp}.json`), JSON.stringify({ meta, patterns: { ...P, tests: P.tests.map(({ ids, ...t }) => t) },
     setups: [...account, ...harness].map((r) => ({ id: r.d.id, origin: r.d.origin, flags: r.flags || [], notes: { p0Source: r.m && r.m.p0Source, inputsSource: r.m && r.m.inputsSource,
-        t0Source: r.d.t0Source, oppRule: r.opp && r.opp.rule, legacyEvidenceKeys: !!(r.d.context && r.d.context.legacyKeys) }, source: r.d.source, strategy: r.d.strategyId, symbol: r.d.symbol, direction: r.d.direction, t0: r.d.t0, outcome: r.d.outcome, class: r.cls, overlay: !!r.overlay,
+        t0Source: r.d.t0Source, evidenceFrom: r.d.evidenceFrom || null, oppRule: r.opp && r.opp.rule, legacyEvidenceKeys: !!(r.d.context && r.d.context.legacyKeys) }, source: r.d.source, strategy: r.d.strategyId, symbol: r.d.symbol, direction: r.d.direction, t0: r.d.t0, outcome: r.d.outcome, class: r.cls, overlay: !!r.overlay,
       horizons: r.m && r.m.horizons ? r.m.horizons.map((h) => ({ key: h.key, label: h.label, m: h.m })) : null, money: r.money ? { tier: r.money.tier, rNet: r.money.rNet, filled: r.money.filled } : null, oppTrade: r.opp ? { rule: r.opp.rule, rNet: r.opp.rNet, filled: r.opp.filled } : null,
       realized: r.d.realized ? { rNet: r.d.realized.rNet, netPnl: r.d.realized.netPnl } : null, opposite: r.oppDir, rule: r.guard, causes: r.attr, missing: r.d.missing })) }, null, 1));
   const c = (k) => account.filter((r) => r.cls.cls === k).length;
