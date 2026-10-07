@@ -90,6 +90,10 @@ module.exports = async ({ check }) => {
   const badT = cli([mid, '--budget', bf, '--through', 'oct-9']); const badN = cli([mid, '--budget', bf, '--now', '2026-10-06']);
   check('review: an invalid --through or a date-only --now is refused with a message (exit 2), never an empty report', badT.status === 2 && /YYYY-MM-DD/.test(badT.stdout)
     && badN.status === 2 && /time of day/.test(badN.stdout), `${badT.status} ${badN.status}`);
+  const badZ = cli([mid, '--budget', bf, '--now', '2026-10-09T21:00']);
+  check('review: --now without a zone is refused (it would read in the PC\'s own time zone)', badZ.status === 2 && /zone/.test(badZ.stdout), `${badZ.status}`);
+  s = one({ '2026-10-05': [...day('2026-10-05'), { v: 1, kind: 'POLL_STATUS', at: A('2026-10-05', 12 * 60), source: 'news-cursor', ok: false, error: 'news lines recorded since 11:45 never reached the disk' }] });
+  check('review: a frozen news cursor (POLL_STATUS news-cursor) is reported on its session', dayOf(s, '2026-10-05').healthy === false && /cursor saving stopped/.test(dayOf(s, '2026-10-05').reasons.join()));
   const early = cli([mid, '--budget', bf, '--through', '2026-10-06', '--now', '2026-10-09T21:00:00Z']);
   check('review: --through before the last file is the last date reported (Oct 7 not listed)', early.status === 0 && /2026-10-06/.test(early.stdout) && !/2026-10-07/.test(early.stdout), early.stdout.slice(-300));
   const rc = cli([folder('covcli', { '2026-10-05': [...day('2026-10-05'), gapLine('2026-10-05', 9 * 60, 'g1')] }), '--budget', bf, '--now', '2026-10-05T21:00:00Z']);

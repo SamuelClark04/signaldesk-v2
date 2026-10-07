@@ -43,6 +43,8 @@ function assess(linesByDay, sessions, { openAt, closeAt, firstDay, now = Infinit
     }
     if (done && done.status !== 'COMPLETE') add(sessionOf(done.at), `news: incomplete recovery of the gap ${span} (${done.reason || done.status})`);
   }
+  // The saved cursor frozen (lines never confirmed on disk for 15 min): from then on the cursor file stops advancing in that process.
+  for (const f of all.filter((x) => x.kind === 'POLL_STATUS' && x.source === 'news-cursor' && !x.ok)) add(sessionOf(f.at), `news: cursor saving stopped at ${when(f.at)} (${f.error || 'no reason recorded'})`);
   // Unread-page backlogs: from the first OK poll that left pages unread to the first OK poll that read the last page (failed polls in
   // between continue the backlog).
   const polls = all.filter((x) => x.kind === 'POLL_STATUS' && x.source === 'alpaca-news');

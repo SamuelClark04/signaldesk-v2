@@ -13,7 +13,7 @@ record. `news-cursor.json` holds the news poll's cursor.
 | NEWS | each news document VERSION (id + updated_at) with OUR receipt time `t_recv`, `seenVia` stream / poll, `versionCoverage: OBSERVED_ONLY`, `receipt: POLL_RECEIPT / STREAM_RECEIPT`, `catchUp` after a restart | a tap on the existing news socket (subscription unchanged) + a REST poll for the 24 pilot symbols, every 2 min in market hours (10 min otherwise) |
 | NEWS_GAP | restart gaps, each with a `gapId`. `recovery: PENDING` (the catch-up from the saved cursor, at most 24 h back, has not read every page yet) or `UNRECOVERABLE` (older than 24 h, or no saved cursor). A gap line never claims coverage (`covered: false`); pending gaps persist in `news-cursor.json` across restarts | the news poll at start |
 | NEWS_RECOVERY | `COMPLETE`: a query that started at or before the named gaps has read its LAST page. `INCOMPLETE`: a restart past the 24 h limit overtook a pending gap | the news poll |
-| (cursor) | `news-cursor.json` (cursor + pending gaps) is saved only once every NEWS / NEWS_RECOVERY line it skips past is confirmed on disk: a crash in between re-reads those articles at the next start instead of claiming them. Lines never confirmed for 15 min (dropped / failing disk, already counted by the recorder) freeze the saved cursor until a restart | the news poll |
+| (cursor) | `news-cursor.json` (cursor + pending gaps) is saved only once every NEWS / NEWS_RECOVERY line it skips past is confirmed on disk: a crash in between re-reads those articles at the next start instead of claiming them. Lines never confirmed for 15 min (dropped / failing disk, already counted by the recorder) freeze the saved cursor until a restart (a POLL_STATUS news-cursor line; the pilot check reports it on that session) | the news poll |
 | NEWS_BACKLOG | `PERSISTENT`: unread pages carried for more than 10 min (news is read late); `CLEARED` with its length once the last page is read | the news poll |
 | MACRO_SNAPSHOT | the weekly Forex Factory feed's USD rows with forecast / previous, on each daily refresh | a tap in `macro-calendar.refresh` |
 | EARNINGS_SNAPSHOT | Finnhub earnings calendar (30 days ahead) rows for the pilot symbols with their estimates | one call a day after 07:00 ET |
@@ -42,7 +42,7 @@ record. `news-cursor.json` holds the news poll's cursor.
 2. `/api/version`: `eventRecorder.enabled: true`, `queued` small, `dropped 0`, `stalled false`.
 3. Settings > Strategies footer: "Event capture: N today · 0 dropped · 0 write errors · last write HH:MM".
 4. After one session: run the pinned vm-audit (Phase 94 copies `events-*.jsonl`, `news-cursor.json` and `watchlist.json`). Then, on the
-   PC: `node tools/event-research/inspect.js <archive>/decisions --now <the archive time, ISO>`. Without `--now` the audit time is now;
+   PC: `node tools/event-research/inspect.js <archive>/decisions --now <the archive time, ISO with a zone, e.g. 2026-10-09T21:00:00Z>`. Without `--now` the audit time is now;
    a session that had not closed by then is NOT JUDGED (neither healthy nor missing). `--through YYYY-MM-DD` reports later dates too:
    a session with no file is NOT HEALTHY ("no events file"), before, between or after the files.
 

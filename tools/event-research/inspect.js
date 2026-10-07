@@ -120,8 +120,8 @@ if (require.main === module) {
   const budget = fs.existsSync(bf) ? JSON.parse(fs.readFileSync(bf, 'utf8')) : null;
   // review: validated, never silently ignored. --now needs a time (a bare date would read as UTC midnight, the evening before in New York).
   const nowArg = args.includes('--now') ? args[args.indexOf('--now') + 1] : null;
-  const now = nowArg === null ? Date.now() : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(nowArg || '') ? Date.parse(nowArg) : NaN;
-  if (!Number.isFinite(now)) { console.log('--now needs an ISO time with a time of day, e.g. 2026-10-09T21:00:00Z'); process.exit(2); }
+  const now = nowArg === null ? Date.now() : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(nowArg || '') ? Date.parse(nowArg) : NaN;
+  if (!Number.isFinite(now)) { console.log('--now needs an ISO time with a time of day and a zone (Z or +hh:mm), e.g. 2026-10-09T21:00:00Z'); process.exit(2); }
   const through = args.includes('--through') ? args[args.indexOf('--through') + 1] : T.ymd(now);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(through || '') || !Number.isFinite(Date.parse(`${through}T12:00:00Z`))) { console.log('--through needs a date, YYYY-MM-DD'); process.exit(2); }
   const s = summarize(args.find((a, i) => !a.startsWith('--') && !['--budget', '--through', '--now'].includes(args[i - 1])) || '.', { budget, through, now });
