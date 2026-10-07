@@ -35,3 +35,24 @@ ThetaData / Massive / Databento: not probed (no account; creating one is the use
 3. **Finnhub's earnings calendar answered exactly 1,500 rows for 30 days of all-US earnings**, which looks like a response cap. A single
    all-US call can therefore miss pilot symbols, so the earnings snapshot queries each capture symbol separately (24 small calls a day,
    far under the free 60 / min).
+
+## Phase 95 option-data re-probe (2026-10-07 15:08Z; Task 0.2, `scripts/research/entitlements-options.js`)
+
+Read-only, data keys in headers, application User-Agent. Contract used: `SPY261130C00808000`.
+
+| Probe | HTTP | Result |
+|---|---|---|
+| (d) Chain endpoint with expiry / strike / type filters (SPY calls, 14-60 days, +/-5%) | 200 | 479 contracts on one page; the filters are RESPECTED |
+| (c) `snapshots?symbols=` with 50 / 100 symbols | 200 | all returned, no paging |
+| (c) `snapshots?symbols=` with 200 / 250 symbols | 400 | "symbol limit is 100" |
+| (a) OPRA snapshot and latest quote (`feed=opra`) | 403 | "OPRA agreement is not signed": no real quotes, even delayed |
+| (a) indicative snapshot, same contract | 200 | served, quote 0 min old (real time, approximated) |
+| (b) recent option trade bars / trades (3 h .. 20 min ago) | 200 | 13 bars / 24 trades: real prints are served after the delay |
+
+**What this means for the plan:**
+- **Batch size:** the collector sends 100 contracts per snapshot request, the confirmed limit.
+- **Re-centring:** it uses the filtered chain query.
+- **Quote source:** every recorded quote is INDICATIVE. No result can be VALIDATED (plan 5.3) unless real quotes become available. The
+  403 names an unsigned OPRA agreement. Whether signing it in the Alpaca dashboard unlocks delayed OPRA quotes on the free plan, and on
+  what terms, is the user's to check: accepting an agreement is the user's own action. After that the probe is re-run.
+- **Calibration:** indicative quotes can be calibrated against real (delayed) trade prints, as planned.
