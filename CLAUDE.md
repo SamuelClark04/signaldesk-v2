@@ -309,6 +309,17 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
     - scripts/research/freeze-universe.js: universe-v1, dated, sources hashed, limitations in the file, never overwrites.
   - Expanding the pilot, any deploy and any data purchase need the user's approval.
   - Tests: tests/ph94capture.js (+ -news, -taps, -pilot), tests/ph94universe.js.
+- **Phase 95 shadow options research (desktop mode; plan docs/superpowers/plans/2026-10-07-shadow-research-system.md, runbook
+  docs/deploy/phase95-desktop.md)**: the VM is not used; Start-SignalDesk.bat also starts scripts/research-supervisor.js (background,
+  restarts the collector; stop flag research-supervisor.stop, honoured by the collector). Collector (server/research/collector/: exact module
+  allowlist in tests/ph95collector.js): options-grid.js re-centres every 30 min in session (Q nearest 1-7 DTE, D / W monthlies; candidate =
+  closest to 0.50 delta, PINNED until expiry, Q pins until the session's close; research-pins.json), samples Q every 60 s and D / W pins every
+  10 min (OPTION_CANDIDATES / OPTION_QUOTES lines, provider + receipt times, label INDICATIVE_ESTIMATE unless RESEARCH_OPTIONS_FEED=opra);
+  nightly.js spawns tools/research/shadow/nightly.js from 16:40 ET (catch-up at start). PC job (tools/research/shadow/): ingest -> bars ->
+  opportunities.js (triggers@1-lite + CONTROL + NEWS + APP) -> fills.js / exits.js (entry at the ask of the first eligible quote >= t_avail +
+  5 s, exits at the NEXT quote's bid) -> books.js (exits@1: 8 Q + H + 3 D + 2 W; per-book limits, one BOOK ENTRY per opportunity) -> run.js
+  (full recompute; research.sqlite v4 shadow_* tables) -> report.js (reports/shadow-<day>.html). No broker module reachable (tests/ph95shadow.js).
+  OPRA: 403 agreement not signed -> every option result is an estimate; real-quote validation UNAVAILABLE. Tests: tests/ph95fills.js, ph95shadow.js.
 - **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken and OKX US ACCOUNT rates at boot + every 6 h (retry 10 min),
   read-only, like coinbase-fees.js. Kraken: POST /0/private/TradeVolume for XBTUSD, ETHUSD, XBTUSDC, ETHUSDC (answer keys XXBTZUSD / XETHZUSD /
   XBTUSDC / ETHUSDC); EVERY requested pair needs a valid maker + taker or the read fails and replaces nothing; claimed for those pairs only

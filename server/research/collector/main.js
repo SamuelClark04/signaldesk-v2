@@ -18,10 +18,12 @@ const earnings = require('../earnings-snapshot');
 const cal = require('../nyse-calendar');
 const heartbeat = require('./heartbeat');
 const { createLimiter } = require('./budget');
+const optionsGrid = require('./options-grid');
+const nightly = require('./nightly');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const ALLOWED = ['ALPACA_API_KEY', 'ALPACA_API_SECRET', 'ALPACA_PAPER_API_KEY', 'ALPACA_PAPER_API_SECRET', 'ALPACA_DATA_BASE_URL', 'FINNHUB_API_KEY', 'FINNHUB_BASE_URL',
-  'EVENTS_DIR', 'EVENTS_RECORDER', 'LEDGER_STATE_PATH', 'RESEARCH_GCS_BUCKET', 'RESEARCH_COLLECTOR', 'RESEARCH_COLLECTOR_PER_MIN'];
+  'EVENTS_DIR', 'EVENTS_RECORDER', 'LEDGER_STATE_PATH', 'RESEARCH_GCS_BUCKET', 'RESEARCH_COLLECTOR', 'RESEARCH_COLLECTOR_PER_MIN', 'RESEARCH_OPTIONS', 'RESEARCH_OPTIONS_FEED', 'RESEARCH_NIGHTLY'];
 const IDENTITY = { prefix: 'research', scope: 'research collector process' };
 const CURSOR = 'research-news-cursor.json';
 
@@ -34,8 +36,8 @@ function loadEnv(file = path.join(ROOT, '.env')) {
 }
 const perMinOf = (v) => Math.min(150, Math.max(1, Math.floor(Number(v)) || 40));
 
-let limiter = null; let keepAlive = null; let started = false;
-const sources = { get limiter() { return limiter; }, grid: () => null, exporter: () => null }; // the grid and the exporter register here (Tasks 1.2 / 2.1)
+let limiter = null; let keepAlive = null; let started = false; let grid = null; let stopWatch = null;
+const sources = { get limiter() { return limiter; }, grid: () => (grid ? grid.stats() : null), exporter: () => nightly.stats() }; // the grid and the exporter register here (Tasks 1.2 / 2.1)
 
 // Alpaca requests of this process: through the limiter, then net-guard (fails fast on a dead host).
 const limitedFetch = async (url, opts) => {
@@ -56,17 +58,29 @@ function start({ envFile } = {}) {
   rec.useIdentity(IDENTITY);
   rec.start();
   heartbeat.start(sources); heartbeat.beat(sources);
+  // Desktop mode: scripts/research-supervisor.js stop writes this flag (signals do not reach a windowless process on Windows)
+  const stopFile = path.join(rec.status().dir, 'research-supervisor.stop');
+  stopWatch = setInterval(() => { if (fs.existsSync(stopFile)) { clearInterval(stopWatch); stopWatch = null; shutdown({ reason: 'stop flag' }).then(() => process.exit(0)); } }, 2000);
+  if (stopWatch.unref) stopWatch.unref();
   if (String(process.env.RESEARCH_COLLECTOR || '').toLowerCase() === 'on') {
     news.useCursorFile(CURSOR); news.useFetch(limitedFetch); news.useMarketOpen(() => cal.isOpen(Date.now()));
     news.start(); earnings.start();
     console.log(`[research] collector started (pid ${process.pid}): news poll + earnings snapshot; limiter ${limiter.stats().perMin} req/min`);
-  } else console.log(`[research] collector started (pid ${process.pid}) WITHOUT polling: RESEARCH_COLLECTOR is not on, so the trading server still polls`);
+  } else console.log(`[research] collector started (pid ${process.pid}) WITHOUT news polling: RESEARCH_COLLECTOR is not on, so the trading server still polls`);
+  // The option grid is the collector's alone (the trading server never samples it): no switch shared with the server. RESEARCH_OPTIONS=off skips it.
+  if (String(process.env.RESEARCH_OPTIONS || '').toLowerCase() !== 'off') {
+    grid = optionsGrid.create({ fetchImpl: limitedFetch, keys: () => require('../data-keys').dataKeys(), base: process.env.ALPACA_DATA_BASE_URL || undefined,
+      symbols: () => require('../capture-universe').symbols(), record: rec.record, dir: rec.status().dir,
+      feed: String(process.env.RESEARCH_OPTIONS_FEED || '').toLowerCase() === 'opra' ? 'opra' : 'indicative' });
+    grid.start(); console.log(`[research] option grid on (${grid.stats().label}; pinned ${grid.stats().pinned})`);
+  }
+  if (String(process.env.RESEARCH_NIGHTLY || '').toLowerCase() !== 'off') nightly.start();
 }
 
 // Stops every timer, waits for a write in flight, then flushes what is queued. Resolves within 5 s even if the disk hangs; `flushed`
 // says whether anything was left unwritten.
 async function shutdown({ reason = 'stop' } = {}) {
-  heartbeat.stop(); news.stop(); earnings.stop();
+  heartbeat.stop(); news.stop(); earnings.stop(); if (grid) grid.stop(); nightly.stop(); if (stopWatch) clearInterval(stopWatch);
   if (keepAlive) clearInterval(keepAlive); keepAlive = null;
   await Promise.race([rec.drain(4000), new Promise((r) => { const t = setTimeout(r, 4500); if (t.unref) t.unref(); })]);
   rec.stop();

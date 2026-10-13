@@ -42,3 +42,6 @@ Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | Where-Object { 
   Stop-Process -Id $_.ProcessId -Force
   Write-Host "Stopped SignalDesk's Cloudflare tunnel (PID $($_.ProcessId))."
 }
+
+# The research collector (background, started by Start-SignalDesk.bat).
+Push-Location 'C:\SignalDesk-V2'; node scripts\research-supervisor.js stop; Pop-Location

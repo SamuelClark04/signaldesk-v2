@@ -5,9 +5,9 @@
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ph95c-'));
 const ALLOWED_ENV = ['ALPACA_API_KEY', 'ALPACA_API_SECRET', 'ALPACA_PAPER_API_KEY', 'ALPACA_PAPER_API_SECRET', 'ALPACA_DATA_BASE_URL', 'FINNHUB_API_KEY', 'FINNHUB_BASE_URL',
-  'EVENTS_DIR', 'EVENTS_RECORDER', 'LEDGER_STATE_PATH', 'RESEARCH_GCS_BUCKET', 'RESEARCH_COLLECTOR', 'RESEARCH_COLLECTOR_PER_MIN'];
+  'EVENTS_DIR', 'EVENTS_RECORDER', 'LEDGER_STATE_PATH', 'RESEARCH_GCS_BUCKET', 'RESEARCH_COLLECTOR', 'RESEARCH_COLLECTOR_PER_MIN', 'RESEARCH_OPTIONS', 'RESEARCH_OPTIONS_FEED', 'RESEARCH_NIGHTLY'];
 for (const k of ALLOWED_ENV) delete process.env[k];
-Object.assign(process.env, { EVENTS_DIR: path.join(DIR, 'events'), LEDGER_STATE_PATH: path.join(DIR, 'ledger.json'), ALPACA_DATA_BASE_URL: 'http://127.0.0.1:9', FINNHUB_BASE_URL: 'http://127.0.0.1:9' });
+Object.assign(process.env, { EVENTS_DIR: path.join(DIR, 'events'), LEDGER_STATE_PATH: path.join(DIR, 'ledger.json'), ALPACA_DATA_BASE_URL: 'http://127.0.0.1:9', FINNHUB_BASE_URL: 'http://127.0.0.1:9', RESEARCH_NIGHTLY: 'off' });
 global.fetch = async (u) => { throw new Error(`test: no network (${String(u).slice(0, 40)})`); };
 const ROOT = path.join(__dirname, '..'); const S = path.join(ROOT, 'server') + '/';
 let fails = 0;
@@ -32,7 +32,8 @@ function graphOf(entries) {
 }
 // The EXACT allowlist: adding any module to the collector's graph is a deliberate change of this list, reviewed.
 const EXPECTED = ['server/connectors/net-guard.js', 'server/market/universe.js', 'server/research/capture-universe.js', 'server/research/collector/budget.js',
-  'server/research/collector/heartbeat.js', 'server/research/collector/main.js', 'server/research/data-keys.js', 'server/research/earnings-snapshot.js',
+  'server/research/collector/heartbeat.js', 'server/research/collector/main.js', 'server/research/collector/nightly.js', 'server/research/collector/option-chain.js',
+  'server/research/collector/options-grid.js', 'server/research/data-keys.js', 'server/research/earnings-snapshot.js',
   'server/research/event-recorder.js', 'server/research/jsonl-sink.js', 'server/research/news-capture.js', 'server/research/nyse-calendar.js', 'server/services/et-time.js'];
 
 (async () => {

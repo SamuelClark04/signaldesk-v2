@@ -26,6 +26,7 @@ netstat -ano | findstr /r /c:":%SD_PORT% .*LISTENING" >nul
 if not errorlevel 1 (
   echo Port %SD_PORT% is already in use: SignalDesk ^(or another app^) is already running.
   echo Opening http://127.0.0.1:%SD_PORT%/ in your browser. Use Stop-SignalDesk.bat to restart it.
+  node scripts\research-supervisor.js start
   start "" "http://127.0.0.1:%SD_PORT%/"
   timeout /t 5 >nul
   exit /b 0
@@ -56,6 +57,10 @@ REM (single-line IFs: a path like "Program Files (x86)" breaks a parenthesised b
 if defined CLOUDFLARED_EXE echo Cloudflare tunnel: "%CLOUDFLARED_EXE%"
 if defined CLOUDFLARED_EXE echo Your public https://....trycloudflare.com link appears below in a box once it is ready.
 if not defined CLOUDFLARED_EXE echo Cloudflare tunnel: cloudflared.exe not found ^(project folder, scripts\, Program Files, winget, Downloads or PATH^): local access only.
+
+REM Research collector (RECORD-ONLY: option quotes, the post-session shadow-paper research report). It runs in the
+REM background without a window, keeps running if this window is closed and is restarted if it crashes. Stop-SignalDesk.bat stops it.
+node scripts\research-supervisor.js start
 
 echo Starting SignalDesk on http://127.0.0.1:%SD_PORT%  ^(Ctrl+C to stop^)
 echo The browser opens automatically once the server is up.

@@ -7,7 +7,11 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node --watch server/server.js",
-    "check:limits": "node scripts/check-limits.js"
+    "check:limits": "node scripts/check-limits.js",
+    "research:start": "node scripts/research-supervisor.js start",
+    "research:stop": "node scripts/research-supervisor.js stop",
+    "research:status": "node scripts/research-supervisor.js status",
+    "research:report": "node tools/research/shadow/nightly.js"
   },
   "engines": {
     "node": ">=18"

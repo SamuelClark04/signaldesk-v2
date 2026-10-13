@@ -36,6 +36,12 @@ const MIGRATIONS = [{ v: 1, sql: `
   create table moves (symbol text, day text, scale text, k integer, dir integer, type text, parent_k integer, start_t integer, start_px real, start_confirmed_at integer,
     end_t integer, end_px real, confirmed_at integer, open integer, size_pct real, size_atr real, duration_min integer, volume real, primary key (symbol, day, scale, k)) without rowid;
   create table quiet_periods (symbol text, day text, k integer, start_t integer, end_t integer, duration_min integer, range_atr real, primary key (symbol, day, k)) without rowid;
+`}, { v: 4, sql: `
+  create table shadow_outcomes (key text, rule text, symbol text, day text, source text, trig text, dir text, t_avail integer, status text, reason text,
+    contract text, selected_at integer, entry_t integer, entry_price real, exit_t integer, exit_bid real, net real, stress_net real, labels text, label text, mode text,
+    detail text, primary key (key, rule)) without rowid;
+  create table shadow_book_entries (book text, key text, status text, reason text, state text, primary key (book, key)) without rowid;
+  create table shadow_books (book text primary key, family text, rule text, label text, summary text);
 ` }];
 const QUOTE_MIGRATIONS = [{ v: 1, sql: `
   create table quotes (contract text, t_quote integer, t_recv integer, bid real, ask real, bid_size real, ask_size real, underlying real, iv real,
