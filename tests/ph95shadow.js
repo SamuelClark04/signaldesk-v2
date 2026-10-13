@@ -109,6 +109,62 @@ const D = '2026-10-08'; const D2 = '2026-10-09';
   const dl = B.runBook([o('A', 1e3, 2e3, -310), o('B', 3e3, 4e3, 5)], rule);
   check('books: the daily loss stop (-$300 realized) skips later entries that day (DAILY_LOSS)', dl.entries[1].reason === 'DAILY_LOSS' && dl.summary.losses === 1);
 
+  // ---------- triggers T4-T7 + the classifier ----------
+  const Xp = T('tools/research/shadow/exposure'); const Cx = T('tools/research/shadow/cross'); const Op = T('tools/research/shadow/opportunities');
+  const cls = (h) => { const c = Xp.classify(h); return `${c.category}/${c.subtype}/${c.dir}`; };
+  check('classifier (rules only): upgrade -> UP, guidance cut -> DOWN, misses estimates -> DOWN, an unclassified headline -> OTHER (never an event)',
+    cls('Morgan Stanley upgrades NVDA to Overweight') === 'ANALYST/UPGRADE/UP' && cls('Apple cuts full-year guidance') === 'GUIDANCE/CUT/DOWN'
+    && cls('Amazon misses Wall Street estimates') === 'EARNINGS/MISS/DOWN' && cls('Markets open on a sunny day') === 'OTHER/null/BOTH');
+  check('company map: AMD news naming NVDA is SEGMENT_PEER; TSLA has no mapped peer there (NONE)', Xp.relation('AMD', ['NVDA']) === 'SEGMENT_PEER' && Xp.relation('TSLA', ['NVDA']) === 'NONE' && Xp.relation('NVDA', ['NVDA']) === 'SELF');
+  const flat = []; for (let i = 0; i < 60; i += 1) flat.push({ t: at(D, 9, 30) + i * 60000, o: 100, h: 100.3, l: 99.9, c: i === 45 ? 101.5 : 100.1, v: 1 });
+  const qb = Op.triggers('AAPL', D, flat, null, 2).filter((o) => o.trigger === 'QUIET_BREAK');
+  check('T7 QUIET_BREAK: a 30-bar range < 0.75 x ATR30, confirmed at its 30th bar; the first close beyond it (the 10:15 bar) -> UP at that bar\'s end', qb.length === 1 && qb[0].dir === 'UP' && qb[0].tAvail === at(D, 10, 16), JSON.stringify(qb.map((o) => o.trigger + o.dir + o.tAvail)));
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const walk = (n, jumpAt, jump) => { const c = []; let p = 100; for (let m = 0; m < n; m += 1) { p *= 1 + rnd() * 0.0004 + (m === jumpAt ? jump : 0); c.push(p); } return c; };
+  const ser = { NVDA: { today: walk(390, -1, 0), prior: [1, 2, 3, 4, 5, 6].map(() => walk(390, -1, 0)) }, SMH: { today: walk(390, -1, 0), prior: [1, 2, 3, 4, 5, 6].map(() => walk(390, -1, 0)) },
+    AMD: { today: walk(390, 200, 0.03), prior: [1, 2, 3, 4, 5, 6].map(() => walk(390, -1, 0)) } };
+  ser.NVDA.today = ser.NVDA.today.map((p, m) => (m >= 100 ? p * 1.03 : p));
+  const ct = Cx.crossTriggers(['NVDA'], D, 390, (s) => ser[s] || null);
+  check('T4 RS_DIVERGENCE: NVDA +3% vs SMH at minute 100 (beyond 2 sd of its prior sessions\' same-bucket values) -> UP at the end of that minute',
+    ct.some((o) => o.trigger === 'RS_DIVERGENCE' && o.dir === 'UP' && o.tAvail === at(D, 9, 30) + 101 * 60000 && o.vs === 'SMH'), JSON.stringify(ct.map((o) => `${o.trigger}${o.dir}@${(o.tAvail - at(D, 9, 30)) / 60000}`)));
+  check('T5 PEER_SHOCK: AMD (mapped peer) jumps 3% in 5 min at minute 200 while NVDA is within 1 sd -> NVDA UP', ct.some((o) => o.trigger === 'PEER_SHOCK' && o.dir === 'UP' && o.peer === 'AMD' && o.tAvail >= at(D, 9, 30) + 201 * 60000 && o.tAvail <= at(D, 9, 30) + 205 * 60000), JSON.stringify(ct.filter((o) => o.trigger === 'PEER_SHOCK').map((o) => (o.tAvail - at(D, 9, 30)) / 60000)));
+  const doc = { docId: 'd1', t_recv: at(D, 11, 20), headline: 'Analyst upgrades Nvidia to Buy', symbols: ['NVDA'] };
+  const ev = Cx.eventTriggers(['NVDA', 'AMD', 'TSLA'], D, [doc], 960, (s) => ser[s] || null, () => 5);
+  check('T6 EVENT: the upgrade -> NVDA EVENT_SELF UP only (category rule); AMD EVENT_PEER both sides; TSLA none; at the receipt time',
+    JSON.stringify(ev.map((o) => `${o.symbol}:${o.trigger}:${o.dir}`).sort()) === JSON.stringify(['AMD:EVENT_PEER:DOWN', 'AMD:EVENT_PEER:UP', 'NVDA:EVENT_SELF:UP']) && ev.every((o) => o.tAvail === doc.t_recv), JSON.stringify(ev.map((o) => o.symbol + o.trigger + o.dir)));
+  check('T6 REACTIVE: a stock that already moved >= 1.5 x ATR30 in the 30 min before the article gets no event', Cx.eventTriggers(['NVDA'], D, [doc], 960, (s) => ser[s] || null, () => 0.5).length === 0);
+
+  // ---------- the frozen protocol (docs/research/phase95-protocol.md) ----------
+  const P = T('tools/research/shadow/protocol');
+  check('protocol: alpha_1 = 0.0608, alpha_2 = 0.0152 (sum <= 0.10); beta_1 = 0.0304', P.alphaK(1).toFixed(4) === '0.0608' && P.alphaK(2).toFixed(4) === '0.0152' && P.betaK(1).toFixed(4) === '0.0304');
+  check('protocol: BH at 0.05 on [0.001, 0.02, 0.04, 0.5] rejects the first two; BY (any dependence) only the first',
+    JSON.stringify(P.stepUp([0.001, 0.02, 0.04, 0.5], 0.05)) === '[true,true,false,false]' && JSON.stringify(P.stepUp([0.001, 0.02, 0.04, 0.5], 0.05, true)) === '[true,false,false,false]');
+  const dayN = (i) => new Date(Date.UTC(2027, 0, 4) + i * 86400000).toISOString().slice(0, 10);
+  const pos = Array.from({ length: 40 }, (_, i) => [5 + (i % 3), 4 - (i % 2)]); const zero = Array.from({ length: 40 }, (_, i) => [i % 2 ? 6 : -6, i % 3 ? -5 : 5]);
+  const b1 = P.bootstrap(pos, 'x'); const b2 = P.bootstrap(pos, 'x');
+  check('protocol: day-block bootstrap, centred, B = 10,000, seeded by the candidate id: a clearly positive book p ~ 1 / (B + 1); a zero-mean one far from it; the same id = the same p',
+    b1.p < 0.001 && b1.p === b2.p && P.bootstrap(zero, 'y').p > 0.1 && b1.lo95 > 0, JSON.stringify({ p: b1.p, z: P.bootstrap(zero, 'y').p }));
+  const bk = (id, family, netOf, days, syms = 10) => ({ id, family, rule: 'Q+20/30m', label: 'INDICATIVE_ESTIMATE', entries: days.flatMap((d, i) => [0, 1].map((j) => ({ status: 'ENTERED',
+    outcome: { opp: { day: d, symbol: `S${(i + j) % syms}` }, exit: { status: 'CLOSED', net: netOf(i, j) }, stressNet: netOf(i, j) - 0.5 } }))) });
+  const d40 = Array.from({ length: 40 }, (_, i) => dayN(i)); const disc = path.join(DIR, 'discovery');
+  const res40 = { days: d40, opportunities: d40.flatMap((d) => Array.from({ length: 10 }, (_, s) => ({ symbol: `S${s}`, day: d }))),
+    books: [bk('ORB5|Q+20/30m|INDICATIVE_ESTIMATE', 'ORB5', (i, j) => 6 + ((i + j) % 4), d40), bk('VWAP_LOSS|Q+20/30m|INDICATIVE_ESTIMATE', 'VWAP_LOSS', (i, j) => ((i + j) % 2 ? 7 : -7), d40),
+      bk('CONTROL|Q+20/30m|INDICATIVE_ESTIMATE', 'CONTROL', (i, j) => ((i * 7 + j) % 5) - 2, d40)] };
+  const protoFile = path.join(ROOT, 'docs', 'research', 'phase95-protocol.md');
+  const s1 = P.step({ result: res40, protocolFile: protoFile, dir: disc, today: d40[39] });
+  const run1 = JSON.parse(fs.readFileSync(path.join(disc, 'run-1.json'), 'utf8'));
+  check('protocol run 1: due (>= 200 symbol-days); the candidate list written + hashed first (CONTROL never a candidate); the strong book PROMISING and frozen; the noise book tested, kept, not promising',
+    s1.ranNow && s1.ranNow.k === 1 && fs.existsSync(path.join(disc, 'run-1-candidates.json')) && run1.results.length === 2 && run1.results.find((c) => c.id.startsWith('ORB5')).promising
+    && run1.results.find((c) => c.id.startsWith('VWAP')).tested && !run1.results.find((c) => c.id.startsWith('VWAP')).promising && s1.forward.length === 0
+    && fs.readdirSync(path.join(disc, 'proposals')).length === 1, JSON.stringify(run1.results.map((c) => [c.id, c.p, c.promising])));
+  const s2 = P.step({ result: res40, protocolFile: protoFile, dir: disc, today: d40[39] });
+  check('protocol: re-running the same day neither repeats run 1 nor re-freezes; the proposal is interim (not a verdict)', !s2.ranNow && s2.runs.length === 1 && s2.forward.length === 1 && s2.forward[0].verdict === null);
+  const d80 = Array.from({ length: 81 }, (_, i) => dayN(i));
+  const res80 = { ...res40, days: d80, books: [bk('ORB5|Q+20/30m|INDICATIVE_ESTIMATE', 'ORB5', (i, j) => 6 + ((i + j) % 4), d80), res40.books[1], res40.books[2]] };
+  const s3 = P.step({ result: res80, protocolFile: protoFile, dir: disc, today: d80[80] });
+  check('protocol forward: one look at forward n_eff 40 (trades after the freeze day only) -> PASSED-INDICATIVE (indicative prices: never VALIDATED); those days left the discovery pool',
+    s3.forward[0].verdict === 'PASSED-INDICATIVE' && s3.poolDays === 40, JSON.stringify({ v: s3.forward[0].verdict, pool: s3.poolDays }));
+
   // ---------- import guard ----------
   const before = new Set(Object.keys(require.cache));
   for (const f of ['ingest', 'opportunities', 'fills', 'exits', 'books', 'run', 'report']) T(`tools/research/shadow/${f}`);

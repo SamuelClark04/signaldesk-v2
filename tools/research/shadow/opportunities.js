@@ -10,12 +10,12 @@
 //   NEWS     the first news receipt (t_recv) of the symbol in session hours: no direction, so a CALL and a PUT opportunity
 //   CONTROL  10:00, 11:30 and 14:00: CALL and PUT (the baseline every trigger must beat)
 //   APP      every app decision on a pilot symbol (staged, rejected or blocked), one per decision id, by its first record
-// NOT in this version (listed in the report): T4 RS_DIVERGENCE, T5 PEER_SHOCK and the sector / peer-lag trigger (need the exposure map),
-// T6 EVENT_ARRIVAL (needs the event classifier: NEWS_FIRST stands in, both sides) and T7 QUIET_BREAK / range compression.
+//            QUIET_BREAK (spec T7: the first close beyond a confirmed 30-min QUIET range, range < 0.75 x ATR30)
+// Cross-symbol / event triggers (T4 RS_DIVERGENCE, T5 PEER_SHOCK, T6 EVENT_SELF / EVENT_PEER) are in cross.js (exposure-map@1-pilot).
 // Dedup: one opportunity per key; distinct triggers / directions stay separate (plan 6.2).
 const et = require('../../../server/services/et-time');
 
-const TRIGGERS_VERSION = 'triggers@1-lite';
+const TRIGGERS_VERSION = 'triggers@1 (pilot map)';
 const MIN = 60000;
 
 function atr14(bars, i) {
@@ -63,6 +63,22 @@ function triggers(symbol, day, bars, prevClose, atr30 = null) {
       const offUp = frac === null ? 0.5 * A : frac * drop; const offDn = frac === null ? 0.5 * A : frac * rise;
       if (drop >= minSwing && b.c - st.loAfterHi >= offUp) { add(id, 'UP', b, { swing: drop }); st.hi = b.h; st.loAfterHi = b.l; }
       if (rise >= minSwing && st.hiAfterLo - b.c >= offDn) { add(id, 'DOWN', b, { swing: rise }); st.lo = b.l; st.hiAfterLo = b.h; }
+    }
+  }
+  // T7 QUIET_BREAK: a 30-bar window whose range is < 0.75 x ATR30 is a QUIET range, confirmed at its 30th bar's end; it extends while the
+  // range stays under that; the first close beyond it is the break. The next quiet window starts after the break.
+  if (A) {
+    let q = null; let from = 0;
+    for (let i = 0; i < bars.length; i += 1) {
+      const b = bars[i];
+      if (!q) {
+        if (i - 29 < from) continue;
+        const w = bars.slice(i - 29, i + 1); const hi = Math.max(...w.map((x) => x.h)); const lo = Math.min(...w.map((x) => x.l));
+        if (hi - lo < 0.75 * A) q = { hi, lo };
+        continue;
+      }
+      if (b.c > q.hi || b.c < q.lo) { add('QUIET_BREAK', b.c > q.hi ? 'UP' : 'DOWN', b, { level: b.c > q.hi ? q.hi : q.lo, range: q.hi - q.lo }); q = null; from = i + 1; continue; }
+      const hi = Math.max(q.hi, b.h); const lo = Math.min(q.lo, b.l); if (hi - lo < 0.75 * A) q = { hi, lo };
     }
   }
   // T3 second half: a close beyond the PRIOR 30-min range (the 30 bars before this one), after the first 30 min; re-armed after 30 min

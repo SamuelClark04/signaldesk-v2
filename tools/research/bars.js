@@ -61,7 +61,9 @@ async function fetchDaily(db, { symbols, from, to, fetchImpl = fetch, limiter, k
     try {
       let token = null; const rows = [];
       do {
-        const q = new URLSearchParams({ timeframe: '1Day', feed: 'sip', adjustment: 'raw', limit: '10000', start: `${from}T00:00:00Z`, end: `${to}T23:59:59Z` });
+        // the free plan refuses SIP data newer than 15 min (HTTP 403): the end is capped at now - 16 min (the 16:40 ET job asked for 23:59Z)
+        const end = new Date(Math.min(Date.parse(`${to}T23:59:59Z`), Date.now() - 16 * 60000)).toISOString();
+        const q = new URLSearchParams({ timeframe: '1Day', feed: 'sip', adjustment: 'raw', limit: '10000', start: `${from}T00:00:00Z`, end });
         if (token) q.set('page_token', token);
         let res = null;
         for (let tries = 0; tries < MAX_TRIES; tries += 1) {

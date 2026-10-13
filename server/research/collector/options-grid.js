@@ -28,10 +28,15 @@ function create({ fetchImpl, keys, base = 'https://data.alpaca.markets', symbols
   const savePins = () => { try { fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify({ v: 1, pins })); fs.renameSync(`${pinsFile}.tmp`, pinsFile); } catch (e) { st.lastError = `pins: ${e.message}`; } };
   async function get(url) {
     const k = keys(); if (!k) throw new Error('no Alpaca data keys');
-    st.requests += 1;
-    const res = await fetchImpl(url, { headers: { 'APCA-API-KEY-ID': k.key, 'APCA-API-SECRET-KEY': k.secret }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${url.split('?')[0].replace(base, '')}`);
-    return res.json();
+    // A timeout / network failure is retried ONCE with a longer timeout (large ETF chains took > 15 s live); an HTTP error is not.
+    for (let attempt = 0; ; attempt += 1) {
+      st.requests += 1;
+      let res;
+      try { res = await fetchImpl(url, { headers: { 'APCA-API-KEY-ID': k.key, 'APCA-API-SECRET-KEY': k.secret }, signal: AbortSignal.timeout(attempt ? 30000 : 15000) }); }
+      catch (e) { if (attempt) throw e; st.retries = (st.retries || 0) + 1; continue; }
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${url.split('?')[0].replace(base, '')}`);
+      return res.json();
+    }
   }
   const fail = (where, err) => { st.errors += 1; st.lastError = `${where}: ${String(err && err.message || err).slice(0, 160)}`; record('POLL_STATUS', { source: 'options-grid', ok: false, where, error: st.lastError }); };
   const writeQuotes = (rows, tRecv, src) => {

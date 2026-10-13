@@ -11,6 +11,7 @@ const O = require('./opportunities');
 const F = require('./fills');
 const X = require('./exits');
 const B = require('./books');
+const C = require('./cross');
 
 const FROZEN_ON = '2026-10-12';
 const openDb = (file) => W.open(file);
@@ -28,13 +29,23 @@ function run(db, { quotesDir, dataDir, symbols, through, now = Date.now() }) {
   const prevCloseOf = db.prepare('select c from bars_1d where symbol = ? and day < ? order by day desc limit 1');
   const dailyOf = db.prepare('select day, h, l, c from bars_1d where symbol = ? and day < ? order by day'); const { atr30 } = require('../observe');
   let opps = [];
+  const sessionsBefore = (day, n) => { const out = []; let d = day; while (out.length < n) { d = new Date(Date.parse(`${d}T12:00:00Z`) - 86400000).toISOString().slice(0, 10); if (d < '2020-01-01') break; if (cal.isSessionDay(d)) out.push(d); } return out; };
+  const denseCache = new Map();
+  const denseOf = (s, d) => { const k = `${s}|${d}`; if (!denseCache.has(k)) { const o = et.toEpoch(d, 9, 30); const n = cal.closeMinOf(d) - 570; const b = barsOf.all(s, o, o + n * 60000); denseCache.set(k, b.length ? C.dense(b, o, n) : null); } return denseCache.get(k); };
   for (const day of days) {
     const open = et.toEpoch(day, 9, 30); const cm = cal.closeMinOf(day); const close = et.toEpoch(day, Math.floor(cm / 60), cm % 60);
+    const n = cm - 570; const prior = sessionsBefore(day, 20);
+    const series = (s) => { const today = denseOf(s, day); if (!today) return null; return { today, prior: prior.map((d) => denseOf(s, d)).filter(Boolean).slice(0, 20) }; };
+    const atrOf = (s) => atr30(dailyOf.all(s, day), day).atr;
     for (const s of symbols) {
       const pc = prevCloseOf.get(s, day);
       opps.push(...O.triggers(s, day, barsOf.all(s, open, close), pc ? pc.c : null, atr30(dailyOf.all(s, day), day).atr), ...O.controls(s, day));
     }
-    opps.push(...O.news(symbols, day, jsonl(path.join(dataDir, `events-${day}.jsonl`), (l) => l.includes('"kind":"NEWS"')).map((n) => ({ t_recv: n.t_recv, symbols: n.symbols })), cm));
+    // news from the trading server's files AND the collector's (RESEARCH_COLLECTOR=on moves the poll there); earliest receipt per document
+    const newsLines = ['events', 'research'].flatMap((p) => jsonl(path.join(dataDir, `${p}-${day}.jsonl`), (l) => l.includes('"kind":"NEWS"')));
+    const docs = new Map(); for (const n of newsLines) { const p = docs.get(n.docId); if (!p || n.t_recv < p.t_recv) docs.set(n.docId, { docId: n.docId, t_recv: n.t_recv, headline: n.headline, symbols: n.symbols }); }
+    opps.push(...O.news(symbols, day, [...docs.values()], cm));
+    opps.push(...C.crossTriggers(symbols, day, n, series), ...C.eventTriggers(symbols, day, [...docs.values()], cm, series, atrOf));
     opps.push(...O.app(symbols, jsonl(path.join(dataDir, `decisions-${day}.jsonl`), (l) => l.includes('"type":"decision"'))).filter((o) => o.tAvail >= open && o.tAvail < close));
   }
   opps = O.dedupe(opps);

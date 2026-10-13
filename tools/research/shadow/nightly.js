@@ -13,6 +13,7 @@ for (const line of (() => { try { return fs.readFileSync(path.join(ROOT, '.env')
   const m = /^(ALPACA_API_KEY|ALPACA_API_SECRET|ALPACA_PAPER_API_KEY|ALPACA_PAPER_API_SECRET|RESEARCH_OPTIONS_FEED|EVENTS_DIR)=(.*)$/.exec(line);
   if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
+require('dns').setDefaultResultOrder('ipv4first'); // as server/boot.js
 const W = require('../db');
 const et = require('../../../server/services/et-time');
 const { ingest } = require('./ingest');
@@ -47,7 +48,10 @@ async function opraStatus(db, keys) {
     if (!a.includes('--no-fetch') && days.length) {
       if (!keys) throw new Error('no Alpaca data keys in .env');
       const bars = require('../bars'); const limiter = require('../../../server/research/collector/budget').createLimiter({ perMin: 60 });
-      console.log(`bars: ${JSON.stringify(await bars.fetchDays(db, { symbols, days, limiter, keys }))}`);
+      // + the 20 sessions before the first one: the T4 / T5 baselines (bars already stored are skipped)
+      const cal = require('../../../server/research/nyse-calendar'); const pre = []; let d = days[0];
+      while (pre.length < 20) { d = new Date(Date.parse(`${d}T12:00:00Z`) - 86400000).toISOString().slice(0, 10); if (cal.isSessionDay(d)) pre.push(d); }
+      console.log(`bars: ${JSON.stringify(await bars.fetchDays(db, { symbols, days: [...pre.reverse(), ...days], limiter, keys }))}`);
       const from = new Date(Date.parse(`${days[0]}T12:00:00Z`) - 60 * 86400000).toISOString().slice(0, 10);
       console.log(`daily: ${JSON.stringify(await bars.fetchDaily(db, { symbols, from, to: through, limiter, keys }))}`);
     }
@@ -58,7 +62,9 @@ async function opraStatus(db, keys) {
       let quotes = 0; try { const q = W.openQuotes(researchDir, d.slice(0, 7)); quotes = q.prepare('select count(*) n from quotes where t_quote >= ? and t_quote < ?').get(from, to).n; q.close(); } catch { quotes = 0; }
       return { day: d, candidates: c.n, quotes, underlyings: c.u };
     });
-    const file = report.write({ result, through, outDir: path.resolve(ROOT, arg('--out', 'reports')), collection, opraStatus: a.includes('--no-fetch') ? 'not checked (--no-fetch)' : await opraStatus(db, keys) });
+    const discovery = require('./protocol').step({ result, protocolFile: path.join(ROOT, 'docs', 'research', 'phase95-protocol.md'), dir: path.join(researchDir, 'discovery'), today: through });
+    console.log(`protocol: ${discovery.ranNow ? `discovery run ${discovery.ranNow.k}: ${discovery.ranNow.tested} tested, ${discovery.ranNow.promising} promising` : `no run due (pool ${discovery.poolSymbolDays} symbol-days)`}; ${discovery.forward.length} proposal(s)`);
+    const file = report.write({ result, through, discovery, outDir: path.resolve(ROOT, arg('--out', 'reports')), collection, opraStatus: a.includes('--no-fetch') ? 'not checked (--no-fetch)' : await opraStatus(db, keys) });
     const filled = result.outcomes.filter((o) => o.status === 'FILLED').length;
     console.log(`shadow: ${result.days.length} session(s), ${result.opportunities.length} opportunities, ${result.outcomes.length} rule outcomes (${filled} filled), ${result.books.length} books`);
     console.log(`report: ${file} (${Math.round((Date.now() - t0) / 1000)} s)`);

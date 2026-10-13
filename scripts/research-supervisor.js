@@ -23,8 +23,33 @@ function start() {
   child.unref(); console.log(`Research collector started in the background (supervisor pid ${child.pid}); log: ${path.relative(ROOT, F.log)}`);
 }
 
+// Keep-awake (Windows): from 9:00 to 16:50 ET on NYSE session days a hidden PowerShell child holds SetThreadExecutionState(
+// ES_CONTINUOUS | ES_SYSTEM_REQUIRED), so the PC does not IDLE-sleep while quotes are being recorded (Alpaca keeps no history of
+// option quotes: a slept session is lost). A per-process request, released when the child ends: no power setting is changed, and a
+// closed lid / a manual sleep still sleeps. RESEARCH_KEEP_AWAKE=off disables it.
+const AWAKE_PS = 'Add-Type -Name P -Namespace W -MemberDefinition \'[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);\'; '
+  + 'while ($true) { [void][W.P]::SetThreadExecutionState([uint32]2147483649); Start-Sleep -Seconds 60 }';
+function marketWindow(ms = Date.now()) {
+  const p = require('../server/services/et-time').parts(ms); const cal = require('../server/research/nyse-calendar'); const m = p.h * 60 + p.m;
+  return cal.isSessionDay(p.ymd) && m >= 9 * 60 && m < cal.closeMinOf(p.ymd) + 50;
+}
+function keepAwake() {
+  if (process.platform !== 'win32' || String(process.env.RESEARCH_KEEP_AWAKE || '').toLowerCase() === 'off') return () => {};
+  let child = null;
+  const check = () => {
+    const want = marketWindow();
+    if (want && !child) {
+      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(AWAKE_PS, 'utf16le').toString('base64')], { stdio: 'ignore', windowsHide: true });
+      logLine(`keep-awake on (market hours, pid ${child.pid})`); child.on('exit', () => { child = null; });
+    } else if (!want && child) { logLine('keep-awake off'); try { child.kill(); } catch { /* gone */ } child = null; }
+  };
+  check(); const t = setInterval(check, 60000);
+  return () => { clearInterval(t); if (child) { try { child.kill(); } catch { /* gone */ } } };
+}
+
 function runLoop() {
   fs.writeFileSync(F.sup, String(process.pid));
+  const releaseAwake = keepAwake();
   let fastFails = 0; let current = null;
   const launch = () => {
     if (fs.existsSync(F.stop)) return finish();
@@ -41,7 +66,7 @@ function runLoop() {
       logLine(`restarting in ${Math.round(wait / 1000)} s`); setTimeout(launch, wait);
     });
   };
-  const finish = () => { for (const f of [F.sup, F.col, F.stop]) { try { fs.unlinkSync(f); } catch { /* gone */ } } logLine('supervisor stopped'); process.exit(0); };
+  const finish = () => { releaseAwake(); for (const f of [F.sup, F.col, F.stop]) { try { fs.unlinkSync(f); } catch { /* gone */ } } logLine('supervisor stopped'); process.exit(0); };
   // the stop flag is checked every 2 s (a signal does not reach a windowless process on Windows): the collector sees the same flag and
   // shuts down cleanly (flushing its queue); it is killed only if still running 10 s later
   let stopSeen = 0;

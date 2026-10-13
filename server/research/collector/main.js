@@ -48,6 +48,7 @@ const limitedFetch = async (url, opts) => {
 
 function start({ envFile } = {}) {
   if (started) return; started = true;
+  try { require('dns').setDefaultResultOrder('ipv4first'); } catch { /* older node */ } // as server/boot.js: a broken IPv6 route stalls fetches
   loadEnv(envFile);
   limiter = createLimiter({ perMin: perMinOf(process.env.RESEARCH_COLLECTOR_PER_MIN) });
   keepAlive = setInterval(() => {}, 60 * 1000); // every reused timer is unref'd (built for the trading server): this one keeps THIS process up

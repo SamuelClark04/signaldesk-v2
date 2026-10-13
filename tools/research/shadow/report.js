@@ -6,6 +6,7 @@ const path = require('path');
 const et = require('../../../server/services/et-time');
 const { RULES, EXITS_VERSION, LIMITS } = require('./books');
 const { TRIGGERS_VERSION } = require('./opportunities');
+const { MAP_VERSION, EVT_VERSION } = require('./exposure');
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const money = (n) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`);
@@ -28,7 +29,21 @@ function ruleRows(outcomes) {
   });
 }
 
-function write({ result, through, outDir, collection, opraStatus }) {
+// Discovery runs and forward tests (protocol.js): what was tested, with its corrections, and every proposal's verdict or interim numbers.
+function discoveryHtml(d) {
+  if (!d) return '<p class="mut">Protocol not run.</p>';
+  const num = (x, k = 2) => (x === null || x === undefined || !Number.isFinite(x) ? '—' : x.toFixed(k));
+  const runs = d.runs.length ? table(['run', 'on', 'alpha_k', 'pool days', 'symbol-days', 'candidates', 'tested (n_eff >= 30)', 'promising'], d.runs.map((r) => [r.k, esc(r.on), num(r.alpha, 5), r.poolDays, r.poolSymbolDays, r.candidates, r.tested, r.promising]))
+    : `<p>No discovery run yet. Run 1 (alpha = ${num(d.nextAlpha, 4)}) is due 28 days after the first recorded session or once the pool reaches 200 symbol-days (now ${d.poolSymbolDays}).</p>`;
+  const tested = d.lastRun ? d.lastRun.results.filter((c) => c.tested).sort((a, b) => a.p - b.p).slice(0, 40) : [];
+  const cand = tested.length ? `<p class="mut">Run ${d.lastRun.k}: the tested candidates (lowest p first). A candidate is promising only if BH rejects it AND every condition holds.</p>` + table(['book', 'n_eff', 'trades', 'mean', '95% low', 'stressed', 'halves', 'vs control', 'p', 'BH', 'BY', 'promising'],
+    tested.map((c) => [esc(c.id), c.nEff, c.trades, money(c.mean), money(c.lo95), money(c.stressMean), `${money(c.half1)} / ${money(c.half2)}`, money(c.controlMean), num(c.p, 4), c.bh ? 'yes' : 'no', c.by ? 'yes' : 'no', c.promising ? '<b>PROMISING</b>' : 'no'])) : '';
+  const fwd = d.forward.length ? table(['proposal', 'book', 'frozen', 'run', 'family size', 'verdict', 'forward n_eff', 'forward mean'], d.forward.map((p) => [esc(p.key), esc(p.book), esc(p.frozenOn), p.k, p.familySize,
+    p.verdict ? `<b>${esc(p.verdict)}</b> (${esc(p.verdictOn)})` : 'interim, not a verdict', p.interim ? p.interim.nEff : '—', p.interim ? money(p.interim.mean) : '—'])) : '<p class="mut">No frozen proposals.</p>';
+  return runs + cand + '<h3>Forward tests</h3>' + fwd;
+}
+
+function write({ result, through, outDir, collection, opraStatus, discovery = null }) {
   const { outcomes, books, days, opportunities, dataThrough } = result;
   const label = outcomes.find((o) => o.label)?.label || 'INDICATIVE_ESTIMATE';
   const bySource = {}; for (const o of opportunities) bySource[o.source] = (bySource[o.source] || 0) + 1;
@@ -55,13 +70,15 @@ th:first-child,td:first-child{text-align:left}.pos{color:var(--pos)}.neg{color:v
 fees $${LIMITS.fees} per contract per side (assumption). Entries fill at the ASK of the first eligible quote >= 5 s after the decision; exits fill at the BID of the next quote after the trigger. Research only: nothing here places an order.</p>
 <div class="box"><b>Price label: ${esc(label)}.</b> ${label === 'MARKET_QUOTE' ? 'Real OPRA quotes.' : `These results use Alpaca's free <i>indicative</i> option quotes, which Alpaca describes as not for strategy validation. They are estimates: they cannot show that a rule makes executable profit. Real-quote validation: <b>UNAVAILABLE</b> (${esc(opraStatus)}).`}</div>
 <h2>Collection</h2>${table(['session', 'selection lines', 'quote rows', 'underlyings'], (collection || []).map((c) => [esc(c.day), c.candidates, c.quotes, c.underlyings]))}
-<p>Opportunities: ${Object.entries(bySource).map(([k, v]) => `${esc(k)} ${v}`).join(', ') || 'none'}. Not in ${esc(TRIGGERS_VERSION)}: T4 relative-strength divergence, T5 peer shock / sector lag (need the company map), T6 classified event arrival (NEWS_FIRST stands in, both sides), T7 quiet-range break.</p>
+<p>Opportunities: ${Object.entries(bySource).map(([k, v]) => `${esc(k)} ${v}`).join(', ') || 'none'}. Company map: ${esc(MAP_VERSION)}; news classifier: ${esc(EVT_VERSION)}. RS divergence is vs the sector ETF including the stock itself (no holdings weights).</p>
 <h2>Exit rules side by side (every opportunity, no book limits)</h2>
 <p class="mut">The same opportunities under each exit rule. Rules compete: never add these rows together.</p>
 ${table(['rule', 'opps', 'filled', 'unfilled', 'no selection', 'short expiry', 'pending', 'closed', 'open', 'wins', 'losses', 'net', 'avg', 'avg stressed', 'worst', 'avg loss beyond stop', 'median entry latency', ''], ruleRows(outcomes))}
 <h2>Research books (opportunity family x rule)</h2>
 <p class="mut">Limits per book: max 3 open (Q / H) or 5 (D / W), 1 per symbol, 10 entries a day, stop for the day at −$300, the debit must fit the cash left. "vs control" = the book's average trade minus the 10:00 / 11:30 / 14:00 control average under the same rule.</p>
 ${table(['family', 'rule', 'label', 'opps', 'entered', 'open', 'wins', 'losses', 'net', 'stressed', 'PF', 'max DD', 'return', 'avg', 'vs control', 'skipped (reason)'], bookRows)}
+<h2>Discovery and forward tests (docs/research/phase95-protocol.md)</h2>
+${discoveryHtml(discovery)}
 <h2>Trades (newest ${trades.length}; wins and losses)</h2>
 ${table(['symbol', 'trigger', 'dir', 'rule', 'contract', 'entry', 'debit', 'exit', 'exit time', 'net', 'stressed', 'labels', 'mode'], trades)}
 </body></html>`;
