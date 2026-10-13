@@ -320,6 +320,10 @@ arrives as numbered phases; each ends with a commit + push to `origin main` and 
   5 s, exits at the NEXT quote's bid) -> books.js (exits@1: 8 Q + H + 3 D + 2 W; per-book limits, one BOOK ENTRY per opportunity) -> run.js
   (full recompute; research.sqlite v4 shadow_* tables) -> report.js (reports/shadow-<day>.html). No broker module reachable (tests/ph95shadow.js).
   OPRA: 403 agreement not signed -> every option result is an estimate; real-quote validation UNAVAILABLE. Tests: tests/ph95fills.js, ph95shadow.js.
+  triggers@1 (pilot map) adds cross.js T4 / T5 / T6 on exposure.js (exposure-map@1-pilot + evt-rules@1-lite, PENDING the user's review) and
+  T7 QUIET_BREAK; protocol.js implements docs/research/phase95-protocol.md (frozen 2026-10-13; registry research-data/discovery/). On this PC
+  .env has RESEARCH_COLLECTOR=on (the collector polls news; it reads research-*.jsonl too); the supervisor holds keep-awake 9:00-16:50 ET.
+  Free SIP refuses data < 15 min old: bars.fetchDaily caps its end at now - 16 min.
 - **Venue fees at runtime (Phase 92)**: connectors/venue-fees.js reads the Kraken and OKX US ACCOUNT rates at boot + every 6 h (retry 10 min),
   read-only, like coinbase-fees.js. Kraken: POST /0/private/TradeVolume for XBTUSD, ETHUSD, XBTUSDC, ETHUSDC (answer keys XXBTZUSD / XETHZUSD /
   XBTUSDC / ETHUSDC); EVERY requested pair needs a valid maker + taker or the read fails and replaces nothing; claimed for those pairs only
