@@ -88,4 +88,16 @@ function installVersion(app, PORT) {
   });
 }
 
-module.exports = { install, installAi, installPaperRuns, installVersion };
+// Phase 95: GET /research/latest = the newest shadow-paper research report (reports/shadow-<day>.html, written on this PC by the
+// post-session job), signed-in only; static HTML with no scripts, served under a CSP that forbids them.
+function installResearch(app, PORT) {
+  app.get('/research/latest', (req, res) => {
+    if (!checkHttp(req, PORT).ok) { res.status(403).send('forbidden'); return; }
+    const dir = require('path').join(__dirname, '..', 'reports'); let files = [];
+    try { files = require('fs').readdirSync(dir).filter((n) => /^shadow-\d{4}-\d{2}-\d{2}\.html$/.test(n)).sort(); } catch { files = []; }
+    if (!files.length) { res.status(404).type('text/plain').send('No research report yet: the first one is written after the first recorded session (from 16:40 ET).'); return; }
+    res.set({ 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }).sendFile(require('path').join(dir, files[files.length - 1]));
+  });
+}
+
+module.exports = { install, installAi, installPaperRuns, installVersion, installResearch };

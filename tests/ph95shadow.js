@@ -115,6 +115,17 @@ const D = '2026-10-08'; const D2 = '2026-10-09';
   const loaded = Object.keys(require.cache).map((f) => path.relative(ROOT, f).replace(/\\/g, '/'));
   check('import guard: the research job loads no broker, execution, strategy or vault module', !loaded.some((f) => /server\/(execution|connectors\/(alpaca-api|alpaca-paper|alpaca-options|coinbase|kraken|okx)|strategies|security|risk)\//.test(f)), loaded.filter((f) => /execution|strategies|security|risk\//.test(f)).join(','));
   void before;
+
+  // ---------- /research/latest (signed-in only; the newest report) ----------
+  const ap = path.join(ROOT, 'server', 'security', 'access-policy.js'); let allow = false;
+  require.cache[require.resolve(ap)] = { id: ap, filename: ap, loaded: true, exports: { checkHttp: () => ({ ok: allow }) } };
+  let handler = null; T('server/http-routes').installResearch({ get: (p, fn) => { if (p === '/research/latest') handler = fn; } }, 3000);
+  const resOf = () => { const r = { code: 200, sent: null, file: null, headers: {} }; r.status = (c) => { r.code = c; return r; }; r.send = (x) => { r.sent = x; return r; }; r.type = () => r;
+    r.set = (h) => { Object.assign(r.headers, h); return r; }; r.sendFile = (f) => { r.file = f; return r; }; return r; };
+  let r1 = resOf(); handler({}, r1);
+  allow = true; const r2 = resOf(); handler({}, r2);
+  check('/research/latest: refused without sign-in (403); signed in, the newest reports/shadow-<day>.html under a no-script CSP (or 404 before the first report)',
+    r1.code === 403 && !r1.file && ((r2.file && /shadow-\d{4}-\d{2}-\d{2}\.html$/.test(r2.file) && /default-src 'none'/.test(r2.headers['Content-Security-Policy'])) || r2.code === 404), JSON.stringify({ c1: r1.code, c2: r2.code, f: r2.file }));
   console.log(`\nph95shadow: ${fails ? `${fails} FAIL` : 'all passed'}`);
   process.exitCode = fails ? 1 : 0;
 })().catch((e) => { console.error(e); process.exitCode = 1; });
